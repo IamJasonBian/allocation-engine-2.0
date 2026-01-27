@@ -1,3 +1,5 @@
+## Summary
+
 1. **Install dependencies**:
 ```bash
 pip install -r requirements.txt
@@ -203,7 +205,7 @@ python -m trading_system.main --live
 python -m trading_system.main --live --continuous
 ```
 
-## ⚠️ Important Notes
+## Limits
 
 ### API Rate Limits
 
