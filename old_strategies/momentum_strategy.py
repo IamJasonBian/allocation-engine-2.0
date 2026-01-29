@@ -4,13 +4,14 @@ Strategy: Buy when price momentum is positive, sell when negative
 Account: 919433888 (Cash Only)
 """
 
-import robin_stocks.robinhood as r
 import sys
 import os
+from datetime import datetime
+
+import robin_stocks.robinhood as r
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from utils.safe_cash_bot import SafeCashBot
-from datetime import datetime, timedelta
-import time
+from utils.safe_cash_bot import SafeCashBot  # noqa: E402
 
 
 class MomentumStrategy:
@@ -39,7 +40,7 @@ class MomentumStrategy:
         self.bot = SafeCashBot()
 
         print(f"\n{'='*70}")
-        print(f"🎯 MOMENTUM STRATEGY INITIALIZED")
+        print("🎯 MOMENTUM STRATEGY INITIALIZED")
         print(f"{'='*70}")
         print(f"   Symbol: {self.symbol}")
         print(f"   Position Size: {self.position_size_pct * 100}% of cash")
@@ -162,7 +163,7 @@ class MomentumStrategy:
         current_price = signal_info['current_price']
 
         print(f"\n{'='*70}")
-        print(f"📊 SIGNAL ANALYSIS")
+        print("📊 SIGNAL ANALYSIS")
         print(f"{'='*70}")
         print(f"   Symbol: {self.symbol}")
         print(f"   Current Price: ${current_price:.2f}")
@@ -184,7 +185,7 @@ class MomentumStrategy:
             # Check if we already have a position
             if position:
                 print(f"⚠️  Already holding {position['quantity']} shares of {self.symbol}")
-                print(f"   Skipping BUY signal\n")
+                print("   Skipping BUY signal\n")
                 return None
 
             # Calculate position size
@@ -194,7 +195,7 @@ class MomentumStrategy:
             quantity = int(position_value / current_price)
 
             if quantity < 1:
-                print(f"⚠️  Insufficient cash to buy 1 share")
+                print("⚠️  Insufficient cash to buy 1 share")
                 print(f"   Available: ${available_cash:.2f}")
                 print(f"   Position size (10%): ${position_value:.2f}")
                 print(f"   Share price: ${current_price:.2f}\n")
@@ -203,7 +204,7 @@ class MomentumStrategy:
             # Place buy order at current price + 0.5% buffer
             limit_price = current_price * 1.005
 
-            print(f"🛒 BUY SIGNAL EXECUTION")
+            print("🛒 BUY SIGNAL EXECUTION")
             print(f"   Quantity: {quantity} shares")
             print(f"   Limit Price: ${limit_price:.2f}")
             print(f"   Total Cost: ${quantity * limit_price:.2f}")
@@ -227,7 +228,7 @@ class MomentumStrategy:
             # Place sell order at current price - 0.5% buffer
             limit_price = current_price * 0.995
 
-            print(f"💵 SELL SIGNAL EXECUTION")
+            print("💵 SELL SIGNAL EXECUTION")
             print(f"   Quantity: {quantity} shares")
             print(f"   Limit Price: ${limit_price:.2f}")
             print(f"   Total Value: ${quantity * limit_price:.2f}")
@@ -248,7 +249,7 @@ class MomentumStrategy:
             span: Historical data span
         """
         print(f"\n{'='*70}")
-        print(f"🚀 RUNNING MOMENTUM STRATEGY")
+        print("🚀 RUNNING MOMENTUM STRATEGY")
         print(f"{'='*70}")
         print(f"   Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         print(f"   Symbol: {self.symbol}")
@@ -282,7 +283,7 @@ class MomentumStrategy:
         Shows what signals would have been generated
         """
         print(f"\n{'='*70}")
-        print(f"📈 BACKTESTING MOMENTUM STRATEGY")
+        print("📈 BACKTESTING MOMENTUM STRATEGY")
         print(f"{'='*70}")
         print(f"   Symbol: {self.symbol}")
         print(f"   Period: {span}")
@@ -326,7 +327,9 @@ class MomentumStrategy:
         print("-" * 70)
 
         for sig in signals[-10:]:  # Show last 10 signals
-            print(f"{sig['date']:<12} {sig['signal']:<6} ${sig['price']:<9.2f} ${sig['short_ma']:<9.2f} ${sig['long_ma']:<9.2f}")
+            print(f"{sig['date']:<12} {sig['signal']:<6} "
+                  f"${sig['price']:<9.2f} ${sig['short_ma']:<9.2f} "
+                  f"${sig['long_ma']:<9.2f}")
 
         print(f"\nTotal signals generated: {len(signals)}")
         print(f"   BUY signals: {sum(1 for s in signals if s['signal'] == 'BUY')}")

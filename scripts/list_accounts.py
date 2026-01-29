@@ -2,12 +2,14 @@
 List all configured Robinhood accounts and their details
 """
 
-import robin_stocks.robinhood as r
 import sys
 import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from utils.rh_auth import RobinhoodAuth
+
+import robin_stocks.robinhood as r
 from dotenv import load_dotenv
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from utils.rh_auth import RobinhoodAuth  # noqa: E402
 
 
 def list_accounts():
@@ -33,8 +35,8 @@ def list_accounts():
 
     for account_name, creds in accounts.items():
         is_active = "✓ ACTIVE" if account_name == active_account else ""
-        has_creds = bool(creds['email'] and creds['password'] and
-                        'example.com' not in creds['email'])
+        has_creds = bool(creds['email'] and creds['password']
+                         and 'example.com' not in creds['email'])
 
         print(f"{'='*60}")
         print(f"📱 {account_name.upper()} ACCOUNT {is_active}")
@@ -45,7 +47,7 @@ def list_accounts():
         if has_creds:
             try:
                 # Try to login and get details
-                print(f"   Fetching account details...")
+                print("   Fetching account details...")
                 auth = RobinhoodAuth()
                 auth.login(account_name)
 
@@ -60,10 +62,10 @@ def list_accounts():
                 print(f"   Open Positions: {len(positions)}")
 
                 auth.logout()
-                print(f"   Status: ✅ Connected")
+                print("   Status: ✅ Connected")
 
             except Exception as e:
-                print(f"   Status: ❌ Failed to connect")
+                print("   Status: ❌ Failed to connect")
                 print(f"   Error: {str(e)[:50]}...")
 
         print()

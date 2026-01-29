@@ -2,11 +2,13 @@
 Test which accounts can place orders
 """
 
-import robin_stocks.robinhood as r
 import sys
 import os
+
+import robin_stocks.robinhood as r
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from utils.rh_auth import RobinhoodAuth
+from utils.rh_auth import RobinhoodAuth  # noqa: E402
 
 
 def test_account(account_number):
@@ -22,7 +24,7 @@ def test_account(account_number):
         print(f"✅ Cash: ${float(account.get('cash', 0)):.2f}")
 
         # Try placing a test order (will fail but shows error)
-        print(f"\n🔍 Testing order placement...")
+        print("\n🔍 Testing order placement...")
         order = r.orders.order_buy_limit(
             symbol='AAPL',
             quantity=1,
@@ -31,19 +33,19 @@ def test_account(account_number):
         )
 
         if order and 'id' in order:
-            print(f"✅ CAN TRADE - Order placed successfully")
+            print("✅ CAN TRADE - Order placed successfully")
             print(f"   Order ID: {order['id']}")
             print(f"   State: {order['state']}")
 
             # Cancel the test order immediately
             try:
                 r.orders.cancel_stock_order(order['id'])
-                print(f"   ✅ Test order cancelled")
-            except:
-                print(f"   ⚠️  Could not cancel - check Robinhood app")
+                print("   ✅ Test order cancelled")
+            except Exception:
+                print("   ⚠️  Could not cancel - check Robinhood app")
 
         elif order and 'non_field_errors' in order:
-            print(f"❌ CANNOT TRADE")
+            print("❌ CANNOT TRADE")
             print(f"   Reason: {order['non_field_errors'][0]}")
         else:
             print(f"⚠️  Unknown response: {order}")

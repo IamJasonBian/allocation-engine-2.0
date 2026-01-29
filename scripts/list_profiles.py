@@ -2,11 +2,13 @@
 List all Robinhood profiles within your account
 """
 
-import robin_stocks.robinhood as r
 import sys
 import os
+
+import robin_stocks.robinhood as r
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from utils.rh_auth import RobinhoodAuth
+from utils.rh_auth import RobinhoodAuth  # noqa: E402
 
 
 def list_profiles():
@@ -28,13 +30,13 @@ def list_profiles():
 
         # Get portfolio profile
         portfolio = r.profiles.load_portfolio_profile()
-        print(f"\n💼 Portfolio Profile:")
+        print("\n💼 Portfolio Profile:")
         print(f"   Equity: ${float(portfolio.get('equity', 0)):,.2f}")
         print(f"   Extended Hours Equity: ${float(portfolio.get('extended_hours_equity', 0)):,.2f}")
 
         # Check if there are multiple profiles/accounts
         # Some Robinhood accounts have multiple investment profiles
-        print(f"\n📊 Investment Profiles:")
+        print("\n📊 Investment Profiles:")
 
         # Get user info
         user = r.profiles.load_user_profile()
@@ -45,7 +47,7 @@ def list_profiles():
         try:
             accounts_data = r.get_all_positions()
             print(f"\n   Total positions across all profiles: {len(accounts_data)}")
-        except:
+        except Exception:
             pass
 
     except Exception as e:

@@ -3,12 +3,14 @@ Safe Cash-Only Trading Bot for Account 919433888
 ISOLATED: Only trades with cash in the specified account
 """
 
-import robin_stocks.robinhood as r
-from .rh_auth import RobinhoodAuth
-from dotenv import load_dotenv
 import os
 import sys
 from datetime import datetime
+
+import robin_stocks.robinhood as r
+from dotenv import load_dotenv
+
+from .rh_auth import RobinhoodAuth
 
 
 class SafeCashBot:
@@ -44,8 +46,8 @@ class SafeCashBot:
     def _verify_account(self):
         """Verify we can access the correct account"""
         try:
-            account = r.profiles.load_account_profile(account_number=self.account_number)
-            account_type = account.get('type', 'unknown')
+            _account = r.profiles.load_account_profile(account_number=self.account_number)
+            account_type = _account.get('type', 'unknown')
 
             print(f"\n{'='*70}")
             print(f"🔒 LOCKED TO ACCOUNT: {self.account_number}")
@@ -54,7 +56,7 @@ class SafeCashBot:
 
             if account_type != 'cash':
                 print(f"   ⚠️  WARNING: Account type is '{account_type}', not 'cash'")
-                print(f"   Bot will still only use available cash, not margin")
+                print("   Bot will still only use available cash, not margin")
 
             print(f"{'='*70}\n")
 
@@ -88,7 +90,7 @@ class SafeCashBot:
     def get_portfolio_summary(self):
         """Get portfolio summary for this specific account"""
         try:
-            account = r.profiles.load_account_profile(account_number=self.account_number)
+            r.profiles.load_account_profile(account_number=self.account_number)
             portfolio = r.profiles.load_portfolio_profile(account_number=self.account_number)
 
             print(f"\n{'='*70}")
@@ -96,7 +98,7 @@ class SafeCashBot:
             print(f"{'='*70}\n")
 
             # Account details
-            print(f"💰 Cash Balances:")
+            print("💰 Cash Balances:")
             cash_info = self.get_cash_balance()
             print(f"   Available Cash: ${cash_info['tradeable_cash']:,.2f}")
             print(f"   Buying Power: ${cash_info['buying_power']:,.2f}")
@@ -106,7 +108,7 @@ class SafeCashBot:
             equity = float(portfolio.get('equity', 0))
             market_value = float(portfolio.get('market_value', 0))
 
-            print(f"\n📊 Portfolio:")
+            print("\n📊 Portfolio:")
             print(f"   Total Equity: ${equity:,.2f}")
             print(f"   Market Value: ${market_value:,.2f}")
 
@@ -195,7 +197,7 @@ class SafeCashBot:
             quote = r.stocks.get_quotes(symbol)
             if not quote or len(quote) == 0:
                 return False, f"Invalid symbol: {symbol}"
-        except:
+        except Exception:
             return False, f"Cannot get quote for {symbol}"
 
         return True, "Order validated"
@@ -230,14 +232,14 @@ class SafeCashBot:
             return None
 
         if dry_run:
-            print(f"\n⚠️  DRY RUN MODE - Order not executed")
-            print(f"   To execute real orders, call with dry_run=False")
+            print("\n⚠️  DRY RUN MODE - Order not executed")
+            print("   To execute real orders, call with dry_run=False")
             print(f"{'='*70}\n")
             return None
 
         # Execute real order
         try:
-            print(f"\n🚀 Executing order...")
+            print("\n🚀 Executing order...")
             order = r.orders.order_buy_limit(
                 symbol=symbol,
                 quantity=quantity,
@@ -245,7 +247,7 @@ class SafeCashBot:
                 account_number=self.account_number
             )
 
-            print(f"✅ Order placed successfully!")
+            print("✅ Order placed successfully!")
             print(f"   Order ID: {order.get('id', 'N/A')}")
             print(f"   State: {order.get('state', 'N/A')}")
             print(f"{'='*70}\n")
@@ -293,17 +295,17 @@ class SafeCashBot:
             print(f"{'='*70}\n")
             return None
 
-        print(f"   Validation: ✅ Valid sell order")
+        print("   Validation: ✅ Valid sell order")
 
         if dry_run:
-            print(f"\n⚠️  DRY RUN MODE - Order not executed")
-            print(f"   To execute real orders, call with dry_run=False")
+            print("\n⚠️  DRY RUN MODE - Order not executed")
+            print("   To execute real orders, call with dry_run=False")
             print(f"{'='*70}\n")
             return None
 
         # Execute real order
         try:
-            print(f"\n🚀 Executing order...")
+            print("\n🚀 Executing order...")
             order = r.orders.order_sell_limit(
                 symbol=symbol,
                 quantity=quantity,
@@ -311,7 +313,7 @@ class SafeCashBot:
                 account_number=self.account_number
             )
 
-            print(f"✅ Order placed successfully!")
+            print("✅ Order placed successfully!")
             print(f"   Order ID: {order.get('id', 'N/A')}")
             print(f"   State: {order.get('state', 'N/A')}")
             print(f"{'='*70}\n")
@@ -367,7 +369,7 @@ class SafeCashBot:
 
 def main():
     """Run the safe cash bot - just show portfolio"""
-    print(f"\n🤖 Safe Cash-Only Trading Bot")
+    print("\n🤖 Safe Cash-Only Trading Bot")
     print(f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
 
     bot = SafeCashBot()

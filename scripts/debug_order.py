@@ -4,9 +4,11 @@ Debug order placement to see actual error
 
 import sys
 import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from utils.safe_cash_bot import SafeCashBot
+
 import robin_stocks.robinhood as r
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from utils.safe_cash_bot import SafeCashBot  # noqa: E402
 
 
 def debug_order():
@@ -44,10 +46,10 @@ def debug_order():
 
     # Try placing order with detailed error catching
     print("\n3️⃣ Attempting to place order...")
-    print(f"   Symbol: AAPL")
-    print(f"   Quantity: 1")
+    print("   Symbol: AAPL")
+    print("   Quantity: 1")
     print(f"   Limit: ${price * 1.005:.2f}")
-    print(f"   Account: 490706777")
+    print("   Account: 490706777")
 
     try:
         # Direct API call
@@ -58,7 +60,7 @@ def debug_order():
             account_number='490706777'
         )
 
-        print(f"\n   ✅ Order Response:")
+        print("\n   ✅ Order Response:")
         print(f"   Type: {type(order)}")
         print(f"   Content: {order}")
 
@@ -73,15 +75,15 @@ def debug_order():
             if 'reject_reason' in order:
                 print(f"   ⚠️  Reject Reason: {order['reject_reason']}")
         else:
-            print(f"   ❌ Order returned None/empty")
+            print("   ❌ Order returned None/empty")
 
     except Exception as e:
-        print(f"\n   ❌ Exception occurred:")
+        print("\n   ❌ Exception occurred:")
         print(f"   Error: {e}")
         print(f"   Type: {type(e)}")
 
         import traceback
-        print(f"\n   Full traceback:")
+        print("\n   Full traceback:")
         traceback.print_exc()
 
     bot.auth.logout()

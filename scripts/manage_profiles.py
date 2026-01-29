@@ -3,12 +3,14 @@ Robinhood Multiple Account/Profile Manager
 Handles switching between different Robinhood investment accounts
 """
 
-import robin_stocks.robinhood as r
 import sys
 import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from utils.rh_auth import RobinhoodAuth
 import json
+
+import robin_stocks.robinhood as r
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from utils.rh_auth import RobinhoodAuth  # noqa: E402
 
 
 class ProfileManager:
@@ -44,7 +46,7 @@ class ProfileManager:
                 # Fallback to single account
                 account = r.profiles.load_account_profile()
                 self.accounts = [account] if account else []
-                print(f"✅ Found 1 account")
+                print("✅ Found 1 account")
                 return self.accounts
 
         except Exception as e:
@@ -73,7 +75,7 @@ class ProfileManager:
                 portfolio = r.profiles.load_portfolio_profile(account_number=account_number)
                 equity = float(portfolio.get('equity', 0))
                 market_value = float(portfolio.get('market_value', 0))
-            except:
+            except Exception:
                 equity = 0
                 market_value = 0
 
@@ -105,13 +107,13 @@ class ProfileManager:
             print(f"   Type: {account.get('type', 'N/A')}")
             print(f"   Created: {account.get('created_at', 'N/A')[:10]}")
 
-            print(f"\nPortfolio:")
+            print("\nPortfolio:")
             print(f"   Equity: ${float(portfolio.get('equity', 0)):,.2f}")
             print(f"   Market Value: ${float(portfolio.get('market_value', 0)):,.2f}")
             print(f"   Buying Power: ${float(account.get('buying_power', 0)):,.2f}")
             print(f"   Cash: ${float(account.get('cash', 0)):,.2f}")
 
-            print(f"\nOptions:")
+            print("\nOptions:")
             print(f"   Option Level: {account.get('option_level', 'N/A')}")
             print(f"   Fractionals Eligible: {account.get('eligible_for_fractionals', False)}")
 
@@ -194,7 +196,7 @@ class ProfileManager:
             json.dump(config, f, indent=2)
 
         print(f"✅ Saved account configuration to {filename}")
-        print(f"   You can edit this file to add custom aliases for your accounts")
+        print("   You can edit this file to add custom aliases for your accounts")
 
     def logout(self):
         """Logout from Robinhood"""
@@ -210,7 +212,7 @@ def main():
     manager.login()
 
     # List all accounts
-    accounts = manager.list_all_accounts()
+    manager.list_all_accounts()
 
     # Save configuration for future reference
     manager.save_account_config()

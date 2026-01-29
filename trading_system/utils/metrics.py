@@ -3,7 +3,7 @@ Metrics Calculation Utilities
 Calculates trading metrics like volatility, highs, lows, etc.
 """
 
-from typing import List, Dict, Optional
+from typing import List, Dict
 import statistics
 import math
 
@@ -96,7 +96,7 @@ class MetricsCalculator:
 
     @staticmethod
     def calculate_all_metrics(intraday_data: List[Dict],
-                             daily_data: List[Dict]) -> Dict:
+                              daily_data: List[Dict]) -> Dict:
         """
         Calculate all metrics for a symbol
 
@@ -144,13 +144,13 @@ class MetricsCalculator:
             f"METRICS: {symbol}",
             f"{'='*70}",
             f"Current Price:        ${metrics.get('current_price', 0):,.2f}",
-            f"",
-            f"Intraday Range:",
+            "",
+            "Intraday Range:",
             f"  High:               ${metrics.get('intraday_high', 0):,.2f}",
             f"  Low:                ${metrics.get('intraday_low', 0):,.2f}",
             f"  Volatility:         {metrics.get('intraday_volatility', 0):.2f}%",
-            f"",
-            f"30-Day Range:",
+            "",
+            "30-Day Range:",
             f"  30-Day High:        ${metrics.get('30d_high', 0):,.2f}",
             f"  30-Day Low:         ${metrics.get('30d_low', 0):,.2f}",
             f"{'='*70}\n"

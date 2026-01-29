@@ -12,11 +12,11 @@ import time
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from trading_system.data_providers.twelve_data import TwelveDataProvider
-from trading_system.utils.metrics import MetricsCalculator
-from trading_system.strategies.breakout_strategy import BreakoutStrategy
-from trading_system.state.state_manager import StateManager
-from utils.safe_cash_bot import SafeCashBot
+from trading_system.data_providers.twelve_data import TwelveDataProvider  # noqa: E402
+from trading_system.utils.metrics import MetricsCalculator  # noqa: E402
+from trading_system.strategies.breakout_strategy import BreakoutStrategy  # noqa: E402
+from trading_system.state.state_manager import StateManager  # noqa: E402
+from utils.safe_cash_bot import SafeCashBot  # noqa: E402
 
 
 class TradingSystem:
@@ -233,7 +233,7 @@ class TradingSystem:
     def run_once(self):
         """Run trading system once for all symbols"""
         print(f"\n{'='*70}")
-        print(f"RUNNING TRADING SYSTEM")
+        print("RUNNING TRADING SYSTEM")
         print(f"{'='*70}")
         print(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         print(f"Symbols: {', '.join(self.symbols)}")

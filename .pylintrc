@@ -1,0 +1,15 @@
+[MASTER]
+# Use multiple processes to speed up pylint
+jobs=1
+
+[MESSAGES CONTROL]
+# Disable warnings that are unavoidable in this project:
+# E0401: import-error (third-party deps not installed in CI)
+# W0718: broad-exception-caught (intentional in trading bot error handling)
+# R0801: duplicate-code (acceptable across strategy files)
+# C0415: import-outside-toplevel (used for conditional imports)
+disable=E0401,W0718,R0801,C0415,C0413,W1514,R0913,R0917,R1705,E1136,R0915,R0914
+
+[FORMAT]
+# Match flake8 max line length
+max-line-length=127

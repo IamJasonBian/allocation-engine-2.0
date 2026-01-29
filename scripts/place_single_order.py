@@ -5,8 +5,9 @@ Account: 490706777 (Cash Only - $2,000)
 
 import sys
 import os
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from utils.safe_cash_bot import SafeCashBot
+from utils.safe_cash_bot import SafeCashBot  # noqa: E402
 
 
 def place_single_order():
@@ -20,7 +21,7 @@ def place_single_order():
     bot = SafeCashBot()
 
     # Show portfolio
-    portfolio = bot.get_portfolio_summary()
+    bot.get_portfolio_summary()
 
     print("\n" + "="*70)
     print("📝 ORDER DETAILS")
@@ -59,7 +60,7 @@ def place_single_order():
     is_buy = order_type == '1'
 
     # Quantity
-    quantity_str = input(f"\nEnter quantity (number of shares): ").strip()
+    quantity_str = input("\nEnter quantity (number of shares): ").strip()
     try:
         quantity = int(quantity_str)
         if quantity <= 0:
@@ -109,7 +110,7 @@ def place_single_order():
     print("\n" + "="*70)
     print("📋 ORDER SUMMARY")
     print("="*70)
-    print(f"   Account: 490706777")
+    print("   Account: 490706777")
     print(f"   Type: {'BUY' if is_buy else 'SELL'}")
     print(f"   Symbol: {symbol}")
     print(f"   Quantity: {quantity}")
@@ -169,7 +170,7 @@ def quick_order(symbol, quantity, price=None, order_type='buy', dry_run=True):
         price = current_price * 1.005 if order_type == 'buy' else current_price * 0.995
 
     print(f"\n{'='*70}")
-    print(f"📝 QUICK ORDER")
+    print("📝 QUICK ORDER")
     print(f"{'='*70}")
     print(f"   Type: {order_type.upper()}")
     print(f"   Symbol: {symbol}")

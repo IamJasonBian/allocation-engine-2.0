@@ -3,11 +3,12 @@ Secure Robinhood Authentication Manager
 Handles multiple accounts with environment variable support
 """
 
-import robin_stocks.robinhood as r
-from dotenv import load_dotenv
 import os
 import sys
 from typing import Optional, Dict
+
+import robin_stocks.robinhood as r
+from dotenv import load_dotenv
 
 
 class RobinhoodAuth:
@@ -59,7 +60,7 @@ class RobinhoodAuth:
         # Logout any existing session
         try:
             r.logout()
-        except:
+        except Exception:
             pass
 
         # Try to use stored token first
@@ -72,7 +73,7 @@ class RobinhoodAuth:
                 return login_response
             except Exception as e:
                 print(f"⚠️  Stored token failed or expired: {e}")
-                print(f"🔄 Logging in with credentials...")
+                print("🔄 Logging in with credentials...")
 
         # Fresh login with credentials
         try:
@@ -129,7 +130,7 @@ def main():
 
     # Get account info
     info = auth.get_account_info()
-    print(f"\n📊 Account Info:")
+    print("\n📊 Account Info:")
     for key, value in info.items():
         print(f"   {key}: {value}")
 

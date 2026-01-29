@@ -7,7 +7,6 @@ import json
 import os
 from datetime import datetime
 from typing import Dict, List, Optional
-from pathlib import Path
 
 
 class StateManager:
@@ -146,7 +145,7 @@ class StateManager:
         self._save_state()
 
     def update_order_status(self, symbol: str, order_type: str, status: str,
-                           order_id: Optional[str] = None):
+                            order_id: Optional[str] = None):
         """
         Update order status
 
