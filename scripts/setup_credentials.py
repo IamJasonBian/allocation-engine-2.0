@@ -72,14 +72,14 @@ def setup_credentials():
     os.chmod(env_path, 0o600)
 
     print("\n✅ Credentials saved to .env file")
-    print(f"   File permissions set to 600 (owner read/write only)")
-    print(f"\n🔒 Security reminders:")
-    print(f"   • .env file is in .gitignore (won't be committed)")
-    print(f"   • Enable 2FA on your Robinhood accounts")
-    print(f"   • Keep your .env file secure and never share it")
-    print(f"\n📝 Next steps:")
-    print(f"   1. Test connection: python rh_auth.py")
-    print(f"   2. Run trading bot: python trading_bot.py")
+    print("   File permissions set to 600 (owner read/write only)")
+    print("\n🔒 Security reminders:")
+    print("   • .env file is in .gitignore (won't be committed)")
+    print("   • Enable 2FA on your Robinhood accounts")
+    print("   • Keep your .env file secure and never share it")
+    print("\n📝 Next steps:")
+    print("   1. Test connection: python rh_auth.py")
+    print("   2. Run trading bot: python trading_bot.py")
     print("=" * 60)
 
 

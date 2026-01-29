@@ -8,15 +8,16 @@ Schedule:
 - 9:30 AM ET (next day): Sell AAPL at open price
 """
 
-import robin_stocks.robinhood as r
 import sys
 import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from utils.safe_cash_bot import SafeCashBot
-from datetime import datetime, time
-import pytz
 import json
-import os
+from datetime import datetime, time
+
+import robin_stocks.robinhood as r
+import pytz
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from utils.safe_cash_bot import SafeCashBot  # noqa: E402
 
 
 class AfterHoursDailyStrategy:
@@ -34,11 +35,11 @@ class AfterHoursDailyStrategy:
         self.state_file = 'afterhours_state.json'
 
         print(f"\n{'='*70}")
-        print(f"🌙 AFTER-HOURS DAILY STRATEGY")
+        print("🌙 AFTER-HOURS DAILY STRATEGY")
         print(f"{'='*70}")
         print(f"   Symbol: {self.symbol}")
         print(f"   Mode: {'DRY RUN' if self.dry_run else '⚠️  LIVE TRADING'}")
-        print(f"   Strategy: Buy at close, sell at open")
+        print("   Strategy: Buy at close, sell at open")
         print(f"{'='*70}\n")
 
     def load_state(self):
@@ -111,7 +112,7 @@ class AfterHoursDailyStrategy:
     def execute_buy(self):
         """Execute buy order at market close (4:00 PM)"""
         print(f"\n{'='*70}")
-        print(f"🛒 BUY EXECUTION - Market Close")
+        print("🛒 BUY EXECUTION - Market Close")
         print(f"{'='*70}")
 
         state = self.load_state()
@@ -120,14 +121,14 @@ class AfterHoursDailyStrategy:
         # Check if already bought today
         if state['last_buy_date'] == current_date:
             print(f"✋ Already bought today ({current_date})")
-            print(f"   Waiting for sell signal tomorrow\n")
+            print("   Waiting for sell signal tomorrow\n")
             return None
 
         # Check if we already have a position
         position = self.get_current_position()
         if position:
             print(f"✋ Already holding {position['quantity']} shares")
-            print(f"   Waiting for sell signal\n")
+            print("   Waiting for sell signal\n")
             return None
 
         # Calculate position size
@@ -141,7 +142,7 @@ class AfterHoursDailyStrategy:
         # Set limit price (current price + 0.5% for after-hours volatility)
         limit_price = current_price * 1.005
 
-        print(f"\n📊 Order Details:")
+        print("\n📊 Order Details:")
         print(f"   Symbol: {self.symbol}")
         print(f"   Quantity: {quantity}")
         print(f"   Current Price: ${current_price:.2f}")
@@ -169,7 +170,7 @@ class AfterHoursDailyStrategy:
     def execute_sell(self):
         """Execute sell order at market open (9:30 AM)"""
         print(f"\n{'='*70}")
-        print(f"💵 SELL EXECUTION - Market Open")
+        print("💵 SELL EXECUTION - Market Open")
         print(f"{'='*70}")
 
         state = self.load_state()
@@ -178,14 +179,14 @@ class AfterHoursDailyStrategy:
         # Check if already sold today
         if state['last_sell_date'] == current_date:
             print(f"✋ Already sold today ({current_date})")
-            print(f"   Waiting for buy signal at close\n")
+            print("   Waiting for buy signal at close\n")
             return None
 
         # Check if we have a position to sell
         position = self.get_current_position()
         if not position:
-            print(f"✋ No position to sell")
-            print(f"   Will buy at market close\n")
+            print("✋ No position to sell")
+            print("   Will buy at market close\n")
             return None
 
         quantity = int(position['quantity'])
@@ -199,7 +200,7 @@ class AfterHoursDailyStrategy:
         # Set limit price (current price - 0.5%)
         limit_price = current_price * 0.995
 
-        print(f"\n📊 Order Details:")
+        print("\n📊 Order Details:")
         print(f"   Symbol: {self.symbol}")
         print(f"   Quantity: {quantity}")
         print(f"   Buy Price: ${buy_price:.2f}")
@@ -228,11 +229,9 @@ class AfterHoursDailyStrategy:
     def run_strategy(self):
         """Run strategy based on time of day"""
         current_time = self.get_current_time()
-        current_hour = current_time.hour
-        current_minute = current_time.minute
 
         print(f"\n{'='*70}")
-        print(f"🚀 RUNNING AFTER-HOURS DAILY STRATEGY")
+        print("🚀 RUNNING AFTER-HOURS DAILY STRATEGY")
         print(f"{'='*70}")
         print(f"   Time: {current_time.strftime('%Y-%m-%d %H:%M:%S %Z')}")
         print(f"   Day: {current_time.strftime('%A')}")
@@ -243,7 +242,7 @@ class AfterHoursDailyStrategy:
 
         # Load state
         state = self.load_state()
-        print(f"📊 Current State:")
+        print("📊 Current State:")
         print(f"   Position Held: {state['position_held']}")
         print(f"   Last Buy: {state['last_buy_date'] or 'Never'}")
         print(f"   Last Sell: {state['last_sell_date'] or 'Never'}")
@@ -264,23 +263,23 @@ class AfterHoursDailyStrategy:
         current_time_only = current_time.time()
 
         if sell_window_start <= current_time_only <= sell_window_end:
-            print(f"\n⏰ SELL WINDOW (Market Open)")
+            print("\n⏰ SELL WINDOW (Market Open)")
             return self.execute_sell()
 
         elif buy_window_start <= current_time_only <= buy_window_end:
-            print(f"\n⏰ BUY WINDOW (Market Close)")
+            print("\n⏰ BUY WINDOW (Market Close)")
             return self.execute_buy()
 
         else:
-            print(f"\n⏸️  WAITING")
-            print(f"   Next sell window: 9:25 AM - 9:45 AM ET")
-            print(f"   Next buy window: 3:55 PM - 4:15 PM ET\n")
+            print("\n⏸️  WAITING")
+            print("   Next sell window: 9:25 AM - 9:45 AM ET")
+            print("   Next buy window: 3:55 PM - 4:15 PM ET\n")
             return None
 
     def get_performance_summary(self):
         """Show historical performance"""
         print(f"\n{'='*70}")
-        print(f"📊 STRATEGY PERFORMANCE")
+        print("📊 STRATEGY PERFORMANCE")
         print(f"{'='*70}\n")
 
         state = self.load_state()

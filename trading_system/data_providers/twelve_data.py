@@ -4,9 +4,7 @@ Provides market data for stocks and crypto using Twelve Data API
 """
 
 import requests
-from datetime import datetime, timedelta
 from typing import Dict, List, Optional
-import time
 
 
 class TwelveDataProvider:

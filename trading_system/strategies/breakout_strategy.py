@@ -4,7 +4,6 @@ Buy at 30-day low, Sell at 30-day high
 """
 
 from typing import Dict, Optional, List
-from datetime import datetime
 
 
 class BreakoutStrategy:
@@ -84,7 +83,7 @@ class BreakoutStrategy:
             }
 
     def _generate_buy_signal(self, symbol: str, current_price: float,
-                            low_30d: float, metrics: Dict) -> Dict:
+                             low_30d: float, metrics: Dict) -> Dict:
         """Generate buy signal when price hits 30-day low"""
         return {
             'signal': 'BUY_AT_LOW',
@@ -100,8 +99,8 @@ class BreakoutStrategy:
         }
 
     def _generate_sell_signal(self, symbol: str, current_price: float,
-                             high_30d: float, metrics: Dict,
-                             position: Dict) -> Dict:
+                              high_30d: float, metrics: Dict,
+                              position: Dict) -> Dict:
         """Generate sell signal when price hits 30-day high"""
         quantity = float(position.get('quantity', 0))
 
@@ -120,16 +119,16 @@ class BreakoutStrategy:
         }
 
     def _get_hold_reason(self, price: float, low: float, high: float,
-                        has_position: bool) -> str:
+                         has_position: bool) -> str:
         """Get reason for HOLD signal"""
         if has_position:
             distance_to_high = ((high - price) / price) * 100
             return (f'Holding position. Price ${price:.2f} is {distance_to_high:.1f}% '
-                   f'below 30d high ${high:.2f}')
+                    f'below 30d high ${high:.2f}')
         else:
             distance_to_low = ((price - low) / low) * 100
             return (f'No position. Price ${price:.2f} is {distance_to_low:.1f}% '
-                   f'above 30d low ${low:.2f}')
+                    f'above 30d low ${low:.2f}')
 
     def calculate_position_size(self, symbol: str, price: float,
                                 available_cash: float) -> int:
@@ -175,8 +174,8 @@ class BreakoutStrategy:
         if signal_data['order']:
             order = signal_data['order']
             lines.extend([
-                f"",
-                f"Order Details:",
+                "",
+                "Order Details:",
                 f"  Action: {order['action'].upper()}",
                 f"  Type: {order['order_type']}",
                 f"  Current Price: ${order['current_price']:,.2f}",

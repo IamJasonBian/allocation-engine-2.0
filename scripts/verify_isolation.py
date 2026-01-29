@@ -2,12 +2,14 @@
 Verify that the bot is properly isolated to account 919433888
 """
 
-import robin_stocks.robinhood as r
 import sys
 import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from utils.rh_auth import RobinhoodAuth
+
+import robin_stocks.robinhood as r
 from dotenv import load_dotenv
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from utils.rh_auth import RobinhoodAuth  # noqa: E402
 
 
 def verify_isolation():
@@ -65,7 +67,7 @@ def verify_isolation():
         print(f"   Equity: ${equity:,.2f}")
 
         if acc_type == 'cash':
-            print(f"   ✅ VERIFIED: Cash account (no margin)")
+            print("   ✅ VERIFIED: Cash account (no margin)")
         else:
             print(f"   ⚠️  Account type is '{acc_type}', will still use cash only")
 
@@ -91,8 +93,8 @@ def verify_isolation():
     print("✅ ISOLATION VERIFIED")
     print("="*70)
     print(f"\nBot is locked to account: {target_account}")
-    print(f"All orders will be executed ONLY in this account")
-    print(f"Only available CASH will be used (no margin)\n")
+    print("All orders will be executed ONLY in this account")
+    print("Only available CASH will be used (no margin)\n")
 
     auth.logout()
     return True

@@ -3,13 +3,15 @@ Example Robinhood Trading Bot
 Demonstrates how to use the RobinhoodAuth class
 """
 
-import robin_stocks.robinhood as r
 import sys
 import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from utils.rh_auth import RobinhoodAuth
 import time
 from datetime import datetime
+
+import robin_stocks.robinhood as r
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from utils.rh_auth import RobinhoodAuth  # noqa: E402
 
 
 class TradingBot:
@@ -28,7 +30,7 @@ class TradingBot:
 
         # Account info
         info = self.auth.get_account_info()
-        print(f"\n💰 Account Overview:")
+        print("\n💰 Account Overview:")
         print(f"   Account Number: {info.get('account_number', 'N/A')}")
         print(f"   Total Equity: ${float(info.get('equity', 0)):,.2f}")
         print(f"   Market Value: ${float(info.get('market_value', 0)):,.2f}")
@@ -87,13 +89,13 @@ class TradingBot:
             price: Limit price
             order_type: 'buy' or 'sell'
         """
-        print(f"\n🔔 DRY RUN - Limit Order:")
+        print("\n🔔 DRY RUN - Limit Order:")
         print(f"   Type: {order_type.upper()}")
         print(f"   Symbol: {symbol}")
         print(f"   Quantity: {quantity}")
         print(f"   Limit Price: ${price:.2f}")
         print(f"   Total Value: ${quantity * price:.2f}")
-        print(f"\n⚠️  This is a DRY RUN. Uncomment the code below to execute real orders.")
+        print("\n⚠️  This is a DRY RUN. Uncomment the code below to execute real orders.")
 
         # Uncomment to execute real orders
         # try:
@@ -110,7 +112,7 @@ class TradingBot:
     def watch_stock(self, symbol, duration_seconds=60):
         """Watch a stock's price for a specified duration"""
         print(f"\n👀 Watching {symbol} for {duration_seconds} seconds...")
-        print(f"   Press Ctrl+C to stop\n")
+        print("   Press Ctrl+C to stop\n")
 
         start_time = time.time()
         try:
@@ -146,7 +148,7 @@ class TradingBot:
 
 def main():
     """Run the trading bot"""
-    print(f"\n🤖 Starting Trading Bot...")
+    print("\n🤖 Starting Trading Bot...")
     print(f"⏰ Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
 
     # Initialize and run bot with automated account
