@@ -103,16 +103,16 @@ class TwelveDataProvider:
 
         return result
 
-    def get_daily_data(self, symbol: str, outputsize: int = 30) -> Optional[List[Dict]]:
+    def get_daily_data(self, symbol: str, outputsize: int = 31) -> Optional[List[Dict]]:
         """
         Get daily price data (for 30-day high/low calculation)
 
         Args:
             symbol: Stock symbol
-            outputsize: Number of days to return (default 30)
+            outputsize: Number of days to return (default 31 - includes today + 30 previous days)
 
         Returns:
-            List of daily price data
+            List of daily price data (index 0 is today, 1-30 are previous 30 days)
         """
         td_symbol = self.SYMBOL_MAP.get(symbol, symbol)
 
@@ -245,11 +245,11 @@ def test_twelve_data():
         print(f"   {symbol}: ${data['price']:,.2f}")
 
     # Test daily data
-    print("\n3. Testing 30-day daily data (SPY):")
-    daily = provider.get_daily_data('SPY', outputsize=30)
+    print("\n3. Testing 31-day daily data (SPY) - today + 30 previous days:")
+    daily = provider.get_daily_data('SPY', outputsize=31)
     if daily:
         print(f"   Retrieved {len(daily)} days of data")
-        print(f"   Latest: {daily[0]['date']} - Close: ${daily[0]['close']:.2f}")
+        print(f"   Latest (today): {daily[0]['date']} - Close: ${daily[0]['close']:.2f}")
 
     # Test intraday data
     print("\n4. Testing intraday data (AMZN):")

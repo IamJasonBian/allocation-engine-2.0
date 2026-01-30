@@ -72,10 +72,11 @@ class MetricsCalculator:
     @staticmethod
     def calculate_30day_range(daily_data: List[Dict]) -> Dict[str, float]:
         """
-        Calculate 30-day high and low
+        Calculate 30-day high and low (excluding today)
 
         Args:
-            daily_data: List of daily price data (should have 30 days)
+            daily_data: List of daily price data (should have 31+ days)
+                       Index 0 is today (excluded), 1-30 are previous 30 days
 
         Returns:
             Dictionary with '30d_high' and '30d_low' keys
@@ -83,8 +84,12 @@ class MetricsCalculator:
         if not daily_data:
             return {'30d_high': 0.0, '30d_low': 0.0}
 
-        # Take up to 30 most recent days
-        recent_data = daily_data[:30]
+        # Skip today (index 0) and take the previous 30 days (indices 1-30)
+        # This ensures we calculate based on completed days only
+        if len(daily_data) < 2:
+            return {'30d_high': 0.0, '30d_low': 0.0}
+
+        recent_data = daily_data[1:31]
 
         highs = [d['high'] for d in recent_data]
         lows = [d['low'] for d in recent_data]
@@ -170,9 +175,9 @@ def test_metrics():
         {'datetime': '2024-01-24 15:40:00', 'open': 97, 'high': 99, 'low': 96, 'close': 98, 'volume': 1000},
     ]
 
-    # Sample daily data
+    # Sample daily data (31 days: today + 30 previous days)
     daily = [
-        {'date': '2024-01-24', 'open': 100, 'high': 105, 'low': 95, 'close': 101, 'volume': 10000},
+        {'date': '2024-01-24', 'open': 100, 'high': 120, 'low': 80, 'close': 101, 'volume': 10000},  # Today (excluded)
         {'date': '2024-01-23', 'open': 98, 'high': 103, 'low': 93, 'close': 100, 'volume': 10000},
         {'date': '2024-01-22', 'open': 95, 'high': 110, 'low': 90, 'close': 98, 'volume': 10000},
     ]
@@ -191,10 +196,11 @@ def test_metrics():
     print(f"Intraday High: ${intraday_range['high']:.2f}")
     print(f"Intraday Low: ${intraday_range['low']:.2f}")
 
-    # Test 30-day range
+    # Test 30-day range (excluding today)
     range_30d = calc.calculate_30day_range(daily)
-    print(f"\n30-Day High: ${range_30d['30d_high']:.2f}")
-    print(f"30-Day Low: ${range_30d['30d_low']:.2f}")
+    print(f"\n30-Day High (excluding today): ${range_30d['30d_high']:.2f}")
+    print(f"30-Day Low (excluding today): ${range_30d['30d_low']:.2f}")
+    print(f"Note: Today's high/low (120/80) should be excluded from 30-day calculation")
 
     # Test all metrics
     all_metrics = calc.calculate_all_metrics(intraday, daily)
