@@ -33,9 +33,13 @@ class SafeCashBot:
 
         if self.account_number != "490706777":
             print(f"⚠️  WARNING: Expected account 490706777, got {self.account_number}")
-            response = input("Continue anyway? (yes/no): ")
-            if response.lower() != 'yes':
-                sys.exit(1)
+            # Check if running in interactive mode
+            if sys.stdin.isatty():
+                response = input("Continue anyway? (yes/no): ")
+                if response.lower() != 'yes':
+                    sys.exit(1)
+            else:
+                print("   Non-interactive mode: proceeding with configured account")
 
         self.auth = RobinhoodAuth()
         self.auth.login()
@@ -112,20 +116,95 @@ class SafeCashBot:
             print(f"   Total Equity: ${equity:,.2f}")
             print(f"   Market Value: ${market_value:,.2f}")
 
+            # Margin Availability Summary
+            print("\n💳 Margin Availability:")
+            available_cash = cash_info['tradeable_cash']
+            buying_power = cash_info['buying_power']
+            margin_available = buying_power - available_cash
+
+            # Calculate margin usage if we have positions
+            if equity > 0:
+                cash_pct = (available_cash / equity) * 100
+                margin_used = equity - available_cash - market_value
+                print(f"   Current Margin Used: ${margin_used:,.2f}")
+                print(f"   Margin Available: ${margin_available:,.2f}")
+                print(f"   Cash % of Equity: {cash_pct:.1f}%")
+                print(f"   Status: {'✅ Cash Only' if margin_used <= 0 else '⚠️ Using Margin'}")
+            else:
+                print(f"   Margin Available: ${margin_available:,.2f}")
+                print(f"   Status: ✅ Cash Only (No positions)")
+
+            # Order Book
+            open_orders = self.get_open_orders()
+            print(f"\n📋 Order Book: {len(open_orders)} open order(s)")
+
+            if open_orders:
+                # Group orders by type
+                buy_orders = [o for o in open_orders if o['side'] == 'BUY']
+                sell_orders = [o for o in open_orders if o['side'] == 'SELL']
+
+                if buy_orders:
+                    print("\n   🟢 BUY ORDERS:")
+                    for order in buy_orders:
+                        print(f"\n      {order['symbol']} - {order['order_type']}")
+                        print(f"         Quantity: {order['quantity']:.0f} shares")
+                        if order['limit_price']:
+                            print(f"         Limit Price: ${order['limit_price']:.2f}")
+                        if order['stop_price']:
+                            print(f"         Stop Price: ${order['stop_price']:.2f}")
+                        print(f"         Status: {order['state']}")
+                        print(f"         Created: {order['created_at']}")
+
+                if sell_orders:
+                    print("\n   🔴 SELL ORDERS:")
+                    for order in sell_orders:
+                        print(f"\n      {order['symbol']} - {order['order_type']}")
+                        print(f"         Quantity: {order['quantity']:.0f} shares")
+                        if order['limit_price']:
+                            print(f"         Limit Price: ${order['limit_price']:.2f}")
+                        if order['stop_price']:
+                            print(f"         Stop Price: ${order['stop_price']:.2f}")
+                        print(f"         Status: {order['state']}")
+                        print(f"         Created: {order['created_at']}")
+            else:
+                print("   No open orders")
+
             # Positions
             positions = self.get_positions()
             print(f"\n📈 Positions: {len(positions)}")
 
             if positions:
+                # Calculate total position value for allocation percentages
+                total_position_value = sum(pos['equity'] for pos in positions)
+
                 for pos in positions:
+                    allocation_pct = (pos['equity'] / equity) * 100 if equity > 0 else 0
                     print(f"\n   {pos['symbol']}")
                     print(f"      Quantity: {pos['quantity']}")
                     print(f"      Avg Buy: ${pos['avg_buy_price']:.2f}")
                     print(f"      Current: ${pos['current_price']:.2f}")
                     print(f"      Equity: ${pos['equity']:,.2f}")
+                    print(f"      Allocation: {allocation_pct:.1f}% of portfolio")
                     print(f"      P/L: ${pos['profit_loss']:+,.2f} ({pos['profit_loss_pct']:+.2f}%)")
+
+                # Stock Distribution (within invested portion)
+                print(f"\n📊 Stock Distribution (of invested capital):")
+                for pos in positions:
+                    stock_pct = (pos['equity'] / total_position_value) * 100 if total_position_value > 0 else 0
+                    print(f"   {pos['symbol']}: {stock_pct:.1f}% (${pos['equity']:,.2f})")
+
+                # Portfolio Allocation Summary
+                print(f"\n📊 Portfolio Allocation Summary:")
+                cash_allocation_pct = (available_cash / equity) * 100 if equity > 0 else 100
+                invested_pct = (total_position_value / equity) * 100 if equity > 0 else 0
+                print(f"   💵 Cash: {cash_allocation_pct:.1f}% (${available_cash:,.2f})")
+                print(f"   📈 Invested: {invested_pct:.1f}% (${total_position_value:,.2f})")
+                print(f"   📊 Total Equity: ${equity:,.2f}")
             else:
                 print("   No open positions")
+                print(f"\n📊 Portfolio Allocation Summary:")
+                print(f"   💵 Cash: 100.0% (${available_cash:,.2f})")
+                print(f"   📈 Invested: 0.0% ($0.00)")
 
             print(f"\n{'='*70}\n")
 
@@ -133,7 +212,8 @@ class SafeCashBot:
                 'cash': cash_info,
                 'equity': equity,
                 'market_value': market_value,
-                'positions': positions
+                'positions': positions,
+                'open_orders': open_orders
             }
 
         except Exception as e:
@@ -143,35 +223,118 @@ class SafeCashBot:
     def get_positions(self):
         """Get positions for this specific account"""
         try:
-            # Get positions filtered by account number
-            url = f'https://api.robinhood.com/positions/?account_number={self.account_number}'
-            data = r.helper.request_get(url, dataType='pagination')
+            # Use build_holdings which works more reliably
+            # Note: This returns all holdings, but we're locked to one account anyway
+            holdings = r.account.build_holdings()
 
             positions = []
-            for pos in data:
-                quantity = float(pos.get('quantity', 0))
-                if quantity > 0:  # Only open positions
-                    symbol = r.get_symbol_by_url(pos['instrument'])
-                    avg_price = float(pos.get('average_buy_price', 0))
-                    current_price = float(r.get_latest_price(symbol)[0])
-                    equity = quantity * current_price
-                    profit_loss = (current_price - avg_price) * quantity
-                    profit_loss_pct = ((current_price - avg_price) / avg_price) * 100 if avg_price > 0 else 0
+            if holdings:
+                for symbol, data in holdings.items():
+                    quantity = float(data.get('quantity', 0))
+                    if quantity > 0:  # Only open positions
+                        avg_price = float(data.get('average_buy_price', 0))
+                        current_price = float(data.get('price', 0))
+                        equity = float(data.get('equity', 0))
+                        profit_loss = (current_price - avg_price) * quantity
+                        profit_loss_pct = ((current_price - avg_price) / avg_price) * 100 if avg_price > 0 else 0
 
-                    positions.append({
-                        'symbol': symbol,
-                        'quantity': quantity,
-                        'avg_buy_price': avg_price,
-                        'current_price': current_price,
-                        'equity': equity,
-                        'profit_loss': profit_loss,
-                        'profit_loss_pct': profit_loss_pct
-                    })
+                        positions.append({
+                            'symbol': symbol,
+                            'quantity': quantity,
+                            'avg_buy_price': avg_price,
+                            'current_price': current_price,
+                            'equity': equity,
+                            'profit_loss': profit_loss,
+                            'profit_loss_pct': profit_loss_pct
+                        })
 
             return positions
 
         except Exception as e:
             print(f"❌ Error getting positions: {e}")
+            return []
+
+    def get_open_orders(self):
+        """
+        Get all open orders for this account
+
+        Returns:
+            List of open orders with details including stop loss and limit prices
+        """
+        try:
+            # Get all open stock orders
+            open_orders = r.orders.get_all_open_stock_orders()
+
+            orders = []
+            if open_orders:
+                for order in open_orders:
+                    # Parse order details
+                    order_id = order.get('id', 'N/A')
+                    symbol = order.get('symbol', 'N/A')
+
+                    # If symbol is not directly available, try to resolve from instrument_id
+                    if symbol == 'N/A':
+                        instrument_id = order.get('instrument_id')
+                        if instrument_id:
+                            try:
+                                instrument = r.stocks.get_instrument_by_url(
+                                    f"https://api.robinhood.com/instruments/{instrument_id}/"
+                                )
+                                if instrument:
+                                    symbol = instrument.get('symbol', 'N/A')
+                            except Exception:
+                                pass  # Keep symbol as 'N/A' if lookup fails
+
+                    side = order.get('side', 'N/A')  # 'buy' or 'sell'
+                    order_type = order.get('type', 'N/A')  # 'market' or 'limit'
+                    trigger = order.get('trigger', 'immediate')  # 'immediate' or 'stop'
+                    state = order.get('state', 'N/A')
+                    quantity = float(order.get('quantity', 0))
+
+                    # Price information
+                    limit_price = order.get('price')  # Limit price (can be None)
+                    stop_price = order.get('stop_price')  # Stop price (can be None)
+
+                    # Timestamps
+                    created_at = order.get('created_at', 'N/A')
+                    updated_at = order.get('updated_at', 'N/A')
+
+                    # Parse datetime if available
+                    try:
+                        if created_at != 'N/A':
+                            created_dt = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+                            created_at = created_dt.strftime('%Y-%m-%d %H:%M:%S')
+                    except Exception:
+                        pass
+
+                    # Determine order description
+                    if trigger == 'stop' and order_type == 'limit':
+                        order_desc = 'Stop Limit'
+                    elif trigger == 'stop':
+                        order_desc = 'Stop Loss'
+                    elif order_type == 'limit':
+                        order_desc = 'Limit'
+                    else:
+                        order_desc = 'Market'
+
+                    orders.append({
+                        'order_id': order_id,
+                        'symbol': symbol,
+                        'side': side.upper() if side != 'N/A' else 'N/A',
+                        'order_type': order_desc,
+                        'trigger': trigger,
+                        'state': state,
+                        'quantity': quantity,
+                        'limit_price': float(limit_price) if limit_price else None,
+                        'stop_price': float(stop_price) if stop_price else None,
+                        'created_at': created_at,
+                        'updated_at': updated_at
+                    })
+
+            return orders
+
+        except Exception as e:
+            print(f"❌ Error getting open orders: {e}")
             return []
 
     def validate_buy_order(self, symbol, quantity, price):

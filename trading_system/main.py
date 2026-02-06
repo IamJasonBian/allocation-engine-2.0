@@ -230,6 +230,57 @@ class TradingSystem:
                 )
                 print(f"Order placed: {order_id}")
 
+    def print_portfolio_allocation(self):
+        """Print current portfolio allocation summary"""
+        print(f"\n{'='*70}")
+        print("PORTFOLIO ALLOCATION")
+        print(f"{'='*70}\n")
+
+        try:
+            # Get portfolio summary data
+            portfolio_data = self.trading_bot.get_portfolio_summary()
+
+            if not portfolio_data:
+                print("Unable to retrieve portfolio data")
+                return
+
+            cash_info = portfolio_data['cash']
+            equity = portfolio_data['equity']
+            positions = portfolio_data['positions']
+
+            # Calculate allocation percentages
+            available_cash = cash_info['tradeable_cash']
+            total_position_value = sum(pos['equity'] for pos in positions)
+
+            cash_allocation_pct = (available_cash / equity) * 100 if equity > 0 else 100
+            invested_pct = (total_position_value / equity) * 100 if equity > 0 else 0
+
+            print(f"Total Portfolio Value: ${equity:,.2f}\n")
+            print(f"Asset Allocation:")
+            print(f"  💵 Cash:     {cash_allocation_pct:>6.2f}%  (${available_cash:>12,.2f})")
+            print(f"  📈 Invested: {invested_pct:>6.2f}%  (${total_position_value:>12,.2f})")
+            print(f"  {'─' * 40}")
+            print(f"  📊 Total:    100.00%  (${equity:>12,.2f})\n")
+
+            if positions:
+                print(f"Position Breakdown ({len(positions)} holdings):")
+                # Sort positions by equity value descending
+                sorted_positions = sorted(positions, key=lambda x: x['equity'], reverse=True)
+
+                for pos in sorted_positions:
+                    allocation_pct = (pos['equity'] / equity) * 100 if equity > 0 else 0
+                    pl_indicator = "📈" if pos['profit_loss'] >= 0 else "📉"
+
+                    print(f"  {pos['symbol']:>6}:   {allocation_pct:>6.2f}%  (${pos['equity']:>12,.2f})  "
+                          f"{pl_indicator} {pos['profit_loss_pct']:+.2f}%")
+            else:
+                print("No positions currently held")
+
+            print(f"\n{'='*70}\n")
+
+        except Exception as e:
+            print(f"Error printing portfolio allocation: {e}\n")
+
     def run_once(self):
         """Run trading system once for all symbols"""
         print(f"\n{'='*70}")
@@ -238,6 +289,9 @@ class TradingSystem:
         print(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         print(f"Symbols: {', '.join(self.symbols)}")
         print(f"{'='*70}\n")
+
+        # Print initial portfolio allocation
+        self.print_portfolio_allocation()
 
         for symbol in self.symbols:
             print(f"\n{'#'*70}")
@@ -270,7 +324,10 @@ class TradingSystem:
         print("RUN COMPLETE")
         print(f"{'='*70}")
         self.state_manager.print_state_summary()
-        self.trading_bot.get_portfolio_summary()
+
+        # Print final portfolio allocation
+        print("\nFinal Portfolio Allocation:")
+        self.print_portfolio_allocation()
 
     def run_continuous(self, interval_minutes: int = 5):
         """
