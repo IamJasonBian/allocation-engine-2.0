@@ -5,12 +5,13 @@ Run pair-wise dollar cost averaging on bad positions with audit, alarming, and U
 
 * Go here for UI: https://github.com/OptimChain/allocation-manager/tree/main/src
   
-## Top Commands (for suriving a crash)
+## Top Commands (as I survive a crash)
 
+```
   python -m trading_system.main
   python -m trading_system.audit
   pytest -v
-
+```
 
 
 
