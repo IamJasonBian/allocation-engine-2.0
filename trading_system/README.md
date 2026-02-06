@@ -1,6 +1,29 @@
 # Trading System - 30-Day Breakout Strategy
 
-A clean, modular trading system that implements a 30-day high/low breakout strategy using Twelve Data for market data and Robinhood for order execution.
+
+Run pair-wise dollar cost averaging on bad positions with audit, alarming, and UI monitoring functions
+
+* Go here for UI: https://github.com/OptimChain/allocation-manager/tree/main/src
+  
+## Top Commands (for suriving a crash)
+
+  python -m trading_system.main
+  python -m trading_system.audit
+  pytest -v
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 ## Architecture
 
