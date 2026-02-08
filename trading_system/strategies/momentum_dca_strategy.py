@@ -23,7 +23,8 @@ class MomentumDcaStrategy:
     """
 
     # Map source symbol -> hedge symbol for protective orders
-    DEFAULT_HEDGE_MAP = {'BTC': 'GBTC'}
+    # BTC is Grayscale Bitcoin Mini Trust ETF, no remapping needed
+    DEFAULT_HEDGE_MAP = {}
 
     def __init__(self, symbols: List[str], coverage_threshold: float = 0.20,
                  stop_offset_pct: float = 0.015, proximity_pct: float = 0.0075,
