@@ -73,6 +73,42 @@ class TestCoverageCalculation:
         signal = strategy.analyze_symbol('SPY', {'current_price': 450.0}, position, ticker)
         assert signal['signal'] == 'COVERED'
 
+    def test_out_of_range_orders_not_counted(self):
+        """Orders >8% from current price don't count toward coverage"""
+        strategy = _make_strategy()
+        position = _make_position('SPY', 100, 450.0)
+        # 25 shares @ $600 is 33% away — out of range
+        ticker = _make_ticker([_sell_order(25, 600.0)])
+        signal = strategy.analyze_symbol('SPY', {'current_price': 450.0}, position, ticker)
+        assert signal['signal'] == 'COVER_GAP'
+        assert signal['order']['quantity'] == 20
+
+    def test_mixed_in_range_and_out_of_range(self):
+        """Only in-range orders count; out-of-range are ignored for coverage"""
+        strategy = _make_strategy()
+        position = _make_position('SPY', 100, 450.0)
+        ticker = _make_ticker([
+            _sell_order(10, 460.0),   # 2.2% away — in range
+            _sell_order(15, 600.0),   # 33% away — out of range
+        ])
+        signal = strategy.analyze_symbol('SPY', {'current_price': 450.0}, position, ticker)
+        # Only 10 shares in range, need 20 for 20% of 100
+        assert signal['order'] is not None
+        assert signal['order']['quantity'] == 10
+
+    def test_out_of_range_listed_in_covered_signal(self):
+        """When covered, out-of-range orders appear in signal data"""
+        strategy = _make_strategy()
+        position = _make_position('SPY', 100, 450.0)
+        ticker = _make_ticker([
+            _sell_order(25, 460.0),   # 2.2% — in range, enough to cover
+            _sell_order(10, 600.0),   # 33% — out of range
+        ])
+        signal = strategy.analyze_symbol('SPY', {'current_price': 450.0}, position, ticker)
+        assert signal['signal'] == 'COVERED'
+        assert len(signal['existing_orders']) == 1
+        assert len(signal['out_of_range_orders']) == 1
+
     def test_invalid_orders_not_counted(self):
         strategy = _make_strategy()
         position = _make_position('SPY', 100, 450.0)

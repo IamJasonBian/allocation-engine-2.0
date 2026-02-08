@@ -1,6 +1,7 @@
 """
 Momentum DCA Strategy
-Ensures at least 20% of each position is covered by sell orders at all times.
+Ensures at least 20% of each position is covered by sell orders
+within 8% of the current price.
 If coverage is below threshold:
   - Price within 0.75% of existing order -> resubmit at original price
   - Price moved >0.75% -> place stop-limit at -1.5% below current price
@@ -22,11 +23,13 @@ class MomentumDcaStrategy:
     """
 
     def __init__(self, symbols: List[str], coverage_threshold: float = 0.20,
-                 stop_offset_pct: float = 0.015, proximity_pct: float = 0.0075):
+                 stop_offset_pct: float = 0.015, proximity_pct: float = 0.0075,
+                 coverage_range_pct: float = 0.08):
         self.symbols = symbols
         self.coverage_threshold = coverage_threshold
         self.stop_offset_pct = stop_offset_pct
         self.proximity_pct = proximity_pct
+        self.coverage_range_pct = coverage_range_pct
 
     def analyze_symbol(self, symbol: str, metrics: Dict,
                        current_position: Optional[Dict],
@@ -49,7 +52,13 @@ class MomentumDcaStrategy:
 
         position_qty = float(current_position['quantity'])
         valid_orders = ticker.get_valid_orders()
-        covered_qty = sum(o.size for o in valid_orders)
+
+        # Only count orders within coverage_range_pct of current price
+        in_range = [o for o in valid_orders
+                    if o.price and abs(current_price - o.price) / current_price <= self.coverage_range_pct]
+        out_of_range = [o for o in valid_orders if o not in in_range]
+
+        covered_qty = sum(o.size for o in in_range)
         coverage_pct = (covered_qty / position_qty) * 100 if position_qty > 0 else 0
 
         if coverage_pct >= self.coverage_threshold * 100:
@@ -62,7 +71,8 @@ class MomentumDcaStrategy:
                 'position_qty': position_qty,
                 'covered_qty': covered_qty,
                 'coverage_pct': coverage_pct,
-                'existing_orders': valid_orders,
+                'existing_orders': in_range,
+                'out_of_range_orders': out_of_range,
                 'current_price': current_price,
             }
 
@@ -149,6 +159,7 @@ class MomentumDcaStrategy:
         ]
         if signal_data['signal'] == 'COVERED' and signal_data.get('existing_orders'):
             orders = signal_data['existing_orders']
+            out_of_range = signal_data.get('out_of_range_orders', [])
             position_qty = signal_data['position_qty']
             covered_qty = signal_data['covered_qty']
             coverage_pct = signal_data['coverage_pct']
@@ -158,12 +169,21 @@ class MomentumDcaStrategy:
             lines.append(f"  Position:  {position_qty:,.4f} units @ ${current_price:,.2f}")
             lines.append(f"  Threshold: {self.coverage_threshold * 100:.0f}% "
                          f"({self.coverage_threshold * position_qty:,.4f} units needed)")
-            lines.append(f"  Covered:   {covered_qty:,.4f} units = {coverage_pct:.1f}%")
+            lines.append(f"  Covered:   {covered_qty:,.4f} units = {coverage_pct:.1f}% "
+                         f"(orders within {self.coverage_range_pct * 100:.0f}% of price)")
             lines.append("")
-            lines.append(f"  Open Sell Orders ({len(orders)}):")
+            lines.append(f"  Sell Orders Within Range ({len(orders)}):")
             for i, o in enumerate(orders, 1):
+                pct_away = abs(current_price - o.price) / current_price * 100
                 lines.append(f"    {i}. {o.size:,.4f} units @ ${o.price:,.2f} "
-                             f"({o.order_type.value})")
+                             f"({o.order_type.value}) [{pct_away:+.1f}%]")
+            if out_of_range:
+                lines.append("")
+                lines.append(f"  Out of Range ({len(out_of_range)}) — not counted:")
+                for i, o in enumerate(out_of_range, 1):
+                    pct_away = abs(current_price - o.price) / current_price * 100
+                    lines.append(f"    {i}. {o.size:,.4f} units @ ${o.price:,.2f} "
+                                 f"({o.order_type.value}) [{pct_away:+.1f}%]")
         if signal_data['order']:
             order = signal_data['order']
             lines.append("")
