@@ -258,6 +258,48 @@ class TestEdgeCases:
         assert 'COVERED' in output
 
 
+class TestHedgeSymbolMap:
+    """BTC drop orders should target GBTC; SPY stays as SPY"""
+
+    def test_btc_cover_gap_targets_gbtc(self):
+        strategy = _make_strategy()
+        position = _make_position('BTC', 1.0, 100000.0)
+        signal = strategy.analyze_symbol('BTC', {'current_price': 100000.0}, position, _make_ticker())
+        assert signal['signal'] == 'COVER_GAP'
+        assert signal['order']['symbol'] == 'GBTC'
+
+    def test_btc_resubmit_targets_gbtc(self):
+        strategy = _make_strategy()
+        position = _make_position('BTC', 1.0, 100000.0)
+        ticker = _make_ticker([_sell_order(0.1, 100500.0)])
+        signal = strategy.analyze_symbol('BTC', {'current_price': 100000.0}, position, ticker)
+        assert signal['signal'] == 'RESUBMIT'
+        assert signal['order']['symbol'] == 'GBTC'
+
+    def test_spy_orders_stay_spy(self):
+        strategy = _make_strategy()
+        position = _make_position('SPY', 100, 450.0)
+        signal = strategy.analyze_symbol('SPY', {'current_price': 450.0}, position, _make_ticker())
+        assert signal['order']['symbol'] == 'SPY'
+
+    def test_custom_hedge_map(self):
+        strategy = _make_strategy(hedge_symbol_map={'SPY': 'SH'})
+        position = _make_position('SPY', 100, 450.0)
+        signal = strategy.analyze_symbol('SPY', {'current_price': 450.0}, position, _make_ticker())
+        assert signal['order']['symbol'] == 'SH'
+
+    def test_format_shows_hedge_note(self):
+        strategy = _make_strategy()
+        signal = {
+            'signal': 'COVER_GAP', 'reason': 'test',
+            'order': {'action': 'stop_limit_sell', 'symbol': 'GBTC', 'quantity': 0.2,
+                      'stop_price': 98500.0, 'limit_price': 98500.0, 'current_price': 100000.0}
+        }
+        output = strategy.format_signal('BTC', signal)
+        assert 'GBTC' in output
+        assert 'hedging BTC via GBTC' in output
+
+
 class TestLoadBrokerSellOrders:
     """Test StateManager.load_broker_sell_orders converts raw dicts to Ticker"""
 

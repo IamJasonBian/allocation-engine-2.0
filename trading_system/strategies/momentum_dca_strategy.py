@@ -22,14 +22,19 @@ class MomentumDcaStrategy:
     minimum coverage threshold. Places protective orders to fill gaps.
     """
 
+    # Map source symbol -> hedge symbol for protective orders
+    DEFAULT_HEDGE_MAP = {'BTC': 'GBTC'}
+
     def __init__(self, symbols: List[str], coverage_threshold: float = 0.20,
                  stop_offset_pct: float = 0.015, proximity_pct: float = 0.0075,
-                 coverage_range_pct: float = 0.08):
+                 coverage_range_pct: float = 0.08,
+                 hedge_symbol_map: Dict = None):
         self.symbols = symbols
         self.coverage_threshold = coverage_threshold
         self.stop_offset_pct = stop_offset_pct
         self.proximity_pct = proximity_pct
         self.coverage_range_pct = coverage_range_pct
+        self.hedge_symbol_map = hedge_symbol_map if hedge_symbol_map is not None else self.DEFAULT_HEDGE_MAP
 
     def analyze_symbol(self, symbol: str, metrics: Dict,
                        current_position: Optional[Dict],
@@ -83,6 +88,9 @@ class MomentumDcaStrategy:
         if gap_qty <= 0:
             return {'signal': 'COVERED', 'reason': f'{symbol}: gap rounds to zero', 'order': None}
 
+        # Resolve hedge symbol for protective orders
+        order_symbol = self.hedge_symbol_map.get(symbol, symbol)
+
         # Check price proximity to nearest existing sell order
         nearest = self._find_nearest_order(current_price, valid_orders)
 
@@ -94,10 +102,10 @@ class MomentumDcaStrategy:
                     'reason': (f'{symbol}: {coverage_pct:.1f}% covered, '
                                f'price ${current_price:.2f} within {self.proximity_pct * 100}% '
                                f'of order @ ${order_price:.2f}. '
-                               f'Resubmitting {gap_qty} shares at ${order_price:.2f}'),
+                               f'Resubmitting {gap_qty} shares of {order_symbol} at ${order_price:.2f}'),
                     'order': {
                         'action': 'limit_sell',
-                        'symbol': symbol,
+                        'symbol': order_symbol,
                         'quantity': gap_qty,
                         'price': order_price,
                         'current_price': current_price,
@@ -111,11 +119,11 @@ class MomentumDcaStrategy:
             'signal': 'COVER_GAP',
             'reason': (f'{symbol}: {coverage_pct:.1f}% covered, '
                        f'need {gap_qty} more shares protected. '
-                       f'Placing stop-limit sell @ ${stop_price:.2f} '
+                       f'Placing stop-limit sell on {order_symbol} @ ${stop_price:.2f} '
                        f'(-{self.stop_offset_pct * 100}%)'),
             'order': {
                 'action': 'stop_limit_sell',
-                'symbol': symbol,
+                'symbol': order_symbol,
                 'quantity': gap_qty,
                 'stop_price': stop_price,
                 'limit_price': stop_price,
@@ -189,6 +197,9 @@ class MomentumDcaStrategy:
             lines.append("")
             lines.append("Order Details:")
             lines.append(f"  Action: {order['action'].upper()}")
+            lines.append(f"  Symbol: {order['symbol']}")
+            if order['symbol'] != symbol:
+                lines.append(f"  (hedging {symbol} via {order['symbol']})")
             lines.append(f"  Quantity: {order['quantity']}")
             lines.append(f"  Current Price: ${order['current_price']:,.2f}")
             if order['action'] == 'stop_limit_sell':
