@@ -155,18 +155,7 @@ class TradingSystem:
             symbol: Stock symbol
             signal: Signal data from strategy
         """
-        if self.verbose:
-            print(self.strategy.format_signal(symbol, signal))
-        else:
-            order = signal.get('order')
-            if order and order.get('action') == 'stop_limit_sell':
-                print(f"  {symbol}: {signal['signal']} — stop-limit sell "
-                      f"{order['quantity']} @ ${order['stop_price']:,.2f}")
-            elif order and order.get('action') == 'limit_sell':
-                print(f"  {symbol}: {signal['signal']} — limit sell "
-                      f"{order['quantity']} @ ${order['price']:,.2f}")
-            else:
-                print(f"  {symbol}: {signal['signal']}")
+        print(self.strategy.format_signal(symbol, signal))
 
         # Store signal in state
         self.state_manager.set_last_signal(symbol, signal['signal'])
