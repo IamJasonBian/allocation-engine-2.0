@@ -134,12 +134,13 @@ class TestGapQuantity:
         signal = strategy.analyze_symbol('SPY', {'current_price': 450.0}, position, ticker)
         assert signal['order']['quantity'] == 25
 
-    def test_btc_fractional_quantity(self):
+    def test_btc_whole_shares(self):
+        """BTC is Grayscale Bitcoin Mini Trust ETF — whole shares only"""
         strategy = _make_strategy()
-        position = _make_position('BTC', 0.5, 100000.0)
-        signal = strategy.analyze_symbol('BTC', {'current_price': 100000.0}, position, _make_ticker())
-        assert signal['order']['quantity'] == 0.1
-        assert round(signal['order']['quantity'], 4) == signal['order']['quantity']
+        position = _make_position('BTC', 3262, 31.0)
+        signal = strategy.analyze_symbol('BTC', {'current_price': 31.0}, position, _make_ticker())
+        assert signal['order']['quantity'] == 652
+        assert isinstance(signal['order']['quantity'], int)
 
     def test_stock_whole_shares(self):
         strategy = _make_strategy()
@@ -160,8 +161,8 @@ class TestStopLimitPricing:
 
     def test_stop_equals_limit(self):
         strategy = _make_strategy()
-        position = _make_position('BTC', 1.0, 100000.0)
-        signal = strategy.analyze_symbol('BTC', {'current_price': 100000.0}, position, _make_ticker())
+        position = _make_position('BTC', 100, 31.0)
+        signal = strategy.analyze_symbol('BTC', {'current_price': 31.0}, position, _make_ticker())
         assert signal['order']['stop_price'] == signal['order']['limit_price']
 
 
@@ -264,8 +265,8 @@ class TestHedgeSymbolMap:
     def test_btc_orders_stay_btc(self):
         """BTC is Grayscale Bitcoin Mini Trust ETF — no remapping"""
         strategy = _make_strategy()
-        position = _make_position('BTC', 1.0, 100000.0)
-        signal = strategy.analyze_symbol('BTC', {'current_price': 100000.0}, position, _make_ticker())
+        position = _make_position('BTC', 100, 31.0)
+        signal = strategy.analyze_symbol('BTC', {'current_price': 31.0}, position, _make_ticker())
         assert signal['order']['symbol'] == 'BTC'
 
     def test_spy_orders_stay_spy(self):

@@ -149,13 +149,9 @@ class MomentumDcaStrategy:
         return abs(current_price - order_price) / order_price <= self.proximity_pct
 
     def _round_quantity(self, symbol, quantity):
-        if symbol == 'BTC':
-            return round(quantity, 4)
         return int(quantity)
 
     def calculate_position_size(self, symbol, price, available_cash):
-        if symbol == 'BTC':
-            return round(available_cash * 0.25 / price, 4)
         return int(available_cash * 0.25 / price)
 
     def format_signal(self, symbol, signal_data):
