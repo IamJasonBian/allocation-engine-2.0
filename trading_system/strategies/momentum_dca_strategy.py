@@ -58,7 +58,12 @@ class MomentumDcaStrategy:
                 'reason': (f'{symbol}: {coverage_pct:.1f}% covered '
                            f'({covered_qty:.4f}/{position_qty:.4f}), '
                            f'threshold {self.coverage_threshold * 100}%'),
-                'order': None
+                'order': None,
+                'position_qty': position_qty,
+                'covered_qty': covered_qty,
+                'coverage_pct': coverage_pct,
+                'existing_orders': valid_orders,
+                'current_price': current_price,
             }
 
         # Under-covered — calculate gap
@@ -142,6 +147,23 @@ class MomentumDcaStrategy:
             f"Signal: {signal_data['signal']}",
             f"Reason: {signal_data['reason']}",
         ]
+        if signal_data['signal'] == 'COVERED' and signal_data.get('existing_orders'):
+            orders = signal_data['existing_orders']
+            position_qty = signal_data['position_qty']
+            covered_qty = signal_data['covered_qty']
+            coverage_pct = signal_data['coverage_pct']
+            current_price = signal_data['current_price']
+            lines.append("")
+            lines.append(f"Coverage Breakdown:")
+            lines.append(f"  Position:  {position_qty:,.4f} units @ ${current_price:,.2f}")
+            lines.append(f"  Threshold: {self.coverage_threshold * 100:.0f}% "
+                         f"({self.coverage_threshold * position_qty:,.4f} units needed)")
+            lines.append(f"  Covered:   {covered_qty:,.4f} units = {coverage_pct:.1f}%")
+            lines.append("")
+            lines.append(f"  Open Sell Orders ({len(orders)}):")
+            for i, o in enumerate(orders, 1):
+                lines.append(f"    {i}. {o.size:,.4f} units @ ${o.price:,.2f} "
+                             f"({o.order_type.value})")
         if signal_data['order']:
             order = signal_data['order']
             lines.append("")
