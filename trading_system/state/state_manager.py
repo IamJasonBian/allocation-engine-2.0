@@ -166,6 +166,37 @@ class StateManager:
         }
         self.state['last_updated'] = datetime.now().isoformat()
 
+    def load_broker_sell_orders(self, symbol: str, broker_orders: List[Dict]):
+        """Convert raw broker sell orders into Order entities on the symbol's Ticker.
+
+        Filters to SELL orders for the given symbol, maps broker order_type
+        strings to OrderType enums, and uses limit_price (or stop_price) as
+        Order.price. Replaces any existing orders on the Ticker.
+        """
+        self.get_symbol_state(symbol)
+
+        ORDER_TYPE_MAP = {
+            'Limit': OrderType.LIMIT,
+            'Market': OrderType.MARKET,
+            'Stop Loss': OrderType.STOP,
+            'Stop Limit': OrderType.STOP_LIMIT,
+        }
+
+        orders = []
+        for raw in broker_orders:
+            if raw.get('symbol') != symbol:
+                continue
+            if raw.get('side') != 'SELL':
+                continue
+
+            order_type = ORDER_TYPE_MAP.get(raw.get('order_type'), OrderType.MARKET)
+            price = raw.get('limit_price') or raw.get('stop_price') or 0
+            size = float(raw.get('quantity', 0))
+
+            orders.append(Order(size=size, price=price, order_type=order_type))
+
+        self.tickers[symbol] = Ticker(orders)
+
     def get_all_symbols(self) -> List[str]:
         """Get list of all tracked symbols"""
         return list(self.state['symbols'].keys())

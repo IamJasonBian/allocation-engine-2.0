@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from trading_system.data_providers.twelve_data import TwelveDataProvider  # noqa: E402
 from trading_system.utils.metrics import MetricsCalculator  # noqa: E402
 from trading_system.strategies.breakout_strategy import BreakoutStrategy  # noqa: E402
+from trading_system.strategies.momentum_dca_strategy import MomentumDcaStrategy  # noqa: E402
 from trading_system.state.state_manager import StateManager  # noqa: E402
 from utils.safe_cash_bot import SafeCashBot  # noqa: E402
 
@@ -23,7 +24,8 @@ class TradingSystem:
     """Main trading system orchestrator"""
 
     def __init__(self, twelve_data_api_key: str, symbols: List[str],
-                 position_size_pct: float = 0.25, dry_run: bool = True):
+                 position_size_pct: float = 0.25, dry_run: bool = True,
+                 strategy_name: str = 'momentum_dca'):
         """
         Initialize trading system
 
@@ -32,20 +34,27 @@ class TradingSystem:
             symbols: List of symbols to trade
             position_size_pct: Position size as percentage of portfolio
             dry_run: If True, simulates orders without execution
+            strategy_name: Strategy to use ('momentum_dca' or 'breakout')
         """
         self.symbols = symbols
         self.dry_run = dry_run
+        self.strategy_name = strategy_name
 
         # Initialize components
         self.data_provider = TwelveDataProvider(twelve_data_api_key)
         self.metrics_calculator = MetricsCalculator()
-        self.strategy = BreakoutStrategy(symbols, position_size_pct)
         self.state_manager = StateManager()
         self.trading_bot = SafeCashBot()
+
+        if strategy_name == 'momentum_dca':
+            self.strategy = MomentumDcaStrategy(symbols)
+        else:
+            self.strategy = BreakoutStrategy(symbols, position_size_pct)
 
         print(f"\n{'='*70}")
         print("TRADING SYSTEM INITIALIZED")
         print(f"{'='*70}")
+        print(f"Strategy: {strategy_name}")
         print(f"Symbols: {', '.join(symbols)}")
         print(f"Mode: {'DRY RUN (Simulation)' if dry_run else 'LIVE TRADING'}")
         print(f"Position Size: {position_size_pct * 100}% per symbol")
@@ -102,13 +111,15 @@ class TradingSystem:
 
         return metrics
 
-    def execute_strategy(self, symbol: str, metrics: Dict) -> Dict:
+    def execute_strategy(self, symbol: str, metrics: Dict,
+                         open_orders: List[Dict] = None) -> Dict:
         """
         Execute strategy for a symbol
 
         Args:
             symbol: Stock symbol
             metrics: Calculated metrics
+            open_orders: Open orders from broker (used by momentum_dca)
 
         Returns:
             Signal data
@@ -120,8 +131,13 @@ class TradingSystem:
             None
         )
 
-        # Analyze and generate signal
-        signal = self.strategy.analyze_symbol(symbol, metrics, current_position)
+        if self.strategy_name == 'momentum_dca':
+            # Load broker sell orders into the symbol's Ticker
+            self.state_manager.load_broker_sell_orders(symbol, open_orders or [])
+            ticker = self.state_manager.get_ticker(symbol)
+            signal = self.strategy.analyze_symbol(symbol, metrics, current_position, ticker)
+        else:
+            signal = self.strategy.analyze_symbol(symbol, metrics, current_position)
 
         return signal
 
@@ -145,9 +161,12 @@ class TradingSystem:
 
         if order['action'] == 'buy':
             self._execute_buy_order(symbol, order)
-
         elif order['action'] == 'sell':
             self._execute_sell_order(symbol, order)
+        elif order['action'] == 'stop_limit_sell':
+            self._execute_stop_limit_sell_order(symbol, order)
+        elif order['action'] == 'limit_sell':
+            self._execute_limit_sell_resubmit(symbol, order)
 
     def _execute_buy_order(self, symbol: str, order: Dict):
         """Execute buy order"""
@@ -230,6 +249,74 @@ class TradingSystem:
                 )
                 print(f"Order placed: {order_id}")
 
+    def _execute_stop_limit_sell_order(self, symbol: str, order: Dict):
+        """Execute stop-limit sell order for gap coverage"""
+        quantity = order['quantity']
+        stop_price = order['stop_price']
+        limit_price = order['limit_price']
+
+        order_details = {
+            'quantity': quantity,
+            'stop_price': stop_price,
+            'limit_price': limit_price,
+            'price': limit_price,
+            'trigger': 'coverage_gap',
+            'order_type': 'stop_limit'
+        }
+        self.state_manager.queue_sell_order(symbol, order_details)
+
+        print(f"\n{'='*70}")
+        print(f"EXECUTING STOP-LIMIT SELL: {symbol}")
+        print(f"{'='*70}")
+        print(f"Quantity: {quantity}")
+        print(f"Stop Price: ${stop_price:,.2f}")
+        print(f"Limit Price: ${limit_price:,.2f}")
+        print(f"Mode: {'DRY RUN' if self.dry_run else 'LIVE'}")
+        print(f"{'='*70}\n")
+
+        if not self.dry_run:
+            result = self.trading_bot.place_stop_limit_sell_order(
+                symbol, quantity, stop_price, limit_price, dry_run=False
+            )
+            if result:
+                order_id = result.get('id', 'unknown')
+                self.state_manager.update_order_status(
+                    symbol, 'sell', 'placed', order_id
+                )
+                print(f"Order placed: {order_id}")
+
+    def _execute_limit_sell_resubmit(self, symbol: str, order: Dict):
+        """Execute limit sell resubmit at original order price"""
+        quantity = order['quantity']
+        price = order['price']
+
+        order_details = {
+            'quantity': quantity,
+            'price': price,
+            'trigger': 'resubmit',
+            'order_type': 'limit'
+        }
+        self.state_manager.queue_sell_order(symbol, order_details)
+
+        print(f"\n{'='*70}")
+        print(f"RESUBMITTING LIMIT SELL: {symbol}")
+        print(f"{'='*70}")
+        print(f"Quantity: {quantity}")
+        print(f"Limit Price: ${price:,.2f} (original order price)")
+        print(f"Mode: {'DRY RUN' if self.dry_run else 'LIVE'}")
+        print(f"{'='*70}\n")
+
+        if not self.dry_run:
+            result = self.trading_bot.place_sell_order(
+                symbol, quantity, price, dry_run=False
+            )
+            if result:
+                order_id = result.get('id', 'unknown')
+                self.state_manager.update_order_status(
+                    symbol, 'sell', 'placed', order_id
+                )
+                print(f"Order placed: {order_id}")
+
     def print_portfolio_allocation(self):
         """Print current portfolio allocation summary"""
         print(f"\n{'='*70}")
@@ -293,6 +380,11 @@ class TradingSystem:
         # Print initial portfolio allocation
         self.print_portfolio_allocation()
 
+        # Fetch open orders once (used by momentum_dca)
+        open_orders = []
+        if self.strategy_name == 'momentum_dca':
+            open_orders = self.trading_bot.get_open_orders()
+
         for symbol in self.symbols:
             print(f"\n{'#'*70}")
             print(f"Processing {symbol}")
@@ -307,7 +399,7 @@ class TradingSystem:
                 print(self.metrics_calculator.format_metrics(symbol, metrics))
 
                 # 3. Execute strategy
-                signal = self.execute_strategy(symbol, metrics)
+                signal = self.execute_strategy(symbol, metrics, open_orders)
 
                 # 4. Process signal
                 self.process_signal(symbol, signal)
@@ -359,7 +451,7 @@ def main():
     load_dotenv()
 
     # Parse arguments
-    parser = argparse.ArgumentParser(description='30-Day Breakout Trading System')
+    parser = argparse.ArgumentParser(description='Trading System')
     parser.add_argument(
         '--live',
         action='store_true',
@@ -375,6 +467,14 @@ def main():
         type=int,
         default=5,
         help='Minutes between runs in continuous mode (default: 5)'
+    )
+
+    parser.add_argument(
+        '--strategy',
+        type=str,
+        choices=['momentum_dca', 'breakout'],
+        default='momentum_dca',
+        help='Trading strategy to use (default: momentum_dca)'
     )
 
     args = parser.parse_args()
@@ -404,7 +504,8 @@ def main():
         twelve_data_api_key=api_key,
         symbols=symbols,
         position_size_pct=0.25,
-        dry_run=not args.live
+        dry_run=not args.live,
+        strategy_name=args.strategy
     )
 
     # Run system
