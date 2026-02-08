@@ -40,7 +40,7 @@ class TradingSystem:
         self.data_provider = TwelveDataProvider(twelve_data_api_key)
         self.metrics_calculator = MetricsCalculator()
         self.strategy = BreakoutStrategy(symbols, position_size_pct)
-        self.state_manager = StateManager('trading_state.json')
+        self.state_manager = StateManager()
         self.trading_bot = SafeCashBot()
 
         print(f"\n{'='*70}")

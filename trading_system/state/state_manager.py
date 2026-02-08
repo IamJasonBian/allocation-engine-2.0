@@ -2,10 +2,9 @@
 State Management Module
 Stores and manages metrics and order state for each symbol.
 Uses entity classes (Order, Ticker, OrderType) for order management.
+State is held in-memory only (no file persistence).
 """
 
-import json
-import os
 from datetime import datetime
 from typing import Dict, List, Optional
 
@@ -15,76 +14,14 @@ from trading_system.entities.Ticker import Ticker
 
 
 class StateManager:
-    """Manages persistent state for trading system"""
+    """Manages in-memory state for trading system"""
 
-    def __init__(self, state_file: str = 'trading_state.json'):
-        self.state_file = state_file
-        self.state = self._load_state()
-        self.tickers: Dict[str, Ticker] = {}
-        self._init_tickers()
-
-    def _init_tickers(self):
-        """Initialize a Ticker for each symbol already in persisted state"""
-        for symbol in self.state.get('symbols', {}):
-            orders = self._load_orders_for_symbol(symbol)
-            self.tickers[symbol] = Ticker(orders)
-
-    def _load_orders_for_symbol(self, symbol: str) -> List[Order]:
-        """Reconstruct Order objects from persisted symbol state"""
-        symbol_data = self.state['symbols'].get(symbol, {})
-        orders_data = symbol_data.get('orders', {})
-        orders = []
-
-        for key in ['active_buy', 'active_sell']:
-            raw = orders_data.get(key)
-            if raw and raw.get('details'):
-                details = raw['details']
-                order_type_str = details.get('order_type', 'market')
-                try:
-                    order_type = OrderType(order_type_str)
-                except ValueError:
-                    order_type = OrderType.MARKET
-
-                order = Order(
-                    size=details.get('quantity', 0),
-                    price=details.get('price', 0),
-                    order_type=order_type,
-                )
-                # Mark cancelled/filled orders as invalid
-                if raw.get('status') in ['filled', 'cancelled']:
-                    order.mark_invalid()
-
-                orders.append(order)
-
-        return orders
-
-    def _load_state(self) -> Dict:
-        """Load state from file"""
-        if os.path.exists(self.state_file):
-            try:
-                with open(self.state_file, 'r') as f:
-                    return json.load(f)
-            except Exception as e:
-                print(f"Error loading state: {e}")
-                return self._create_empty_state()
-        else:
-            return self._create_empty_state()
-
-    def _create_empty_state(self) -> Dict:
-        """Create empty state structure"""
-        return {
+    def __init__(self):
+        self.state: Dict = {
             'symbols': {},
             'last_updated': None
         }
-
-    def _save_state(self):
-        """Save state to file"""
-        try:
-            self.state['last_updated'] = datetime.now().isoformat()
-            with open(self.state_file, 'w') as f:
-                json.dump(self.state, f, indent=2)
-        except Exception as e:
-            print(f"Error saving state: {e}")
+        self.tickers: Dict[str, Ticker] = {}
 
     def get_symbol_state(self, symbol: str) -> Dict:
         """Get state for a specific symbol, initializing a new Ticker if needed"""
@@ -116,7 +53,7 @@ class StateManager:
         symbol_state = self.get_symbol_state(symbol)
         symbol_state['metrics'] = metrics
         symbol_state['last_updated'] = datetime.now().isoformat()
-        self._save_state()
+        self.state['last_updated'] = datetime.now().isoformat()
 
     def get_metrics(self, symbol: str) -> Dict:
         """Get current metrics for a symbol"""
@@ -149,7 +86,7 @@ class StateManager:
 
         symbol_state['orders']['active_buy'] = order_record
         symbol_state['orders']['order_history'].append(order_record.copy())
-        self._save_state()
+        self.state['last_updated'] = datetime.now().isoformat()
 
     def queue_sell_order(self, symbol: str, order_details: Dict):
         """Queue a sell order using Order and Ticker entities"""
@@ -178,7 +115,7 @@ class StateManager:
 
         symbol_state['orders']['active_sell'] = order_record
         symbol_state['orders']['order_history'].append(order_record.copy())
-        self._save_state()
+        self.state['last_updated'] = datetime.now().isoformat()
 
     def update_order_status(self, symbol: str, order_type: str, status: str,
                             order_id: Optional[str] = None):
@@ -196,15 +133,12 @@ class StateManager:
 
             if status in ['filled', 'cancelled']:
                 symbol_state['orders'][order_key] = None
-                # Mark matching orders invalid on the Ticker
                 for order in ticker.orders:
-                    if not order.is_valid:
-                        continue
-                    details = symbol_state['orders'].get(order_key)
-                    order.mark_invalid()
-                    break
+                    if order.is_valid:
+                        order.mark_invalid()
+                        break
 
-            self._save_state()
+            self.state['last_updated'] = datetime.now().isoformat()
 
     def get_active_orders(self, symbol: str) -> Dict:
         """Get active orders for a symbol, using the Ticker for valid order tracking"""
@@ -230,7 +164,7 @@ class StateManager:
             'signal': signal,
             'timestamp': datetime.now().isoformat()
         }
-        self._save_state()
+        self.state['last_updated'] = datetime.now().isoformat()
 
     def get_all_symbols(self) -> List[str]:
         """Get list of all tracked symbols"""
@@ -276,73 +210,3 @@ class StateManager:
                 print(f"  Last Signal: {last_signal['signal']} at {last_signal['timestamp']}")
 
         print(f"{'='*70}\n")
-
-
-def test_state_manager():
-    """Test state manager with entity classes"""
-    import tempfile
-
-    with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.json') as f:
-        temp_file = f.name
-
-    try:
-        print("Testing State Manager")
-        print("=" * 70)
-
-        manager = StateManager(temp_file)
-
-        # Verify Ticker is initialized for new symbol
-        print("\n1. Updating metrics for BTC:")
-        manager.update_metrics('BTC', {
-            'current_price': 42000.00,
-            'intraday_high': 43000.00,
-            'intraday_low': 41000.00,
-            '30d_high': 45000.00,
-            '30d_low': 38000.00
-        })
-
-        ticker = manager.get_ticker('BTC')
-        print(f"   BTC Ticker initialized: {ticker is not None}")
-        print(f"   BTC Ticker orders: {len(ticker.orders)}")
-
-        # Queue buy order - creates Order entity on the Ticker
-        print("2. Queuing buy order for BTC:")
-        manager.queue_buy_order('BTC', {
-            'quantity': 0.1,
-            'price': 38000.00,
-            'trigger': '30d_low',
-            'order_type': 'market'
-        })
-        print(f"   Ticker orders after buy: {len(ticker.orders)}")
-        print(f"   Order type: {ticker.orders[-1].order_type}")
-
-        # Queue sell order - creates another Order entity
-        print("3. Queuing sell order for BTC:")
-        manager.queue_sell_order('BTC', {
-            'quantity': 0.1,
-            'price': 45000.00,
-            'trigger': '30d_high',
-            'order_type': 'limit'
-        })
-        print(f"   Ticker orders after sell: {len(ticker.orders)}")
-        print(f"   Valid orders: {len(ticker.get_valid_orders())}")
-
-        manager.set_last_signal('BTC', 'HOLD')
-        manager.print_state_summary()
-
-        # Update order status
-        print("4. Updating order status:")
-        manager.update_order_status('BTC', 'buy', 'placed', order_id='ORDER123')
-        manager.print_state_summary()
-
-        # Verify active orders include Ticker data
-        active = manager.get_active_orders('BTC')
-        print(f"5. Active orders valid_orders count: {len(active['valid_orders'])}")
-
-    finally:
-        if os.path.exists(temp_file):
-            os.remove(temp_file)
-
-
-if __name__ == "__main__":
-    test_state_manager()
