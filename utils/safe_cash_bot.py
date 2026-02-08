@@ -488,6 +488,73 @@ class SafeCashBot:
             print(f"{'='*70}\n")
             return None
 
+    def place_stop_limit_sell_order(self, symbol, quantity, stop_price, limit_price, dry_run=True):
+        """
+        Place a stop-limit sell order
+
+        Args:
+            symbol: Stock ticker
+            quantity: Number of shares
+            stop_price: Price that triggers the order
+            limit_price: Minimum price to accept once triggered
+            dry_run: If True, simulates order without execution
+        """
+        print(f"\n{'='*70}")
+        print(f"STOP-LIMIT SELL ORDER - {'DRY RUN' if dry_run else 'LIVE'}")
+        print(f"{'='*70}")
+
+        positions = self.get_positions()
+        position = next((p for p in positions if p['symbol'] == symbol), None)
+
+        print(f"   Account: {self.account_number}")
+        print(f"   Symbol: {symbol}")
+        print(f"   Quantity: {quantity}")
+        print(f"   Stop Price: ${stop_price:.2f}")
+        print(f"   Limit Price: ${limit_price:.2f}")
+        print(f"   Total Value: ${quantity * limit_price:.2f}")
+
+        if not position:
+            print(f"   Validation: No position in {symbol}")
+            print(f"\nOrder rejected: You don't own {symbol}")
+            print(f"{'='*70}\n")
+            return None
+
+        if quantity > position['quantity']:
+            print(f"   Validation: Insufficient shares (have {position['quantity']})")
+            print(f"\nOrder rejected: Can't sell {quantity} shares, only own {position['quantity']}")
+            print(f"{'='*70}\n")
+            return None
+
+        print("   Validation: Valid stop-limit sell order")
+
+        if dry_run:
+            print("\n   DRY RUN MODE - Order not executed")
+            print(f"{'='*70}\n")
+            return None
+
+        try:
+            print("\n   Executing order...")
+            order = r.orders.order_sell_stop_limit(
+                symbol=symbol,
+                quantity=quantity,
+                limitPrice=limit_price,
+                stopPrice=stop_price,
+                account_number=self.account_number,
+                timeInForce='gtc'
+            )
+
+            print("   Order placed successfully!")
+            print(f"   Order ID: {order.get('id', 'N/A')}")
+            print(f"   State: {order.get('state', 'N/A')}")
+            print(f"{'='*70}\n")
+
+            return order
+
+        except Exception as e:
+            print(f"   Order failed: {e}")
+            print(f"{'='*70}\n")
+            return None
+
     def get_quote(self, symbol):
         """Get real-time quote"""
         try:
