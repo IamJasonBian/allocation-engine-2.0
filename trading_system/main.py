@@ -476,6 +476,13 @@ def main():
         default='momentum_dca',
         help='Trading strategy to use (default: momentum_dca)'
     )
+    parser.add_argument(
+        '--ticker',
+        type=str,
+        nargs='+',
+        default=None,
+        help='Symbols to trade (default: BTC SPY QQQ AMZN). Example: --ticker BTC SPY'
+    )
 
     args = parser.parse_args()
 
@@ -483,7 +490,7 @@ def main():
     api_key = os.getenv('TWELVE_DATA_API_KEY', 'f2c57fbb0a794024b0defff74af45686')
 
     # Define symbols
-    symbols = ['BTC', 'SPY', 'QQQ', 'AMZN']
+    symbols = [s.upper() for s in args.ticker] if args.ticker else ['BTC', 'SPY', 'QQQ', 'AMZN']
 
     # Show warning for live trading
     if args.live:
