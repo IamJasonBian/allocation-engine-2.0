@@ -25,7 +25,8 @@ class TradingSystem:
 
     def __init__(self, twelve_data_api_key: str, symbols: List[str],
                  position_size_pct: float = 0.25, dry_run: bool = True,
-                 strategy_name: str = 'momentum_dca'):
+                 strategy_name: str = 'momentum_dca',
+                 verbose: bool = False):
         """
         Initialize trading system
 
@@ -35,10 +36,12 @@ class TradingSystem:
             position_size_pct: Position size as percentage of portfolio
             dry_run: If True, simulates orders without execution
             strategy_name: Strategy to use ('momentum_dca' or 'breakout')
+            verbose: If True, show detailed output (metrics, portfolio, etc.)
         """
         self.symbols = symbols
         self.dry_run = dry_run
         self.strategy_name = strategy_name
+        self.verbose = verbose
 
         # Initialize components
         self.data_provider = TwelveDataProvider(twelve_data_api_key)
@@ -51,14 +54,15 @@ class TradingSystem:
         else:
             self.strategy = BreakoutStrategy(symbols, position_size_pct)
 
-        print(f"\n{'='*70}")
-        print("TRADING SYSTEM INITIALIZED")
-        print(f"{'='*70}")
-        print(f"Strategy: {strategy_name}")
-        print(f"Symbols: {', '.join(symbols)}")
-        print(f"Mode: {'DRY RUN (Simulation)' if dry_run else 'LIVE TRADING'}")
-        print(f"Position Size: {position_size_pct * 100}% per symbol")
-        print(f"{'='*70}\n")
+        if self.verbose:
+            print(f"\n{'='*70}")
+            print("TRADING SYSTEM INITIALIZED")
+            print(f"{'='*70}")
+            print(f"Strategy: {strategy_name}")
+            print(f"Symbols: {', '.join(symbols)}")
+            print(f"Mode: {'DRY RUN (Simulation)' if dry_run else 'LIVE TRADING'}")
+            print(f"Position Size: {position_size_pct * 100}% per symbol")
+            print(f"{'='*70}\n")
 
     def fetch_market_data(self, symbol: str) -> Dict:
         """
@@ -70,7 +74,8 @@ class TradingSystem:
         Returns:
             Dictionary with intraday and daily data
         """
-        print(f"Fetching market data for {symbol}...")
+        if self.verbose:
+            print(f"Fetching market data for {symbol}...")
 
         # Fetch intraday data (5min intervals, last day)
         intraday_data = self.data_provider.get_intraday_data(
@@ -83,7 +88,8 @@ class TradingSystem:
         )
 
         if not intraday_data or not daily_data:
-            print(f"  Warning: Incomplete data for {symbol}")
+            if self.verbose:
+                print(f"  Warning: Incomplete data for {symbol}")
 
         return {
             'intraday': intraday_data or [],
@@ -149,7 +155,18 @@ class TradingSystem:
             symbol: Stock symbol
             signal: Signal data from strategy
         """
-        print(self.strategy.format_signal(symbol, signal))
+        if self.verbose:
+            print(self.strategy.format_signal(symbol, signal))
+        else:
+            order = signal.get('order')
+            if order and order.get('action') == 'stop_limit_sell':
+                print(f"  {symbol}: {signal['signal']} — stop-limit sell "
+                      f"{order['quantity']} @ ${order['stop_price']:,.2f}")
+            elif order and order.get('action') == 'limit_sell':
+                print(f"  {symbol}: {signal['signal']} — limit sell "
+                      f"{order['quantity']} @ ${order['price']:,.2f}")
+            else:
+                print(f"  {symbol}: {signal['signal']}")
 
         # Store signal in state
         self.state_manager.set_last_signal(symbol, signal['signal'])
@@ -192,14 +209,15 @@ class TradingSystem:
         }
         self.state_manager.queue_buy_order(symbol, order_details)
 
-        print(f"\n{'='*70}")
-        print(f"EXECUTING BUY ORDER: {symbol}")
-        print(f"{'='*70}")
-        print(f"Quantity: {quantity}")
-        print(f"Price: ${order['current_price']:,.2f}")
-        print(f"Total: ${quantity * order['current_price']:,.2f}")
-        print(f"Mode: {'DRY RUN' if self.dry_run else 'LIVE'}")
-        print(f"{'='*70}\n")
+        if self.verbose:
+            print(f"\n{'='*70}")
+            print(f"EXECUTING BUY ORDER: {symbol}")
+            print(f"{'='*70}")
+            print(f"Quantity: {quantity}")
+            print(f"Price: ${order['current_price']:,.2f}")
+            print(f"Total: ${quantity * order['current_price']:,.2f}")
+            print(f"Mode: {'DRY RUN' if self.dry_run else 'LIVE'}")
+            print(f"{'='*70}\n")
 
         if not self.dry_run:
             # Execute real order
@@ -227,14 +245,15 @@ class TradingSystem:
         }
         self.state_manager.queue_sell_order(symbol, order_details)
 
-        print(f"\n{'='*70}")
-        print(f"EXECUTING SELL ORDER: {symbol}")
-        print(f"{'='*70}")
-        print(f"Quantity: {quantity}")
-        print(f"Price: ${order['current_price']:,.2f}")
-        print(f"Total: ${quantity * order['current_price']:,.2f}")
-        print(f"Mode: {'DRY RUN' if self.dry_run else 'LIVE'}")
-        print(f"{'='*70}\n")
+        if self.verbose:
+            print(f"\n{'='*70}")
+            print(f"EXECUTING SELL ORDER: {symbol}")
+            print(f"{'='*70}")
+            print(f"Quantity: {quantity}")
+            print(f"Price: ${order['current_price']:,.2f}")
+            print(f"Total: ${quantity * order['current_price']:,.2f}")
+            print(f"Mode: {'DRY RUN' if self.dry_run else 'LIVE'}")
+            print(f"{'='*70}\n")
 
         if not self.dry_run:
             # Execute real order
@@ -265,14 +284,15 @@ class TradingSystem:
         }
         self.state_manager.queue_sell_order(symbol, order_details)
 
-        print(f"\n{'='*70}")
-        print(f"EXECUTING STOP-LIMIT SELL: {symbol}")
-        print(f"{'='*70}")
-        print(f"Quantity: {quantity}")
-        print(f"Stop Price: ${stop_price:,.2f}")
-        print(f"Limit Price: ${limit_price:,.2f}")
-        print(f"Mode: {'DRY RUN' if self.dry_run else 'LIVE'}")
-        print(f"{'='*70}\n")
+        if self.verbose:
+            print(f"\n{'='*70}")
+            print(f"EXECUTING STOP-LIMIT SELL: {symbol}")
+            print(f"{'='*70}")
+            print(f"Quantity: {quantity}")
+            print(f"Stop Price: ${stop_price:,.2f}")
+            print(f"Limit Price: ${limit_price:,.2f}")
+            print(f"Mode: {'DRY RUN' if self.dry_run else 'LIVE'}")
+            print(f"{'='*70}\n")
 
         if not self.dry_run:
             result = self.trading_bot.place_stop_limit_sell_order(
@@ -298,13 +318,14 @@ class TradingSystem:
         }
         self.state_manager.queue_sell_order(symbol, order_details)
 
-        print(f"\n{'='*70}")
-        print(f"RESUBMITTING LIMIT SELL: {symbol}")
-        print(f"{'='*70}")
-        print(f"Quantity: {quantity}")
-        print(f"Limit Price: ${price:,.2f} (original order price)")
-        print(f"Mode: {'DRY RUN' if self.dry_run else 'LIVE'}")
-        print(f"{'='*70}\n")
+        if self.verbose:
+            print(f"\n{'='*70}")
+            print(f"RESUBMITTING LIMIT SELL: {symbol}")
+            print(f"{'='*70}")
+            print(f"Quantity: {quantity}")
+            print(f"Limit Price: ${price:,.2f} (original order price)")
+            print(f"Mode: {'DRY RUN' if self.dry_run else 'LIVE'}")
+            print(f"{'='*70}\n")
 
         if not self.dry_run:
             result = self.trading_bot.place_sell_order(
@@ -370,15 +391,16 @@ class TradingSystem:
 
     def run_once(self):
         """Run trading system once for all symbols"""
-        print(f"\n{'='*70}")
-        print("RUNNING TRADING SYSTEM")
-        print(f"{'='*70}")
-        print(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        print(f"Symbols: {', '.join(self.symbols)}")
-        print(f"{'='*70}\n")
+        if self.verbose:
+            print(f"\n{'='*70}")
+            print("RUNNING TRADING SYSTEM")
+            print(f"{'='*70}")
+            print(f"Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+            print(f"Symbols: {', '.join(self.symbols)}")
+            print(f"{'='*70}\n")
 
-        # Print initial portfolio allocation
-        self.print_portfolio_allocation()
+            # Print initial portfolio allocation
+            self.print_portfolio_allocation()
 
         # Fetch open orders once (used by momentum_dca)
         open_orders = []
@@ -386,9 +408,10 @@ class TradingSystem:
             open_orders = self.trading_bot.get_open_orders()
 
         for symbol in self.symbols:
-            print(f"\n{'#'*70}")
-            print(f"Processing {symbol}")
-            print(f"{'#'*70}\n")
+            if self.verbose:
+                print(f"\n{'#'*70}")
+                print(f"Processing {symbol}")
+                print(f"{'#'*70}\n")
 
             try:
                 # 1. Fetch market data
@@ -396,7 +419,8 @@ class TradingSystem:
 
                 # 2. Calculate metrics
                 metrics = self.calculate_metrics(symbol, market_data)
-                print(self.metrics_calculator.format_metrics(symbol, metrics))
+                if self.verbose:
+                    print(self.metrics_calculator.format_metrics(symbol, metrics))
 
                 # 3. Execute strategy
                 signal = self.execute_strategy(symbol, metrics, open_orders)
@@ -411,15 +435,16 @@ class TradingSystem:
             # Rate limiting between symbols
             time.sleep(1)
 
-        # Show summary
-        print(f"\n{'='*70}")
-        print("RUN COMPLETE")
-        print(f"{'='*70}")
-        self.state_manager.print_state_summary()
+        if self.verbose:
+            # Show summary
+            print(f"\n{'='*70}")
+            print("RUN COMPLETE")
+            print(f"{'='*70}")
+            self.state_manager.print_state_summary()
 
-        # Print final portfolio allocation
-        print("\nFinal Portfolio Allocation:")
-        self.print_portfolio_allocation()
+            # Print final portfolio allocation
+            print("\nFinal Portfolio Allocation:")
+            self.print_portfolio_allocation()
 
     def run_continuous(self, interval_minutes: int = 5):
         """
@@ -483,6 +508,11 @@ def main():
         default=None,
         help='Symbols to trade (default: BTC SPY QQQ AMZN). Example: --ticker BTC SPY'
     )
+    parser.add_argument(
+        '-v', '--verbose',
+        action='store_true',
+        help='Show detailed output (metrics, portfolio allocation, etc.)'
+    )
 
     args = parser.parse_args()
 
@@ -512,7 +542,8 @@ def main():
         symbols=symbols,
         position_size_pct=0.25,
         dry_run=not args.live,
-        strategy_name=args.strategy
+        strategy_name=args.strategy,
+        verbose=args.verbose
     )
 
     # Run system
@@ -521,24 +552,25 @@ def main():
     else:
         system.run_once()
 
-    # Show usage
-    print("\n" + "="*70)
-    print("USAGE")
-    print("="*70)
-    if args.live:
-        print("LIVE mode - Real orders were placed")
-        print("\nTo run in DRY RUN mode:")
-        print("  python -m trading_system.main")
-    else:
-        print("DRY RUN mode - No real orders were placed")
-        print("\nTo execute LIVE trades:")
-        print("  python -m trading_system.main --live")
+    if args.verbose:
+        # Show usage
+        print("\n" + "="*70)
+        print("USAGE")
+        print("="*70)
+        if args.live:
+            print("LIVE mode - Real orders were placed")
+            print("\nTo run in DRY RUN mode:")
+            print("  python -m trading_system.main")
+        else:
+            print("DRY RUN mode - No real orders were placed")
+            print("\nTo execute LIVE trades:")
+            print("  python -m trading_system.main --live")
 
-    print("\nOther options:")
-    print("  --continuous           # Run continuously")
-    print("  --interval 10          # Check every 10 minutes")
-    print("  --help                 # Show all options")
-    print("="*70 + "\n")
+        print("\nOther options:")
+        print("  --continuous           # Run continuously")
+        print("  --interval 10          # Check every 10 minutes")
+        print("  --help                 # Show all options")
+        print("="*70 + "\n")
 
 
 if __name__ == "__main__":
