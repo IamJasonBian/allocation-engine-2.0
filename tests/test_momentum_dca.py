@@ -277,7 +277,7 @@ class TestPairedBuyOrder:
         stop_price = signal['order']['stop_price']
         buy_price = signal['paired_buy']['price']
         assert buy_price < stop_price
-        expected = round(stop_price * (1 - 0.002), 2)
+        expected = round(stop_price - 0.20, 2)
         assert buy_price == expected
 
     def test_paired_buy_same_quantity(self):
@@ -308,11 +308,11 @@ class TestPairedBuyOrder:
             'order': {'action': 'stop_limit_sell', 'symbol': 'SPY', 'quantity': 20,
                       'stop_price': 443.25, 'limit_price': 443.25, 'current_price': 450.0},
             'paired_buy': {'action': 'limit_buy', 'symbol': 'SPY', 'quantity': 20,
-                           'price': 442.36, 'current_price': 450.0},
+                           'price': 443.05, 'current_price': 450.0},
         }
         output = strategy.format_signal('SPY', signal)
         assert 'Paired Buy' in output
-        assert '$442.36' in output
+        assert '$443.05' in output
 
 
 class TestHedgeSymbolMap:

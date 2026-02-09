@@ -29,14 +29,14 @@ class MomentumDcaStrategy:
     def __init__(self, symbols: List[str], coverage_threshold: float = 0.20,
                  stop_offset_pct: float = 0.015, proximity_pct: float = 0.0075,
                  coverage_range_pct: float = 0.08,
-                 buy_offset_pct: float = 0.002,
+                 buy_offset: float = 0.20,
                  hedge_symbol_map: Dict = None):
         self.symbols = symbols
         self.coverage_threshold = coverage_threshold
         self.stop_offset_pct = stop_offset_pct
         self.proximity_pct = proximity_pct
         self.coverage_range_pct = coverage_range_pct
-        self.buy_offset_pct = buy_offset_pct
+        self.buy_offset = buy_offset
         self.hedge_symbol_map = hedge_symbol_map if hedge_symbol_map is not None else self.DEFAULT_HEDGE_MAP
 
     def analyze_symbol(self, symbol: str, metrics: Dict,
@@ -117,7 +117,7 @@ class MomentumDcaStrategy:
 
         # Price moved too far — new stop-limit
         stop_price = round(current_price * (1 - self.stop_offset_pct), 2)
-        buy_price = round(stop_price * (1 - self.buy_offset_pct), 2)
+        buy_price = round(stop_price - self.buy_offset, 2)
 
         return {
             'signal': 'COVER_GAP',
@@ -223,6 +223,6 @@ class MomentumDcaStrategy:
             lines.append(f"  Symbol: {buy['symbol']}")
             lines.append(f"  Quantity: {buy['quantity']}")
             lines.append(f"  Limit Price: ${buy['price']:,.2f} "
-                         f"(-{self.buy_offset_pct * 100:.1f}% below stop)")
+                         f"(-${self.buy_offset:.2f} below stop)")
         lines.append(f"{'='*70}\n")
         return '\n'.join(lines)
