@@ -29,12 +29,14 @@ class MomentumDcaStrategy:
     def __init__(self, symbols: List[str], coverage_threshold: float = 0.20,
                  stop_offset_pct: float = 0.015, proximity_pct: float = 0.0075,
                  coverage_range_pct: float = 0.08,
+                 buy_offset_pct: float = 0.002,
                  hedge_symbol_map: Dict = None):
         self.symbols = symbols
         self.coverage_threshold = coverage_threshold
         self.stop_offset_pct = stop_offset_pct
         self.proximity_pct = proximity_pct
         self.coverage_range_pct = coverage_range_pct
+        self.buy_offset_pct = buy_offset_pct
         self.hedge_symbol_map = hedge_symbol_map if hedge_symbol_map is not None else self.DEFAULT_HEDGE_MAP
 
     def analyze_symbol(self, symbol: str, metrics: Dict,
@@ -115,19 +117,28 @@ class MomentumDcaStrategy:
 
         # Price moved too far — new stop-limit
         stop_price = round(current_price * (1 - self.stop_offset_pct), 2)
+        buy_price = round(stop_price * (1 - self.buy_offset_pct), 2)
 
         return {
             'signal': 'COVER_GAP',
             'reason': (f'{symbol}: {coverage_pct:.1f}% covered, '
                        f'need {gap_qty} more shares protected. '
                        f'Placing stop-limit sell on {order_symbol} @ ${stop_price:.2f} '
-                       f'(-{self.stop_offset_pct * 100}%)'),
+                       f'(-{self.stop_offset_pct * 100}%) '
+                       f'with paired buy @ ${buy_price:.2f}'),
             'order': {
                 'action': 'stop_limit_sell',
                 'symbol': order_symbol,
                 'quantity': gap_qty,
                 'stop_price': stop_price,
                 'limit_price': stop_price,
+                'current_price': current_price,
+            },
+            'paired_buy': {
+                'action': 'limit_buy',
+                'symbol': order_symbol,
+                'quantity': gap_qty,
+                'price': buy_price,
                 'current_price': current_price,
             }
         }
@@ -204,5 +215,14 @@ class MomentumDcaStrategy:
                 lines.append(f"  Limit Price: ${order['limit_price']:,.2f}")
             elif order['action'] == 'limit_sell':
                 lines.append(f"  Limit Price: ${order['price']:,.2f}")
+        if signal_data.get('paired_buy'):
+            buy = signal_data['paired_buy']
+            lines.append("")
+            lines.append("Paired Buy Order:")
+            lines.append(f"  Action: LIMIT_BUY")
+            lines.append(f"  Symbol: {buy['symbol']}")
+            lines.append(f"  Quantity: {buy['quantity']}")
+            lines.append(f"  Limit Price: ${buy['price']:,.2f} "
+                         f"(-{self.buy_offset_pct * 100:.1f}% below stop)")
         lines.append(f"{'='*70}\n")
         return '\n'.join(lines)
