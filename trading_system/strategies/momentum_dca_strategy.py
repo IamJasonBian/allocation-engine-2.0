@@ -4,7 +4,7 @@ Ensures at least 20% of each position is covered by sell orders
 within 8% of the current price.
 If coverage is below threshold:
   - Price within 0.75% of existing order -> resubmit at original price
-  - Price moved >0.75% -> place stop-limit at -1.5% below current price
+  - Price moved >0.75% -> place stop-limit at -1.0% below current price
 
 Uses Ticker/Order entities for order tracking (no raw dicts).
 """
@@ -27,10 +27,10 @@ class MomentumDcaStrategy:
     DEFAULT_HEDGE_MAP = {}
 
     def __init__(self, symbols: List[str], coverage_threshold: float = 0.20,
-                 stop_offset_pct: float = 0.015, proximity_pct: float = 0.0075,
+                 stop_offset_pct: float = 0.01, proximity_pct: float = 0.0075,
                  coverage_range_pct: float = 0.08,
                  buy_offset: float = 0.20,
-                 lot_size: int = 150,
+                 lot_size: int = 300,
                  hedge_symbol_map: Dict = None):
         self.symbols = symbols
         self.coverage_threshold = coverage_threshold
@@ -122,6 +122,8 @@ class MomentumDcaStrategy:
         stop_price = round(current_price * (1 - self.stop_offset_pct), 2)
         buy_price = round(stop_price - self.buy_offset, 2)
 
+        target_qty = self._round_quantity(symbol, self.coverage_threshold * position_qty)
+
         return {
             'signal': 'COVER_GAP',
             'reason': (f'{symbol}: {coverage_pct:.1f}% covered, '
@@ -143,7 +145,12 @@ class MomentumDcaStrategy:
                 'quantity': gap_qty,
                 'price': buy_price,
                 'current_price': current_price,
-            }
+            },
+            'position_qty': position_qty,
+            'target_qty': target_qty,
+            'covered_qty': covered_qty,
+            'coverage_pct': coverage_pct,
+            'gap_qty': gap_qty,
         }
 
     def _find_nearest_order(self, current_price, valid_orders):
@@ -203,6 +210,17 @@ class MomentumDcaStrategy:
                     pct_away = abs(current_price - o.price) / current_price * 100
                     lines.append(f"    {i}. {o.size:,.4f} units @ ${o.price:,.2f} "
                                  f"({o.order_type.value}) [{pct_away:+.1f}%]")
+        if signal_data.get('position_qty') and signal_data['signal'] == 'COVER_GAP':
+            lines.append("")
+            lines.append("Coverage Sizing:")
+            lines.append(f"  Position:  {signal_data['position_qty']:,.0f} shares")
+            lines.append(f"  Target:    {signal_data['target_qty']:,.0f} shares "
+                         f"({self.coverage_threshold * 100:.0f}% of position)")
+            lines.append(f"  Covered:   {signal_data['covered_qty']:,.0f} shares "
+                         f"({signal_data['coverage_pct']:.1f}%)")
+            lines.append(f"  Gap:       {signal_data['gap_qty']:,.0f} shares "
+                         f"(lot cap: {self.lot_size})")
+
         if signal_data['order']:
             order = signal_data['order']
             lines.append("")

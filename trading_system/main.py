@@ -147,13 +147,14 @@ class TradingSystem:
 
         return signal
 
-    def process_signal(self, symbol: str, signal: Dict):
+    def process_signal(self, symbol: str, signal: Dict, open_orders: list = None):
         """
         Process trading signal and execute orders
 
         Args:
             symbol: Stock symbol
             signal: Signal data from strategy
+            open_orders: Current open orders from broker
         """
         print(self.strategy.format_signal(symbol, signal))
 
@@ -163,6 +164,11 @@ class TradingSystem:
         if not signal['order']:
             return
 
+        # Skip execution if 2 or more orders already on the book (max 1 buy + 1 sell)
+        if open_orders and len(open_orders) >= 2:
+            print(f"⚠️  Skipping order execution: {len(open_orders)} orders on book (max 2)")
+            return
+
         order = signal['order']
 
         if order['action'] == 'buy':
@@ -170,10 +176,26 @@ class TradingSystem:
         elif order['action'] == 'sell':
             self._execute_sell_order(symbol, order)
         elif order['action'] == 'stop_limit_sell':
-            self._execute_stop_limit_sell_order(symbol, order)
-            # Execute paired buy if present
-            if signal.get('paired_buy'):
-                self._execute_paired_limit_buy(symbol, signal['paired_buy'])
+            has_paired_buy = signal.get('paired_buy') is not None
+
+            if has_paired_buy:
+                # Default: place buy first, then sell.
+                # If first existing order is a buy, place sell first instead.
+                sell_first = False
+                if open_orders:
+                    for o in open_orders:
+                        if o['symbol'] == symbol:
+                            sell_first = o['side'] == 'BUY'
+                            break
+
+                if sell_first:
+                    self._execute_stop_limit_sell_order(symbol, order)
+                    self._execute_paired_limit_buy(symbol, signal['paired_buy'])
+                else:
+                    self._execute_paired_limit_buy(symbol, signal['paired_buy'])
+                    self._execute_stop_limit_sell_order(symbol, order)
+            else:
+                self._execute_stop_limit_sell_order(symbol, order)
         elif order['action'] == 'limit_sell':
             self._execute_limit_sell_resubmit(symbol, order)
 
@@ -218,11 +240,12 @@ class TradingSystem:
             )
 
             if result:
-                order_id = result.get('id', 'unknown')
-                self.state_manager.update_order_status(
-                    symbol, 'buy', 'placed', order_id
-                )
-                print(f"Order placed: {order_id}")
+                order_id = result.get('id') if isinstance(result, dict) else None
+                if order_id:
+                    self.state_manager.update_order_status(
+                        symbol, 'buy', 'placed', order_id
+                    )
+                    print(f"Order placed: {order_id}")
 
     def _execute_sell_order(self, symbol: str, order: Dict):
         """Execute sell order"""
@@ -291,11 +314,12 @@ class TradingSystem:
                 symbol, quantity, stop_price, limit_price, dry_run=False
             )
             if result:
-                order_id = result.get('id', 'unknown')
-                self.state_manager.update_order_status(
-                    symbol, 'sell', 'placed', order_id
-                )
-                print(f"Order placed: {order_id}")
+                order_id = result.get('id') if isinstance(result, dict) else None
+                if order_id:
+                    self.state_manager.update_order_status(
+                        symbol, 'sell', 'placed', order_id
+                    )
+                    print(f"Order placed: {order_id}")
 
     def _execute_limit_sell_resubmit(self, symbol: str, order: Dict):
         """Execute limit sell resubmit at original order price"""
@@ -358,11 +382,12 @@ class TradingSystem:
                 order_symbol, quantity, price, dry_run=False
             )
             if result:
-                order_id = result.get('id', 'unknown')
-                self.state_manager.update_order_status(
-                    order_symbol, 'buy', 'placed', order_id
-                )
-                print(f"Paired buy placed: {order_id}")
+                order_id = result.get('id') if isinstance(result, dict) else None
+                if order_id:
+                    self.state_manager.update_order_status(
+                        order_symbol, 'buy', 'placed', order_id
+                    )
+                    print(f"Paired buy placed: {order_id}")
 
     def print_portfolio_allocation(self):
         """Print current portfolio allocation summary"""
@@ -433,6 +458,35 @@ class TradingSystem:
         if self.strategy_name == 'momentum_dca':
             open_orders = self.trading_bot.get_open_orders()
 
+        # Always print order book in live mode
+        if not self.dry_run and open_orders:
+            print(f"\n📋 Order Book: {len(open_orders)} open order(s)")
+            buy_orders = [o for o in open_orders if o['side'] == 'BUY']
+            sell_orders = [o for o in open_orders if o['side'] == 'SELL']
+            if buy_orders:
+                print("\n   🟢 BUY ORDERS:")
+                for order in buy_orders:
+                    print(f"\n      {order['symbol']} - {order['order_type']}")
+                    print(f"         Quantity: {order['quantity']:.0f} shares")
+                    if order['limit_price']:
+                        print(f"         Limit Price: ${order['limit_price']:.2f}")
+                    if order['stop_price']:
+                        print(f"         Stop Price: ${order['stop_price']:.2f}")
+                    print(f"         Status: {order['state']}")
+                    print(f"         Created: {order['created_at']}")
+            if sell_orders:
+                print("\n   🔴 SELL ORDERS:")
+                for order in sell_orders:
+                    print(f"\n      {order['symbol']} - {order['order_type']}")
+                    print(f"         Quantity: {order['quantity']:.0f} shares")
+                    if order['limit_price']:
+                        print(f"         Limit Price: ${order['limit_price']:.2f}")
+                    if order['stop_price']:
+                        print(f"         Stop Price: ${order['stop_price']:.2f}")
+                    print(f"         Status: {order['state']}")
+                    print(f"         Created: {order['created_at']}")
+            print()
+
         for symbol in self.symbols:
             if self.verbose:
                 print(f"\n{'#'*70}")
@@ -452,7 +506,7 @@ class TradingSystem:
                 signal = self.execute_strategy(symbol, metrics, open_orders)
 
                 # 4. Process signal
-                self.process_signal(symbol, signal)
+                self.process_signal(symbol, signal, open_orders)
 
             except Exception as e:
                 print(f"Error processing {symbol}: {e}")
