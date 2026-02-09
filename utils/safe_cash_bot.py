@@ -346,14 +346,14 @@ class SafeCashBot:
         if not cash_info:
             return False, "Cannot retrieve cash balance"
 
-        available_cash = cash_info['tradeable_cash']
+        buying_power = cash_info['buying_power']
         total_cost = quantity * price
 
         # Add 1% buffer for price fluctuations
         total_cost_with_buffer = total_cost * 1.01
 
-        if total_cost_with_buffer > available_cash:
-            return False, f"Insufficient cash: need ${total_cost_with_buffer:,.2f}, have ${available_cash:,.2f}"
+        if total_cost_with_buffer > buying_power:
+            return False, f"Insufficient buying power: need ${total_cost_with_buffer:,.2f}, have ${buying_power:,.2f}"
 
         # Check if symbol is valid
         try:
