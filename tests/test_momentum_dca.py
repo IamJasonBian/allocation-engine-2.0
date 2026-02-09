@@ -259,6 +259,62 @@ class TestEdgeCases:
         assert 'COVERED' in output
 
 
+class TestPairedBuyOrder:
+    """COVER_GAP should include a paired limit buy 0.2% below stop price"""
+
+    def test_cover_gap_includes_paired_buy(self):
+        strategy = _make_strategy()
+        position = _make_position('SPY', 100, 450.0)
+        signal = strategy.analyze_symbol('SPY', {'current_price': 450.0}, position, _make_ticker())
+        assert signal['signal'] == 'COVER_GAP'
+        assert signal['paired_buy'] is not None
+        assert signal['paired_buy']['action'] == 'limit_buy'
+
+    def test_paired_buy_price_below_stop(self):
+        strategy = _make_strategy()
+        position = _make_position('SPY', 100, 450.0)
+        signal = strategy.analyze_symbol('SPY', {'current_price': 450.0}, position, _make_ticker())
+        stop_price = signal['order']['stop_price']
+        buy_price = signal['paired_buy']['price']
+        assert buy_price < stop_price
+        expected = round(stop_price - 0.20, 2)
+        assert buy_price == expected
+
+    def test_paired_buy_same_quantity(self):
+        strategy = _make_strategy()
+        position = _make_position('SPY', 100, 450.0)
+        signal = strategy.analyze_symbol('SPY', {'current_price': 450.0}, position, _make_ticker())
+        assert signal['paired_buy']['quantity'] == signal['order']['quantity']
+
+    def test_paired_buy_same_symbol(self):
+        strategy = _make_strategy()
+        position = _make_position('SPY', 100, 450.0)
+        signal = strategy.analyze_symbol('SPY', {'current_price': 450.0}, position, _make_ticker())
+        assert signal['paired_buy']['symbol'] == signal['order']['symbol']
+
+    def test_resubmit_no_paired_buy(self):
+        """RESUBMIT signals should not have a paired buy"""
+        strategy = _make_strategy()
+        position = _make_position('SPY', 100, 450.0)
+        ticker = _make_ticker([_sell_order(10, 452.0)])
+        signal = strategy.analyze_symbol('SPY', {'current_price': 450.0}, position, ticker)
+        assert signal['signal'] == 'RESUBMIT'
+        assert signal.get('paired_buy') is None
+
+    def test_format_shows_paired_buy(self):
+        strategy = _make_strategy()
+        signal = {
+            'signal': 'COVER_GAP', 'reason': 'test',
+            'order': {'action': 'stop_limit_sell', 'symbol': 'SPY', 'quantity': 20,
+                      'stop_price': 443.25, 'limit_price': 443.25, 'current_price': 450.0},
+            'paired_buy': {'action': 'limit_buy', 'symbol': 'SPY', 'quantity': 20,
+                           'price': 443.05, 'current_price': 450.0},
+        }
+        output = strategy.format_signal('SPY', signal)
+        assert 'Paired Buy' in output
+        assert '$443.05' in output
+
+
 class TestHedgeSymbolMap:
     """Orders target the same symbol by default; custom map can override"""
 

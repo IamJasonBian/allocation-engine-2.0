@@ -171,6 +171,9 @@ class TradingSystem:
             self._execute_sell_order(symbol, order)
         elif order['action'] == 'stop_limit_sell':
             self._execute_stop_limit_sell_order(symbol, order)
+            # Execute paired buy if present
+            if signal.get('paired_buy'):
+                self._execute_paired_limit_buy(symbol, signal['paired_buy'])
         elif order['action'] == 'limit_sell':
             self._execute_limit_sell_resubmit(symbol, order)
 
@@ -326,6 +329,40 @@ class TradingSystem:
                     symbol, 'sell', 'placed', order_id
                 )
                 print(f"Order placed: {order_id}")
+
+    def _execute_paired_limit_buy(self, symbol: str, buy_order: Dict):
+        """Execute paired limit buy order below the stop-limit sell"""
+        quantity = buy_order['quantity']
+        price = buy_order['price']
+        order_symbol = buy_order['symbol']
+
+        order_details = {
+            'quantity': quantity,
+            'price': price,
+            'trigger': 'paired_dca_buy',
+            'order_type': 'limit'
+        }
+        self.state_manager.queue_buy_order(order_symbol, order_details)
+
+        if self.verbose:
+            print(f"\n{'='*70}")
+            print(f"PAIRED LIMIT BUY: {order_symbol}")
+            print(f"{'='*70}")
+            print(f"Quantity: {quantity}")
+            print(f"Limit Price: ${price:,.2f}")
+            print(f"Mode: {'DRY RUN' if self.dry_run else 'LIVE'}")
+            print(f"{'='*70}\n")
+
+        if not self.dry_run:
+            result = self.trading_bot.place_cash_buy_order(
+                order_symbol, quantity, price, dry_run=False
+            )
+            if result:
+                order_id = result.get('id', 'unknown')
+                self.state_manager.update_order_status(
+                    order_symbol, 'buy', 'placed', order_id
+                )
+                print(f"Paired buy placed: {order_id}")
 
     def print_portfolio_allocation(self):
         """Print current portfolio allocation summary"""
