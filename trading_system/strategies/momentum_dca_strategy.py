@@ -30,6 +30,7 @@ class MomentumDcaStrategy:
                  stop_offset_pct: float = 0.015, proximity_pct: float = 0.0075,
                  coverage_range_pct: float = 0.08,
                  buy_offset: float = 0.20,
+                 lot_size: int = 150,
                  hedge_symbol_map: Dict = None):
         self.symbols = symbols
         self.coverage_threshold = coverage_threshold
@@ -37,6 +38,7 @@ class MomentumDcaStrategy:
         self.proximity_pct = proximity_pct
         self.coverage_range_pct = coverage_range_pct
         self.buy_offset = buy_offset
+        self.lot_size = lot_size
         self.hedge_symbol_map = hedge_symbol_map if hedge_symbol_map is not None else self.DEFAULT_HEDGE_MAP
 
     def analyze_symbol(self, symbol: str, metrics: Dict,
@@ -84,9 +86,10 @@ class MomentumDcaStrategy:
                 'current_price': current_price,
             }
 
-        # Under-covered — calculate gap
+        # Under-covered — calculate gap, capped to lot_size
         gap_qty = (self.coverage_threshold * position_qty) - covered_qty
         gap_qty = self._round_quantity(symbol, gap_qty)
+        gap_qty = min(gap_qty, self.lot_size)
 
         if gap_qty <= 0:
             return {'signal': 'COVERED', 'reason': f'{symbol}: gap rounds to zero', 'order': None}
