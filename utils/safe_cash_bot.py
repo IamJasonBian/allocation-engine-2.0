@@ -365,9 +365,59 @@ class SafeCashBot:
 
         return True, "Order validated"
 
+    def _cancel_existing_orders(self, symbol, side):
+        """
+        Cancel all existing orders for a symbol on the given side.
+
+        Args:
+            symbol: Stock ticker
+            side: 'buy' or 'sell'
+
+        Returns:
+            Total quantity of cancelled orders
+        """
+        target_instrument_url = None
+        try:
+            target_instruments = r.stocks.get_instruments_by_symbols(symbol, info='url')
+            if target_instruments:
+                target_instrument_url = target_instruments[0]
+        except Exception as e:
+            print(f"   Failed to resolve instrument for {symbol}: {e}")
+            return 0
+
+        if not target_instrument_url:
+            print(f"   Could not resolve instrument URL for {symbol}")
+            return 0
+
+        open_orders = r.orders.get_all_open_stock_orders(account_number=self.account_number)
+        cancelled_qty = 0
+        if open_orders:
+            for open_order in open_orders:
+                order_instrument = open_order.get('instrument', '')
+                order_side = open_order.get('side', '')
+
+                if order_instrument == target_instrument_url and order_side == side:
+                    existing_id = open_order.get('id')
+                    existing_qty = open_order.get('quantity', '?')
+                    existing_type = open_order.get('type', '?')
+                    existing_trigger = open_order.get('trigger', '?')
+                    existing_stop = open_order.get('stop_price', 'N/A')
+                    existing_limit = open_order.get('price', 'N/A')
+                    print(f"   Existing {side}: id={existing_id} type={existing_type} trigger={existing_trigger} qty={existing_qty} stop=${existing_stop} limit=${existing_limit}")
+                    print(f"   Cancelling...")
+                    r.orders.cancel_stock_order(existing_id)
+                    try:
+                        cancelled_qty += int(float(existing_qty))
+                    except (ValueError, TypeError):
+                        pass
+
+        return cancelled_qty
+
     def place_cash_buy_order(self, symbol, quantity, price, dry_run=True):
         """
-        Place a limit buy order using CASH ONLY
+        Place a limit buy order using CASH ONLY.
+        Cancels any existing buy order for the symbol first to maintain
+        a single active buy order at all times.
 
         Args:
             symbol: Stock ticker
@@ -400,7 +450,6 @@ class SafeCashBot:
             print(f"{'='*70}\n")
             return None
 
-        # Execute real order
         try:
             print("\n🚀 Executing order...")
             order = r.orders.order_buy_limit(
@@ -410,11 +459,50 @@ class SafeCashBot:
                 account_number=self.account_number
             )
 
-            print("✅ Order placed successfully!")
-            print(f"   Order ID: {order.get('id', 'N/A')}")
-            print(f"   State: {order.get('state', 'N/A')}")
-            print(f"{'='*70}\n")
+            order_id = order.get('id') if isinstance(order, dict) else None
+            order_state = order.get('state') if isinstance(order, dict) else None
 
+            if order_id:
+                print("✅ Order placed successfully!")
+                print(f"   Order ID: {order_id}")
+                print(f"   State: {order_state or 'N/A'}")
+                print(f"{'='*70}\n")
+                return order
+
+            # Order failed — check for PDT
+            detail = None
+            if isinstance(order, dict):
+                detail = order.get('detail') or order.get('non_field_errors') or order.get('message')
+            print(f"❌ Buy order failed!")
+            print(f"   Reason: {detail or order}")
+
+            if isinstance(detail, str) and 'pdt' in detail.lower():
+                print(f"   PDT hit — cancelling existing buy order(s) for {symbol}...")
+                cancelled_qty = self._cancel_existing_orders(symbol, 'buy')
+                if cancelled_qty:
+                    print(f"   Cancelled {cancelled_qty} shares, retrying...")
+                    retry = r.orders.order_buy_limit(
+                        symbol=symbol,
+                        quantity=quantity,
+                        limitPrice=price,
+                        account_number=self.account_number
+                    )
+                    retry_id = retry.get('id') if isinstance(retry, dict) else None
+                    if retry_id:
+                        print("✅ Order placed successfully!")
+                        print(f"   Order ID: {retry_id}")
+                        print(f"   State: {retry.get('state', 'N/A')}")
+                        print(f"{'='*70}\n")
+                        return retry
+                    else:
+                        retry_detail = None
+                        if isinstance(retry, dict):
+                            retry_detail = retry.get('detail') or retry.get('non_field_errors') or retry.get('message')
+                        print(f"   Retry also failed: {retry_detail or retry}")
+                else:
+                    print(f"   No existing buy orders found for {symbol}")
+
+            print(f"{'='*70}\n")
             return order
 
         except Exception as e:
@@ -543,11 +631,52 @@ class SafeCashBot:
                 timeInForce='gtc'
             )
 
-            print("   Order placed successfully!")
-            print(f"   Order ID: {order.get('id', 'N/A')}")
-            print(f"   State: {order.get('state', 'N/A')}")
-            print(f"{'='*70}\n")
+            order_id = order.get('id') if isinstance(order, dict) else None
+            order_state = order.get('state') if isinstance(order, dict) else None
 
+            if order_id:
+                print("   Order placed successfully!")
+                print(f"   Order ID: {order_id}")
+                print(f"   State: {order_state or 'N/A'}")
+                print(f"{'='*70}\n")
+                return order
+
+            # Order failed — check for PDT
+            detail = None
+            if isinstance(order, dict):
+                detail = order.get('detail') or order.get('non_field_errors') or order.get('message')
+            print(f"   Stop-limit order failed!")
+            print(f"   Reason: {detail or order}")
+
+            if isinstance(detail, str) and 'pdt' in detail.lower():
+                print(f"   PDT hit — cancelling existing sell order(s) for {symbol}...")
+                cancelled_qty = self._cancel_existing_orders(symbol, 'sell')
+                if cancelled_qty:
+                    print(f"   Cancelled {cancelled_qty} shares, retrying...")
+                    retry = r.orders.order_sell_stop_limit(
+                        symbol=symbol,
+                        quantity=quantity,
+                        limitPrice=limit_price,
+                        stopPrice=stop_price,
+                        account_number=self.account_number,
+                        timeInForce='gtc'
+                    )
+                    retry_id = retry.get('id') if isinstance(retry, dict) else None
+                    if retry_id:
+                        print("   Order placed successfully!")
+                        print(f"   Order ID: {retry_id}")
+                        print(f"   State: {retry.get('state', 'N/A')}")
+                        print(f"{'='*70}\n")
+                        return retry
+                    else:
+                        retry_detail = None
+                        if isinstance(retry, dict):
+                            retry_detail = retry.get('detail') or retry.get('non_field_errors') or retry.get('message')
+                        print(f"   Retry also failed: {retry_detail or retry}")
+                else:
+                    print(f"   No existing sell orders found for {symbol}")
+
+            print(f"{'='*70}\n")
             return order
 
         except Exception as e:
