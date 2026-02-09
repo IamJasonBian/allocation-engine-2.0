@@ -73,6 +73,42 @@ class TestCoverageCalculation:
         signal = strategy.analyze_symbol('SPY', {'current_price': 450.0}, position, ticker)
         assert signal['signal'] == 'COVERED'
 
+    def test_out_of_range_orders_not_counted(self):
+        """Orders >8% from current price don't count toward coverage"""
+        strategy = _make_strategy()
+        position = _make_position('SPY', 100, 450.0)
+        # 25 shares @ $600 is 33% away — out of range
+        ticker = _make_ticker([_sell_order(25, 600.0)])
+        signal = strategy.analyze_symbol('SPY', {'current_price': 450.0}, position, ticker)
+        assert signal['signal'] == 'COVER_GAP'
+        assert signal['order']['quantity'] == 20
+
+    def test_mixed_in_range_and_out_of_range(self):
+        """Only in-range orders count; out-of-range are ignored for coverage"""
+        strategy = _make_strategy()
+        position = _make_position('SPY', 100, 450.0)
+        ticker = _make_ticker([
+            _sell_order(10, 460.0),   # 2.2% away — in range
+            _sell_order(15, 600.0),   # 33% away — out of range
+        ])
+        signal = strategy.analyze_symbol('SPY', {'current_price': 450.0}, position, ticker)
+        # Only 10 shares in range, need 20 for 20% of 100
+        assert signal['order'] is not None
+        assert signal['order']['quantity'] == 10
+
+    def test_out_of_range_listed_in_covered_signal(self):
+        """When covered, out-of-range orders appear in signal data"""
+        strategy = _make_strategy()
+        position = _make_position('SPY', 100, 450.0)
+        ticker = _make_ticker([
+            _sell_order(25, 460.0),   # 2.2% — in range, enough to cover
+            _sell_order(10, 600.0),   # 33% — out of range
+        ])
+        signal = strategy.analyze_symbol('SPY', {'current_price': 450.0}, position, ticker)
+        assert signal['signal'] == 'COVERED'
+        assert len(signal['existing_orders']) == 1
+        assert len(signal['out_of_range_orders']) == 1
+
     def test_invalid_orders_not_counted(self):
         strategy = _make_strategy()
         position = _make_position('SPY', 100, 450.0)
@@ -98,12 +134,13 @@ class TestGapQuantity:
         signal = strategy.analyze_symbol('SPY', {'current_price': 450.0}, position, ticker)
         assert signal['order']['quantity'] == 25
 
-    def test_btc_fractional_quantity(self):
+    def test_btc_whole_shares(self):
+        """BTC is Grayscale Bitcoin Mini Trust ETF — whole shares only"""
         strategy = _make_strategy()
-        position = _make_position('BTC', 0.5, 100000.0)
-        signal = strategy.analyze_symbol('BTC', {'current_price': 100000.0}, position, _make_ticker())
-        assert signal['order']['quantity'] == 0.1
-        assert round(signal['order']['quantity'], 4) == signal['order']['quantity']
+        position = _make_position('BTC', 3262, 31.0)
+        signal = strategy.analyze_symbol('BTC', {'current_price': 31.0}, position, _make_ticker())
+        assert signal['order']['quantity'] == 652
+        assert isinstance(signal['order']['quantity'], int)
 
     def test_stock_whole_shares(self):
         strategy = _make_strategy()
@@ -124,8 +161,8 @@ class TestStopLimitPricing:
 
     def test_stop_equals_limit(self):
         strategy = _make_strategy()
-        position = _make_position('BTC', 1.0, 100000.0)
-        signal = strategy.analyze_symbol('BTC', {'current_price': 100000.0}, position, _make_ticker())
+        position = _make_position('BTC', 100, 31.0)
+        signal = strategy.analyze_symbol('BTC', {'current_price': 31.0}, position, _make_ticker())
         assert signal['order']['stop_price'] == signal['order']['limit_price']
 
 
@@ -220,6 +257,40 @@ class TestEdgeCases:
         signal = {'signal': 'COVERED', 'reason': 'fully covered', 'order': None}
         output = strategy.format_signal('SPY', signal)
         assert 'COVERED' in output
+
+
+class TestHedgeSymbolMap:
+    """Orders target the same symbol by default; custom map can override"""
+
+    def test_btc_orders_stay_btc(self):
+        """BTC is Grayscale Bitcoin Mini Trust ETF — no remapping"""
+        strategy = _make_strategy()
+        position = _make_position('BTC', 100, 31.0)
+        signal = strategy.analyze_symbol('BTC', {'current_price': 31.0}, position, _make_ticker())
+        assert signal['order']['symbol'] == 'BTC'
+
+    def test_spy_orders_stay_spy(self):
+        strategy = _make_strategy()
+        position = _make_position('SPY', 100, 450.0)
+        signal = strategy.analyze_symbol('SPY', {'current_price': 450.0}, position, _make_ticker())
+        assert signal['order']['symbol'] == 'SPY'
+
+    def test_custom_hedge_map(self):
+        strategy = _make_strategy(hedge_symbol_map={'SPY': 'SH'})
+        position = _make_position('SPY', 100, 450.0)
+        signal = strategy.analyze_symbol('SPY', {'current_price': 450.0}, position, _make_ticker())
+        assert signal['order']['symbol'] == 'SH'
+
+    def test_format_shows_hedge_note_when_mapped(self):
+        strategy = _make_strategy(hedge_symbol_map={'SPY': 'SH'})
+        signal = {
+            'signal': 'COVER_GAP', 'reason': 'test',
+            'order': {'action': 'stop_limit_sell', 'symbol': 'SH', 'quantity': 20,
+                      'stop_price': 443.25, 'limit_price': 443.25, 'current_price': 450.0}
+        }
+        output = strategy.format_signal('SPY', signal)
+        assert 'SH' in output
+        assert 'hedging SPY via SH' in output
 
 
 class TestLoadBrokerSellOrders:

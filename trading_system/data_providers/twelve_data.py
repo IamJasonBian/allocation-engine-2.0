@@ -14,8 +14,9 @@ class TwelveDataProvider:
     BASE_URL = "https://api.twelvedata.com"
 
     # Symbol mappings for Twelve Data API
+    # BTC = Grayscale Bitcoin Mini Trust ETF (NYSE: BTC), not crypto BTC/USD
     SYMBOL_MAP = {
-        'BTC': 'BTC/USD',
+        'BTC': 'BTC',
         'SPY': 'SPY',  # S&P 500 ETF
         'QQQ': 'QQQ',
         'AMZN': 'AMZN'
