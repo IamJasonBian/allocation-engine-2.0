@@ -60,22 +60,8 @@ class StateManager:
         return self.get_symbol_state(symbol).get('metrics', {})
 
     def queue_buy_order(self, symbol: str, order_details: Dict):
-        """Queue a buy order using Order and Ticker entities"""
+        """Queue a buy order, tracked in symbol state (not on Ticker)"""
         symbol_state = self.get_symbol_state(symbol)
-        ticker = self.get_ticker(symbol)
-
-        order_type_str = order_details.get('order_type', 'market')
-        try:
-            order_type = OrderType(order_type_str)
-        except ValueError:
-            order_type = OrderType.MARKET
-
-        order = Order(
-            size=order_details.get('quantity', 0),
-            price=order_details.get('price', 0),
-            order_type=order_type,
-        )
-        ticker.orders.append(order)
 
         order_record = {
             'type': OrderSide.BUY.value,
@@ -89,22 +75,8 @@ class StateManager:
         self.state['last_updated'] = datetime.now().isoformat()
 
     def queue_sell_order(self, symbol: str, order_details: Dict):
-        """Queue a sell order using Order and Ticker entities"""
+        """Queue a sell order, tracked in symbol state (not on Ticker)"""
         symbol_state = self.get_symbol_state(symbol)
-        ticker = self.get_ticker(symbol)
-
-        order_type_str = order_details.get('order_type', 'market')
-        try:
-            order_type = OrderType(order_type_str)
-        except ValueError:
-            order_type = OrderType.MARKET
-
-        order = Order(
-            size=order_details.get('quantity', 0),
-            price=order_details.get('price', 0),
-            order_type=order_type,
-        )
-        ticker.orders.append(order)
 
         order_record = {
             'type': OrderSide.SELL.value,

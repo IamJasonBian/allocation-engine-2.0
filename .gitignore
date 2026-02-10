@@ -50,6 +50,7 @@ env/
 # Logs
 *.log
 logs/
+state_logs/
 
 # Trading data (optional - uncomment if you don't want to track)
 # trades/
