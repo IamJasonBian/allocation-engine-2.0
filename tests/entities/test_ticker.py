@@ -19,18 +19,18 @@ class TestGetOpenOrders:
         ticker = Ticker([])
         assert ticker.get_open_orders() == []
 
-class TestGetValidOrders:
+class TestGetSignalOrders:
     def test_initially_all_valid(self):
         orders = make_orders()
         ticker = Ticker(orders)
-        assert len(ticker.get_valid_orders()) == 3
-        assert ticker.get_valid_orders() == orders
+        assert len(ticker.get_signal_orders()) == 3
+        assert ticker.get_signal_orders() == orders
 
     def test_filters_invalid(self):
         orders = make_orders()
         ticker = Ticker(orders)
         orders[1].mark_invalid()
-        valid = ticker.get_valid_orders()
+        valid = ticker.get_signal_orders()
         assert len(valid) == 2
         assert orders[1] not in valid
         assert orders[0] in valid
@@ -47,4 +47,4 @@ class TestOrderValidity:
         ticker = Ticker(orders)
         orders[0].mark_invalid()
         assert orders[0].is_valid is False
-        assert len(ticker.get_valid_orders()) == 2
+        assert len(ticker.get_signal_orders()) == 2

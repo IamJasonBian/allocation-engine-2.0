@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from trading_system.data_providers.twelve_data import TwelveDataProvider  # noqa: E402
 from trading_system.utils.metrics import MetricsCalculator  # noqa: E402
 from trading_system.strategies.breakout_strategy import BreakoutStrategy  # noqa: E402
-from trading_system.strategies.momentum_dca_strategy import MomentumDcaStrategy  # noqa: E402
+from trading_system.strategies.momentum_dca_strategy import MomentumDcaLongStrategy  # noqa: E402
 from trading_system.state.state_manager import StateManager  # noqa: E402
 from trading_system.state.blob_logger import log_state_to_blob  # noqa: E402
 from utils.safe_cash_bot import SafeCashBot  # noqa: E402
@@ -50,8 +50,8 @@ class TradingSystem:
         self.state_manager = StateManager()
         self.trading_bot = SafeCashBot()
 
-        if strategy_name == 'momentum_dca':
-            self.strategy = MomentumDcaStrategy(symbols)
+        if strategy_name == 'momentum_dca_long':
+            self.strategy = MomentumDcaLongStrategy(symbols)
         else:
             self.strategy = BreakoutStrategy(symbols, position_size_pct)
 
@@ -139,7 +139,7 @@ class TradingSystem:
         )
 
         # Load broker orders into the symbol's Ticker (all strategies get a Ticker)
-        self.state_manager.load_broker_sell_orders(symbol, open_orders or [])
+        self.state_manager.load_broker_orders(symbol, open_orders or [])
         ticker = self.state_manager.get_ticker(symbol)
 
         return self.strategy.analyze_symbol(symbol, metrics, current_position, ticker)
@@ -453,7 +453,7 @@ class TradingSystem:
 
         # Fetch open orders once (used by momentum_dca)
         open_orders = []
-        if self.strategy_name == 'momentum_dca':
+        if self.strategy_name == 'momentum_dca_long':
             open_orders = self.trading_bot.get_open_orders()
 
         # Print order book before processing through state manager
@@ -578,9 +578,9 @@ def main():
     parser.add_argument(
         '--strategy',
         type=str,
-        choices=['momentum_dca', 'breakout'],
-        default='momentum_dca',
-        help='Trading strategy to use (default: momentum_dca)'
+        choices=['momentum_dca_long', 'breakout'],
+        default='momentum_dca_long',
+        help='Trading strategy to use (default: momentum_dca_long)'
     )
     parser.add_argument(
         '--ticker',

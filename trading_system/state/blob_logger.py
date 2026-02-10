@@ -38,7 +38,7 @@ def _serialize_state(state_manager) -> dict:
     for symbol, ticker in state_manager.tickers.items():
         snapshot["tickers"][symbol] = {
             "orders": [order.get_state() for order in ticker.orders],
-            "valid_orders": [order.get_state() for order in ticker.get_valid_orders()],
+            "signal_orders": [order.get_state() for order in ticker.get_signal_orders()],
         }
     return snapshot
 
