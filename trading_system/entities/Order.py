@@ -13,6 +13,6 @@ class Order:
             "size": self.size,
             "price": self.price,
             "order_type": self.order_type,
-            "is_valid": self.is_valid
+            "is_valid": self.is_valid,
         }
 

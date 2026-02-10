@@ -23,51 +23,72 @@ class TestTickerInitialization:
         assert t1 is not t2
 
 
-class TestQueueOrderEntities:
-    def test_buy_order_creates_order_entity(self):
+class TestQueueOrderState:
+    """Queued orders are tracked in symbol state, not on the Ticker."""
+
+    def test_buy_order_stored_in_state(self):
         mgr = StateManager()
         mgr.queue_buy_order('BTC', {
             'quantity': 0.1,
             'price': 38000.00,
             'order_type': 'market'
         })
-        ticker = mgr.get_ticker('BTC')
-        assert len(ticker.orders) == 1
-        assert isinstance(ticker.orders[0], Order)
-        assert ticker.orders[0].order_type == OrderType.MARKET
-        assert ticker.orders[0].price == 38000.00
-        assert ticker.orders[0].size == 0.1
+        state = mgr.get_symbol_state('BTC')
+        assert state['orders']['active_buy'] is not None
+        assert state['orders']['active_buy']['status'] == 'queued'
+        assert state['orders']['active_buy']['details']['price'] == 38000.00
 
-    def test_sell_order_creates_order_entity(self):
+    def test_sell_order_stored_in_state(self):
         mgr = StateManager()
         mgr.queue_sell_order('BTC', {
             'quantity': 5,
             'price': 45000.00,
             'order_type': 'limit'
         })
-        ticker = mgr.get_ticker('BTC')
-        assert len(ticker.orders) == 1
-        assert ticker.orders[0].order_type == OrderType.LIMIT
+        state = mgr.get_symbol_state('BTC')
+        assert state['orders']['active_sell'] is not None
+        assert state['orders']['active_sell']['status'] == 'queued'
 
-    def test_multiple_orders_accumulate_on_ticker(self):
+    def test_queued_orders_do_not_appear_on_ticker(self):
         mgr = StateManager()
         mgr.queue_buy_order('BTC', {'quantity': 1, 'price': 100, 'order_type': 'market'})
         mgr.queue_sell_order('BTC', {'quantity': 1, 'price': 200, 'order_type': 'limit'})
         ticker = mgr.get_ticker('BTC')
-        assert len(ticker.orders) == 2
-        assert len(ticker.get_valid_orders()) == 2
+        assert len(ticker.orders) == 0
 
-    def test_invalid_order_type_defaults_to_market(self):
-        mgr = StateManager()
-        mgr.queue_buy_order('BTC', {'quantity': 1, 'price': 100, 'order_type': 'unknown'})
-        ticker = mgr.get_ticker('BTC')
-        assert ticker.orders[0].order_type == OrderType.MARKET
-
-
-class TestActiveOrdersIncludeTickerData:
-    def test_valid_orders_in_response(self):
+    def test_order_history_appended(self):
         mgr = StateManager()
         mgr.queue_buy_order('BTC', {'quantity': 1, 'price': 100, 'order_type': 'market'})
+        mgr.queue_sell_order('BTC', {'quantity': 1, 'price': 200, 'order_type': 'limit'})
+        history = mgr.get_order_history('BTC')
+        assert len(history) == 2
+
+
+class TestTickerHoldsBrokerOrders:
+    """Ticker only holds live broker orders loaded via load_broker_sell_orders."""
+
+    def test_broker_orders_on_ticker(self):
+        mgr = StateManager()
+        broker_orders = [
+            {'symbol': 'BTC', 'side': 'SELL', 'order_type': 'Limit',
+             'quantity': '100', 'limit_price': 31.0},
+            {'symbol': 'BTC', 'side': 'SELL', 'order_type': 'Stop Limit',
+             'quantity': '50', 'limit_price': 29.0, 'stop_price': 29.5},
+        ]
+        mgr.load_broker_sell_orders('BTC', broker_orders)
+        ticker = mgr.get_ticker('BTC')
+        assert len(ticker.orders) == 2
+        assert all(isinstance(o, Order) for o in ticker.orders)
+        assert ticker.orders[0].order_type == OrderType.LIMIT
+        assert ticker.orders[1].order_type == OrderType.STOP_LIMIT
+
+    def test_valid_orders_in_active_response(self):
+        mgr = StateManager()
+        broker_orders = [
+            {'symbol': 'BTC', 'side': 'SELL', 'order_type': 'Limit',
+             'quantity': '100', 'limit_price': 31.0},
+        ]
+        mgr.load_broker_sell_orders('BTC', broker_orders)
         active = mgr.get_active_orders('BTC')
         assert 'valid_orders' in active
         assert len(active['valid_orders']) == 1
@@ -76,15 +97,25 @@ class TestActiveOrdersIncludeTickerData:
 class TestUpdateOrderStatus:
     def test_filled_order_marks_ticker_order_invalid(self):
         mgr = StateManager()
-        mgr.queue_buy_order('BTC', {'quantity': 1, 'price': 100, 'order_type': 'market'})
-        mgr.update_order_status('BTC', 'buy', 'filled', order_id='ORDER1')
+        broker_orders = [
+            {'symbol': 'BTC', 'side': 'SELL', 'order_type': 'Limit',
+             'quantity': '100', 'limit_price': 31.0},
+        ]
+        mgr.load_broker_sell_orders('BTC', broker_orders)
+        mgr.queue_sell_order('BTC', {'quantity': 100, 'price': 31.0, 'order_type': 'limit'})
+        mgr.update_order_status('BTC', 'sell', 'filled', order_id='ORDER1')
         ticker = mgr.get_ticker('BTC')
         assert len(ticker.get_valid_orders()) == 0
         assert len(ticker.orders) == 1
 
     def test_cancelled_order_marks_ticker_order_invalid(self):
         mgr = StateManager()
-        mgr.queue_sell_order('BTC', {'quantity': 1, 'price': 200, 'order_type': 'limit'})
+        broker_orders = [
+            {'symbol': 'BTC', 'side': 'SELL', 'order_type': 'Limit',
+             'quantity': '100', 'limit_price': 31.0},
+        ]
+        mgr.load_broker_sell_orders('BTC', broker_orders)
+        mgr.queue_sell_order('BTC', {'quantity': 100, 'price': 31.0, 'order_type': 'limit'})
         mgr.update_order_status('BTC', 'sell', 'cancelled')
         ticker = mgr.get_ticker('BTC')
         assert len(ticker.get_valid_orders()) == 0

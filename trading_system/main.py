@@ -17,6 +17,7 @@ from trading_system.utils.metrics import MetricsCalculator  # noqa: E402
 from trading_system.strategies.breakout_strategy import BreakoutStrategy  # noqa: E402
 from trading_system.strategies.momentum_dca_strategy import MomentumDcaStrategy  # noqa: E402
 from trading_system.state.state_manager import StateManager  # noqa: E402
+from trading_system.state.blob_logger import log_state_to_blob  # noqa: E402
 from utils.safe_cash_bot import SafeCashBot  # noqa: E402
 
 
@@ -137,15 +138,11 @@ class TradingSystem:
             None
         )
 
-        if self.strategy_name == 'momentum_dca':
-            # Load broker sell orders into the symbol's Ticker
-            self.state_manager.load_broker_sell_orders(symbol, open_orders or [])
-            ticker = self.state_manager.get_ticker(symbol)
-            signal = self.strategy.analyze_symbol(symbol, metrics, current_position, ticker)
-        else:
-            signal = self.strategy.analyze_symbol(symbol, metrics, current_position)
+        # Load broker orders into the symbol's Ticker (all strategies get a Ticker)
+        self.state_manager.load_broker_sell_orders(symbol, open_orders or [])
+        ticker = self.state_manager.get_ticker(symbol)
 
-        return signal
+        return self.strategy.analyze_symbol(symbol, metrics, current_position, ticker)
 
     def process_signal(self, symbol: str, signal: Dict, open_orders: list = None):
         """
@@ -164,9 +161,10 @@ class TradingSystem:
         if not signal['order']:
             return
 
-        # Skip execution if 2 or more orders already on the book (max 1 buy + 1 sell)
-        if open_orders and len(open_orders) >= 2:
-            print(f"⚠️  Skipping order execution: {len(open_orders)} orders on book (max 2)")
+        # Skip execution if 2 or more orders already on the book for this symbol
+        symbol_orders = [o for o in (open_orders or []) if o.get('symbol') == symbol]
+        if len(symbol_orders) >= 2:
+            print(f"⚠️  Skipping order execution: {len(symbol_orders)} orders on book for {symbol} (max 2)")
             return
 
         order = signal['order']
@@ -458,8 +456,8 @@ class TradingSystem:
         if self.strategy_name == 'momentum_dca':
             open_orders = self.trading_bot.get_open_orders()
 
-        # Always print order book in live mode
-        if not self.dry_run and open_orders:
+        # Print order book before processing through state manager
+        if open_orders:
             print(f"\n📋 Order Book: {len(open_orders)} open order(s)")
             buy_orders = [o for o in open_orders if o['side'] == 'BUY']
             sell_orders = [o for o in open_orders if o['side'] == 'SELL']
@@ -514,6 +512,9 @@ class TradingSystem:
 
             # Rate limiting between symbols
             time.sleep(1)
+
+        # Log state: local file in dry-run, Netlify Blobs when live
+        log_state_to_blob(self.state_manager, live=not self.dry_run)
 
         if self.verbose:
             # Show summary
