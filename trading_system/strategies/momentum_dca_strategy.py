@@ -12,9 +12,10 @@ Uses Ticker/Order entities for order tracking (no raw dicts).
 from typing import Dict, Optional, List
 
 from trading_system.entities.Ticker import Ticker
+from trading_system.strategies.base_strategy import BaseStrategy
 
 
-class MomentumDcaStrategy:
+class MomentumDcaStrategy(BaseStrategy):
     """
     Momentum Dollar-Cost Averaging Strategy
 

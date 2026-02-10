@@ -5,8 +5,11 @@ Buy at 30-day low, Sell at 30-day high
 
 from typing import Dict, Optional, List
 
+from trading_system.entities.Ticker import Ticker
+from trading_system.strategies.base_strategy import BaseStrategy
 
-class BreakoutStrategy:
+
+class BreakoutStrategy(BaseStrategy):
     """
     30-Day High/Low Breakout Strategy
 
@@ -36,7 +39,8 @@ class BreakoutStrategy:
         print(f"{'='*70}\n")
 
     def analyze_symbol(self, symbol: str, metrics: Dict,
-                       current_position: Optional[Dict] = None) -> Dict:
+                       current_position: Optional[Dict] = None,
+                       ticker: Ticker = None) -> Dict:
         """
         Analyze a symbol and generate trading signal
 

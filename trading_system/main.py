@@ -138,15 +138,11 @@ class TradingSystem:
             None
         )
 
-        if self.strategy_name == 'momentum_dca':
-            # Load broker sell orders into the symbol's Ticker
-            self.state_manager.load_broker_sell_orders(symbol, open_orders or [])
-            ticker = self.state_manager.get_ticker(symbol)
-            signal = self.strategy.analyze_symbol(symbol, metrics, current_position, ticker)
-        else:
-            signal = self.strategy.analyze_symbol(symbol, metrics, current_position)
+        # Load broker orders into the symbol's Ticker (all strategies get a Ticker)
+        self.state_manager.load_broker_sell_orders(symbol, open_orders or [])
+        ticker = self.state_manager.get_ticker(symbol)
 
-        return signal
+        return self.strategy.analyze_symbol(symbol, metrics, current_position, ticker)
 
     def process_signal(self, symbol: str, signal: Dict, open_orders: list = None):
         """
