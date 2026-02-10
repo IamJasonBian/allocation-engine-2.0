@@ -120,7 +120,7 @@ class StateManager:
         return {
             'buy': symbol_state['orders']['active_buy'],
             'sell': symbol_state['orders']['active_sell'],
-            'valid_orders': [o.get_state() for o in ticker.get_valid_orders()]
+            'signal_orders': [o.get_state() for o in ticker.get_signal_orders()]
         }
 
     def get_order_history(self, symbol: str, limit: int = 10) -> List[Dict]:
@@ -138,12 +138,12 @@ class StateManager:
         }
         self.state['last_updated'] = datetime.now().isoformat()
 
-    def load_broker_sell_orders(self, symbol: str, broker_orders: List[Dict]):
-        """Convert raw broker sell orders into Order entities on the symbol's Ticker.
+    def load_broker_orders(self, symbol: str, broker_orders: List[Dict]):
+        """Convert raw broker orders into Order entities on the symbol's Ticker.
 
-        Filters to SELL orders for the given symbol, maps broker order_type
-        strings to OrderType enums, and uses limit_price (or stop_price) as
-        Order.price. Replaces any existing orders on the Ticker.
+        Filters to the given symbol, maps broker order_type strings to
+        OrderType enums, and uses limit_price (or stop_price) as Order.price.
+        Replaces any existing orders on the Ticker.
         """
         self.get_symbol_state(symbol)
 
@@ -156,15 +156,13 @@ class StateManager:
 
         orders = []
         for raw in broker_orders:
-            if raw.get('symbol') != symbol:
-                continue
-            if raw.get('side') != 'SELL':
+            raw_symbol = raw.get('symbol')
+            if raw_symbol != symbol:
                 continue
 
             order_type = ORDER_TYPE_MAP.get(raw.get('order_type'), OrderType.MARKET)
             price = raw.get('limit_price') or raw.get('stop_price') or 0
             size = float(raw.get('quantity', 0))
-
             orders.append(Order(size=size, price=price, order_type=order_type))
 
         self.tickers[symbol] = Ticker(orders)
@@ -186,7 +184,7 @@ class StateManager:
             print(f"\n{symbol}:")
             print(f"  Last Updated: {data.get('last_updated', 'Never')}")
             print(f"  Ticker Orders: {len(ticker.orders)} total, "
-                  f"{len(ticker.get_valid_orders())} valid")
+                  f"{len(ticker.get_signal_orders())} signal")
 
             metrics = data.get('metrics', {})
             if metrics:

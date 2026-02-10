@@ -10,7 +10,7 @@ class Ticker:
     def get_open_orders(self):
         return self.orders
 
-    def get_valid_orders(self):
+    def get_signal_orders(self):
         return [order for order in self.orders if order.is_valid]
 
     def write_to_blob(self, blob):

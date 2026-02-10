@@ -15,7 +15,7 @@ from trading_system.entities.Ticker import Ticker
 from trading_system.strategies.base_strategy import BaseStrategy
 
 
-class MomentumDcaStrategy(BaseStrategy):
+class MomentumDcaLongStrategy(BaseStrategy):
     """
     Momentum Dollar-Cost Averaging Strategy
 
@@ -62,12 +62,12 @@ class MomentumDcaStrategy(BaseStrategy):
             return {'signal': 'NO_POSITION', 'reason': f'No position in {symbol}', 'order': None}
 
         position_qty = float(current_position['quantity'])
-        valid_orders = ticker.get_valid_orders()
+        signal_orders = ticker.get_signal_orders()
 
         # Only count orders within coverage_range_pct of current price
-        in_range = [o for o in valid_orders
+        in_range = [o for o in signal_orders
                     if o.price and abs(current_price - o.price) / current_price <= self.coverage_range_pct]
-        out_of_range = [o for o in valid_orders if o not in in_range]
+        out_of_range = [o for o in signal_orders if o not in in_range]
 
         covered_qty = sum(o.size for o in in_range)
         coverage_pct = (covered_qty / position_qty) * 100 if position_qty > 0 else 0
@@ -99,7 +99,7 @@ class MomentumDcaStrategy(BaseStrategy):
         order_symbol = self.hedge_symbol_map.get(symbol, symbol)
 
         # Check price proximity to nearest existing sell order
-        nearest = self._find_nearest_order(current_price, valid_orders)
+        nearest = self._find_nearest_order(current_price, signal_orders)
 
         if nearest:
             order_price = nearest.price
@@ -154,11 +154,11 @@ class MomentumDcaStrategy(BaseStrategy):
             'gap_qty': gap_qty,
         }
 
-    def _find_nearest_order(self, current_price, valid_orders):
+    def _find_nearest_order(self, current_price, signal_orders):
         """Find the Order entity whose price is closest to current price"""
         best = None
         best_dist = float('inf')
-        for order in valid_orders:
+        for order in signal_orders:
             if not order.price:
                 continue
             dist = abs(current_price - order.price) / order.price
