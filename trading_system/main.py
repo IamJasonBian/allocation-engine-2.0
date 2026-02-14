@@ -518,7 +518,13 @@ class TradingSystem:
             time.sleep(1)
 
         # Log state: local file in dry-run, Netlify Blobs when live
-        log_state_to_blob(self.state_manager, live=not self.dry_run)
+        portfolio_data = self.trading_bot.get_portfolio_summary()
+        log_state_to_blob(
+            self.state_manager,
+            live=not self.dry_run,
+            order_book=open_orders,
+            portfolio=portfolio_data,
+        )
 
         # Refresh dashboard market indicators
         if self.dashboard:
