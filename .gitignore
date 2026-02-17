@@ -63,6 +63,9 @@ trading_state.json
 # Account configuration
 accounts_config.json
 
+# Dashboard generated data
+dashboard/market_data.json
+
 # Jupyter Notebook
 .ipynb_checkpoints
 
