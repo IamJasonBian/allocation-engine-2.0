@@ -1,0 +1,435 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Market Indicators</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+      background: #000; color: #ccc; padding: 20px 24px;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* Header */
+    .hdr { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 18px; border-bottom: 1px solid #222; padding-bottom: 10px; }
+    .hdr h1 { font-size: 15px; font-weight: 500; color: #fff; letter-spacing: 0.5px; }
+    .hdr .st { font-size: 11px; color: #555; }
+    .hdr .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
+    .hdr .dot.ok { background: #4a4; } .hdr .dot.warn { background: #aa4; }
+
+    /* Range selector */
+    .range { display: flex; gap: 2px; margin-bottom: 16px; }
+    .range button {
+      background: transparent; border: 1px solid #333; padding: 3px 10px;
+      color: #666; font-size: 11px; font-family: inherit; cursor: pointer;
+    }
+    .range button:first-child { border-radius: 3px 0 0 3px; }
+    .range button:last-child { border-radius: 0 3px 3px 0; }
+    .range button.on { background: #fff; color: #000; border-color: #fff; }
+
+    /* Focus prices (BTC + QQQ) */
+    .focus { display: flex; gap: 24px; margin-bottom: 18px; flex-wrap: wrap; }
+    .focus-card { min-width: 200px; }
+    .focus-card .name { font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; }
+    .focus-card .price { font-size: 28px; font-weight: 700; color: #fff; margin: 2px 0; }
+    .focus-card .meta { font-size: 12px; }
+    .focus-card .meta span { margin-right: 12px; }
+    .up { color: #4a4; } .dn { color: #a44; } .flat { color: #666; }
+
+    /* Instrument table */
+    table { width: 100%; border-collapse: collapse; margin-bottom: 18px; font-size: 12px; }
+    th { text-align: left; color: #555; font-weight: 500; padding: 4px 8px; border-bottom: 1px solid #222; text-transform: uppercase; font-size: 10px; letter-spacing: 0.3px; }
+    td { padding: 5px 8px; border-bottom: 1px solid #111; }
+    td.num { text-align: right; font-variant-numeric: tabular-nums; }
+    tr:hover { background: #0a0a0a; }
+
+    /* Correlation matrix */
+    .corr-wrap { margin-bottom: 18px; }
+    .corr-wrap h2 { font-size: 11px; font-weight: 500; color: #555; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+    .corr { display: inline-block; }
+    .corr table { width: auto; }
+    .corr th, .corr td { text-align: center; padding: 4px 10px; font-size: 11px; min-width: 56px; }
+    .corr td.lbl { text-align: left; color: #888; font-weight: 500; }
+
+    /* Sections */
+    .section { margin-bottom: 18px; }
+    .section h2 { font-size: 11px; font-weight: 500; color: #555; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+
+    /* Chart grid */
+    .cgrid { display: grid; gap: 16px; margin-bottom: 18px; }
+    .cgrid.c2 { grid-template-columns: 1fr 1fr; }
+    .cgrid.c3 { grid-template-columns: 1fr 1fr 1fr; }
+    @media (max-width: 1000px) { .cgrid.c2, .cgrid.c3 { grid-template-columns: 1fr; } }
+    .cbox { border: 1px solid #1a1a1a; padding: 12px; }
+    .cbox h3 { font-size: 10px; font-weight: 500; color: #555; text-transform: uppercase; letter-spacing: 0.3px; margin-bottom: 6px; }
+
+    /* Stat cards row */
+    .stats { display: flex; gap: 16px; margin-bottom: 18px; flex-wrap: wrap; }
+    .stat { border: 1px solid #1a1a1a; padding: 10px 14px; min-width: 130px; }
+    .stat .lbl { font-size: 10px; color: #555; text-transform: uppercase; letter-spacing: 0.3px; }
+    .stat .val { font-size: 18px; font-weight: 700; color: #fff; margin-top: 2px; }
+    .stat .sub { font-size: 10px; color: #555; margin-top: 2px; }
+  </style>
+</head>
+<body>
+  <div class="hdr">
+    <h1>MARKET INDICATORS</h1>
+    <div class="st"><span class="dot" id="dot"></span><span id="stxt">loading</span></div>
+  </div>
+
+  <div class="range" id="rangeBar">
+    <button data-key="1d" class="on">1D</button>
+    <button data-key="1w">1W</button>
+    <button data-key="2w">2W</button>
+    <button data-key="3w">3W</button>
+    <button data-key="4w">4W</button>
+    <button data-key="5w">5W</button>
+    <button data-key="6w">6W</button>
+    <button data-key="7w">7W</button>
+  </div>
+
+  <div class="focus" id="focusRow"></div>
+  <div id="instTable"></div>
+  <div class="corr-wrap" id="corrWrap"></div>
+
+  <div class="section">
+    <h2>Price Movement (Normalised %)</h2>
+    <div class="cgrid c2">
+      <div class="cbox"><h3>BTC Trust vs Indexes</h3><canvas id="chartMove"></canvas></div>
+      <div class="cbox"><h3>BTC/USD Spot</h3><canvas id="chartBtcSpot"></canvas></div>
+    </div>
+  </div>
+
+  <div class="stats" id="statRow"></div>
+
+  <div class="section">
+    <h2>BTC Indicators</h2>
+    <div class="cgrid c3">
+      <div class="cbox"><h3 id="ivTitle">IV Z-Score</h3><canvas id="ivChart"></canvas></div>
+      <div class="cbox"><h3>ETF Flows (Cumulative)</h3><canvas id="flowChart"></canvas></div>
+      <div class="cbox"><h3>Historical Volatility (30d Rolling)</h3><canvas id="volChart"></canvas></div>
+    </div>
+  </div>
+
+<script>
+/* ── state ── */
+let D = null; // current data
+let R = '1d'; // selected range key
+const charts = {};
+
+/* ── range config ── */
+const RANGE_CFG = {
+  '1d': { hours: 24, useHourly: true,  label: '1 Day' },
+  '1w': { days: 7,   useHourly: true,  label: '1 Week' },
+  '2w': { days: 14,  useHourly: false, label: '2 Weeks' },
+  '3w': { days: 21,  useHourly: false, label: '3 Weeks' },
+  '4w': { days: 28,  useHourly: false, label: '4 Weeks' },
+  '5w': { days: 35,  useHourly: false, label: '5 Weeks' },
+  '6w': { days: 42,  useHourly: false, label: '6 Weeks' },
+  '7w': { days: 49,  useHourly: false, label: '7 Weeks' },
+};
+
+/* Map range key to correlation window (trading days) */
+const CORR_WINDOW = { '1d':'5','1w':'5','2w':'10','3w':'15','4w':'20','5w':'25','6w':'30','7w':'35' };
+
+/* Chart colours - muted academic palette */
+const COLORS = {
+  'BTC':     '#fff',
+  'BTC/USD': '#999',
+  'QQQ':     '#6cf',
+  'SPY':     '#c9f',
+  'GLD':     '#fc6',
+  'DIA':     '#f96',
+  'IWM':     '#6f9',
+  'EFA':     '#f69',
+};
+
+/* ── helpers ── */
+function dir(v) { return v > 0.005 ? 'up' : v < -0.005 ? 'dn' : 'flat'; }
+function s(v) { return v >= 0 ? '+' + v.toFixed(2) : v.toFixed(2); }
+function p$(v) { return v >= 1000 ? '$' + v.toLocaleString(undefined,{maximumFractionDigits:2}) : '$' + v.toFixed(2); }
+function fmtDollar(n) {
+  if (Math.abs(n) >= 1e9) return '$' + (n/1e9).toFixed(1) + 'B';
+  if (Math.abs(n) >= 1e6) return '$' + (n/1e6).toFixed(1) + 'M';
+  if (Math.abs(n) >= 1e3) return '$' + (n/1e3).toFixed(0) + 'K';
+  return '$' + n.toFixed(0);
+}
+
+function filterSeries(series, rangeKey) {
+  if (!series || !series.length) return [];
+  const cfg = RANGE_CFG[rangeKey];
+  const ms = cfg.hours ? cfg.hours * 3600000 : cfg.days * 86400000;
+  const cutoff = Date.now() - ms;
+  return series.filter(d => (d.t || d.timestamp) >= cutoff);
+}
+
+function corrColor(v) {
+  if (v == null) return '#222';
+  const abs = Math.abs(v);
+  if (v > 0) return `rgba(68,170,68,${abs * 0.8})`;
+  return `rgba(170,68,68,${abs * 0.8})`;
+}
+
+/* ── chart defaults ── */
+function mkOpts(yFmt) {
+  return {
+    responsive: true, maintainAspectRatio: true,
+    animation: { duration: 200 },
+    plugins: {
+      legend: { display: true, position: 'bottom', labels: { color: '#555', font: { size: 10, family: 'inherit' }, boxWidth: 10, padding: 8 } },
+      tooltip: { backgroundColor: '#111', borderColor: '#333', borderWidth: 1, titleColor: '#888', bodyColor: '#ccc', padding: 6, titleFont: { size: 10 }, bodyFont: { size: 11 } },
+    },
+    scales: {
+      x: { type: 'time', grid: { color: '#111' }, ticks: { color: '#444', font: { size: 9 }, maxTicksLimit: 8 }, border: { color: '#222' } },
+      y: { grid: { color: '#111' }, ticks: { color: '#444', font: { size: 9 }, callback: yFmt || (v => v) }, border: { color: '#222' } },
+    },
+  };
+}
+
+function mkLine(label, data, color, dashed) {
+  return {
+    label, data,
+    borderColor: color, borderWidth: 1.2,
+    borderDash: dashed ? [4,4] : [],
+    pointRadius: 0, tension: 0.15, fill: false,
+  };
+}
+
+function destroyChart(key) { if (charts[key]) { charts[key].destroy(); delete charts[key]; } }
+
+/* ── render focus prices ── */
+function renderFocus() {
+  const el = document.getElementById('focusRow');
+  const cards = [];
+  for (const sym of ['BTC', 'BTC/USD', 'QQQ']) {
+    const q = D.quotes[sym];
+    if (!q) continue;
+    const name = (D.instrument_names || {})[sym] || sym;
+    const d = dir(q.change_pct / 100);
+    cards.push(`<div class="focus-card">
+      <div class="name">${name} &mdash; ${sym}</div>
+      <div class="price">${p$(q.price)}</div>
+      <div class="meta">
+        <span class="${d}">${s(q.change_pct)}%</span>
+        <span>O ${p$(q.open)}</span>
+        <span>H ${p$(q.high)}</span>
+        <span>L ${p$(q.low)}</span>
+        <span style="color:#444">Vol ${q.volume ? (q.volume/1e6).toFixed(1)+'M' : '-'}</span>
+      </div>
+    </div>`);
+  }
+  el.innerHTML = cards.join('');
+}
+
+/* ── render instrument table ── */
+function renderTable() {
+  const el = document.getElementById('instTable');
+  const syms = ['BTC','BTC/USD','QQQ','SPY','GLD','DIA','IWM','EFA'];
+  let html = '<table><thead><tr><th>Instrument</th><th>Symbol</th><th style="text-align:right">Price</th><th style="text-align:right">Chg</th><th style="text-align:right">Chg %</th><th style="text-align:right">Open</th><th style="text-align:right">High</th><th style="text-align:right">Low</th><th style="text-align:right">Volume</th></tr></thead><tbody>';
+  for (const sym of syms) {
+    const q = D.quotes[sym];
+    if (!q) continue;
+    const name = (D.instrument_names || {})[sym] || sym;
+    const d = dir(q.change_pct / 100);
+    const vol = q.volume ? (q.volume >= 1e6 ? (q.volume/1e6).toFixed(1)+'M' : Math.round(q.volume).toLocaleString()) : '-';
+    html += `<tr>
+      <td>${name}</td><td style="color:#888">${sym}</td>
+      <td class="num" style="color:#fff">${p$(q.price)}</td>
+      <td class="num ${d}">${s(q.change)}</td>
+      <td class="num ${d}">${s(q.change_pct)}%</td>
+      <td class="num">${p$(q.open)}</td>
+      <td class="num">${p$(q.high)}</td>
+      <td class="num">${p$(q.low)}</td>
+      <td class="num" style="color:#555">${vol}</td>
+    </tr>`;
+  }
+  html += '</tbody></table>';
+  el.innerHTML = html;
+}
+
+/* ── render correlation matrix ── */
+function renderCorr() {
+  const wrap = document.getElementById('corrWrap');
+  const wKey = CORR_WINDOW[R] || '5';
+  const cData = (D.correlations || {})[wKey] || {};
+  const ref = ['QQQ','SPY','GLD','DIA','IWM','EFA'];
+  const focus = ['BTC','BTC/USD'];
+
+  let html = `<h2>Correlation Matrix (${RANGE_CFG[R].label})</h2><div class="corr"><table><thead><tr><th></th>`;
+  for (const r of ref) html += `<th>${r}</th>`;
+  html += '</tr></thead><tbody>';
+  for (const f of focus) {
+    html += `<tr><td class="lbl">${f}</td>`;
+    for (const r of ref) {
+      const v = cData[f + '_' + r];
+      const bg = corrColor(v);
+      const txt = v != null ? v.toFixed(2) : '-';
+      html += `<td style="background:${bg};color:#ddd">${txt}</td>`;
+    }
+    html += '</tr>';
+  }
+  html += '</tbody></table></div>';
+  wrap.innerHTML = html;
+}
+
+/* ── render movement chart ── */
+function renderMoveChart() {
+  const cfg = RANGE_CFG[R];
+  const sourceKey = cfg.useHourly ? 'hourly' : 'daily';
+  const syms = ['BTC','QQQ','SPY','GLD','DIA','IWM','EFA'];
+  const datasets = [];
+
+  for (const sym of syms) {
+    const raw = (D[sourceKey] || {})[sym];
+    if (!raw || !raw.length) continue;
+    const filtered = filterSeries(raw, R);
+    if (filtered.length < 2) continue;
+    const base = filtered[0].c;
+    const normed = filtered.map(d => ({ x: d.t, y: ((d.c - base) / base) * 100 }));
+    datasets.push(mkLine(sym, normed, COLORS[sym] || '#666'));
+  }
+
+  destroyChart('move');
+  charts.move = new Chart(document.getElementById('chartMove'), {
+    type: 'line', data: { datasets },
+    options: mkOpts(v => v.toFixed(1) + '%'),
+  });
+}
+
+function renderBtcSpotChart() {
+  const cfg = RANGE_CFG[R];
+  const sourceKey = cfg.useHourly ? 'hourly' : 'daily';
+  const raw = (D[sourceKey] || {})['BTC/USD'];
+  if (!raw || !raw.length) return;
+  const filtered = filterSeries(raw, R);
+
+  destroyChart('btcSpot');
+  charts.btcSpot = new Chart(document.getElementById('chartBtcSpot'), {
+    type: 'line',
+    data: { datasets: [mkLine('BTC/USD', filtered.map(d => ({ x: d.t, y: d.c })), '#999')] },
+    options: mkOpts(v => '$' + v.toLocaleString()),
+  });
+}
+
+/* ── render stat cards ── */
+function renderStats() {
+  const el = document.getElementById('statRow');
+  const cards = [];
+
+  if (D.iv && D.iv.current != null) {
+    const cls = D.iv.zscore > 1 ? 'up' : D.iv.zscore < -1 ? 'dn' : 'flat';
+    cards.push(`<div class="stat"><div class="lbl">IV Z-Score</div><div class="val ${cls}">${D.iv.zscore.toFixed(2)}</div><div class="sub">${D.iv.source || ''} ${D.iv.current.toFixed(1)}%</div></div>`);
+  }
+  if (D.vol && D.vol.windows) {
+    for (const w of D.vol.windows) {
+      const cls = w.regime === 'high' || w.regime === 'extreme' ? 'dn' : w.regime === 'low' ? 'up' : 'flat';
+      cards.push(`<div class="stat"><div class="lbl">Vol ${w.label}</div><div class="val ${cls}">${w.vol.toFixed(1)}%</div><div class="sub">${w.regime}</div></div>`);
+    }
+  }
+  if (D.flows) {
+    cards.push(`<div class="stat"><div class="lbl">ETF Flow 30d</div><div class="val">${fmtDollar(D.flows.recent30d)}</div><div class="sub">7d: ${fmtDollar(D.flows.recent7d)}</div></div>`);
+  }
+  if (D.ma && D.ma.ma200wk) {
+    cards.push(`<div class="stat"><div class="lbl">200wk MA</div><div class="val">${fmtDollar(D.ma.ma200wk)}</div><div class="sub">${D.ma.pctAbove > 0 ? '+' : ''}${D.ma.pctAbove.toFixed(1)}% above</div></div>`);
+  }
+  el.innerHTML = cards.join('');
+}
+
+/* ── indicator charts ── */
+function renderIV() {
+  const series = filterSeries((D.iv.series || []).map(d => ({t:d.timestamp, c:d.value})), R);
+  const datasets = [mkLine('IV', series.map(d => ({x:d.t, y:d.c})), '#fff')];
+  if (D.iv.mean != null) {
+    datasets.push(mkLine('Mean', series.map(d => ({x:d.t, y:D.iv.mean})), '#555', true));
+    if (D.iv.std != null) {
+      datasets.push(mkLine('+1\u03c3', series.map(d => ({x:d.t, y:D.iv.mean+D.iv.std})), '#a44', true));
+      datasets.push(mkLine('-1\u03c3', series.map(d => ({x:d.t, y:D.iv.mean-D.iv.std})), '#4a4', true));
+    }
+  }
+  destroyChart('iv');
+  charts.iv = new Chart(document.getElementById('ivChart'), {
+    type:'line', data:{datasets}, options: mkOpts(v => v.toFixed(0)+'%'),
+  });
+  document.getElementById('ivTitle').textContent = 'IV Z-Score' + (D.iv.source ? ' ('+D.iv.source+')' : '');
+}
+
+function renderFlows() {
+  const flows = filterSeries((D.flows.dailyFlows||[]).map(d=>({t:d.timestamp,c:d.cumulative})), R);
+  destroyChart('flow');
+  charts.flow = new Chart(document.getElementById('flowChart'), {
+    type:'line',
+    data: { datasets: [{
+      label:'Cumulative Flow',
+      data: flows.map(d=>({x:d.t,y:d.c})),
+      borderColor:'#fff', borderWidth:1.2, pointRadius:0, tension:0.15,
+      fill:true, backgroundColor:'rgba(255,255,255,0.03)',
+    }]},
+    options: mkOpts(v => fmtDollar(v)),
+  });
+}
+
+function renderVol() {
+  const series = filterSeries((D.vol.rollingSeries||[]).map(d=>({t:d.timestamp,c:d.vol})), R);
+  destroyChart('vol');
+  charts.vol = new Chart(document.getElementById('volChart'), {
+    type:'line',
+    data: { datasets: [{
+      label:'30d Vol',
+      data: series.map(d=>({x:d.t,y:d.c})),
+      borderColor:'#fff', borderWidth:1.2, pointRadius:0, tension:0.15,
+      fill:true, backgroundColor:'rgba(255,255,255,0.04)',
+    }]},
+    options: mkOpts(v => v.toFixed(0)+'%'),
+  });
+}
+
+/* ── master render ── */
+function render() {
+  renderFocus();
+  renderTable();
+  renderCorr();
+  renderMoveChart();
+  renderBtcSpotChart();
+  renderStats();
+  renderIV();
+  renderFlows();
+  renderVol();
+}
+
+/* ── data fetch ── */
+async function refresh() {
+  try {
+    const resp = await fetch('market_data.json?t=' + Date.now());
+    if (!resp.ok) throw new Error('not found');
+    D = await resp.json();
+    const age = (Date.now() - new Date(D.updated_at).getTime()) / 1000;
+    document.getElementById('dot').className = age < 600 ? 'dot ok' : 'dot warn';
+    document.getElementById('stxt').textContent = age < 600
+      ? new Date(D.updated_at).toLocaleTimeString()
+      : Math.round(age/60) + 'm ago';
+    render();
+  } catch {
+    document.getElementById('dot').className = 'dot warn';
+    document.getElementById('stxt').textContent = 'waiting for data';
+  }
+}
+
+/* ── range selector ── */
+document.getElementById('rangeBar').addEventListener('click', e => {
+  if (e.target.tagName !== 'BUTTON') return;
+  document.querySelectorAll('.range button').forEach(b => b.classList.remove('on'));
+  e.target.classList.add('on');
+  R = e.target.dataset.key;
+  if (D) render();
+});
+
+/* ── init ── */
+refresh();
+setInterval(refresh, 30000);
+</script>
+</body>
+</html>

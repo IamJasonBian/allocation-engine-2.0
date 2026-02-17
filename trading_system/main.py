@@ -18,6 +18,7 @@ from trading_system.strategies.breakout_strategy import BreakoutStrategy  # noqa
 from trading_system.strategies.momentum_dca_strategy import MomentumDcaLongStrategy  # noqa: E402
 from trading_system.state.state_manager import StateManager  # noqa: E402
 from trading_system.state.blob_logger import log_state_to_blob  # noqa: E402
+from trading_system.market_indicators import fetch_and_write_indicators  # noqa: E402
 from utils.safe_cash_bot import SafeCashBot  # noqa: E402
 
 
@@ -27,7 +28,8 @@ class TradingSystem:
     def __init__(self, twelve_data_api_key: str, symbols: List[str],
                  position_size_pct: float = 0.25, dry_run: bool = True,
                  strategy_name: str = 'momentum_dca',
-                 verbose: bool = False):
+                 verbose: bool = False,
+                 dashboard: bool = False):
         """
         Initialize trading system
 
@@ -38,11 +40,13 @@ class TradingSystem:
             dry_run: If True, simulates orders without execution
             strategy_name: Strategy to use ('momentum_dca' or 'breakout')
             verbose: If True, show detailed output (metrics, portfolio, etc.)
+            dashboard: If True, fetch market indicators and write dashboard data each cycle
         """
         self.symbols = symbols
         self.dry_run = dry_run
         self.strategy_name = strategy_name
         self.verbose = verbose
+        self.dashboard = dashboard
 
         # Initialize components
         self.data_provider = TwelveDataProvider(twelve_data_api_key)
@@ -516,6 +520,13 @@ class TradingSystem:
         # Log state: local file in dry-run, Netlify Blobs when live
         log_state_to_blob(self.state_manager, live=not self.dry_run)
 
+        # Refresh dashboard market indicators
+        if self.dashboard:
+            try:
+                fetch_and_write_indicators(self.symbols)
+            except Exception as e:
+                print(f"  [indicators] Error refreshing dashboard: {e}")
+
         if self.verbose:
             # Show summary
             print(f"\n{'='*70}")
@@ -594,6 +605,11 @@ def main():
         action='store_true',
         help='Show detailed output (metrics, portfolio allocation, etc.)'
     )
+    parser.add_argument(
+        '--dashboard',
+        action='store_true',
+        help='Fetch market indicators and write dashboard/market_data.json each cycle'
+    )
 
     args = parser.parse_args()
 
@@ -624,7 +640,8 @@ def main():
         position_size_pct=0.25,
         dry_run=not args.live,
         strategy_name=args.strategy,
-        verbose=args.verbose
+        verbose=args.verbose,
+        dashboard=args.dashboard
     )
 
     # Run system
