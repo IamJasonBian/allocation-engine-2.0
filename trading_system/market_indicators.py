@@ -332,6 +332,93 @@ def calc_historical_vol(daily_data: List[Dict]) -> Dict:
     return {"windows": windows, "rollingSeries": rolling_series}
 
 
+# ── Hourly-granularity indicators ────────────────────────────────────────
+
+# Annualisation: crypto trades 24/7 (8760 hrs/yr), stocks ~6.5h * 252d (1638 hrs/yr)
+CRYPTO_HOURS_PER_YEAR = 8760
+EQUITY_HOURS_PER_YEAR = 1638
+
+
+def calc_hourly_iv_zscore(hourly_data: List[Dict], is_crypto: bool = False) -> Dict:
+    """
+    IV Z-Score from hourly close-to-close returns.
+    Uses a 168-hour (1 week) rolling window for the vol estimate,
+    then z-scores across the full available history.
+    """
+    ann = CRYPTO_HOURS_PER_YEAR if is_crypto else EQUITY_HOURS_PER_YEAR
+    closes = [d["close"] for d in hourly_data]
+    if len(closes) < 200:
+        return {"source": None, "current": None, "mean": None, "std": None,
+                "zscore": None, "series": []}
+
+    log_ret = [math.log(closes[i] / closes[i - 1])
+               for i in range(1, len(closes)) if closes[i - 1] > 0]
+    window = 168  # 1 week of hourly bars
+    rolling_vol = []
+    rolling_ts = []
+
+    for i in range(window - 1, len(log_ret)):
+        sl = log_ret[i - window + 1: i + 1]
+        vol = _stddev(sl) * math.sqrt(ann)
+        rolling_vol.append(vol)
+        rolling_ts.append(hourly_data[i + 1]["timestamp"])
+
+    if len(rolling_vol) < 30:
+        return {"source": None, "current": None, "mean": None, "std": None,
+                "zscore": None, "series": []}
+
+    current = rolling_vol[-1]
+    mean_val = _avg(rolling_vol)
+    std_val = _stddev(rolling_vol)
+
+    return {
+        "source": "168h Realised Vol",
+        "current": round(current * 100, 2),
+        "mean": round(mean_val * 100, 2),
+        "std": round(std_val * 100, 2),
+        "zscore": round((current - mean_val) / std_val, 2) if std_val > 0 else 0,
+        "series": [
+            {"timestamp": rolling_ts[i], "value": round(rolling_vol[i] * 100, 2)}
+            for i in range(len(rolling_vol))
+        ],
+    }
+
+
+def calc_hourly_vol(hourly_data: List[Dict], is_crypto: bool = False) -> Dict:
+    """
+    Historical volatility from hourly OHLCV (Yang-Zhang).
+    Rolling 24-hour window, annualised.
+    """
+    ann = CRYPTO_HOURS_PER_YEAR if is_crypto else EQUITY_HOURS_PER_YEAR
+    n = len(hourly_data)
+
+    # Spot windows
+    windows = []
+    for label, period in [("4h", 4), ("24h", 24), ("1w", 168)]:
+        if n < period + 2:
+            continue
+        vol = _yang_zhang_vol(hourly_data[-period:], trading_days=ann)
+        regime = "normal"
+        if vol > 0.8:
+            regime = "extreme"
+        elif vol > 0.5:
+            regime = "high"
+        elif vol < 0.2:
+            regime = "low"
+        windows.append({"label": label, "vol": round(vol * 100, 2), "regime": regime})
+
+    # Rolling 24h series
+    rolling_series = []
+    for i in range(24, n):
+        vol = _yang_zhang_vol(hourly_data[i - 24: i], trading_days=ann)
+        rolling_series.append({
+            "timestamp": hourly_data[i]["timestamp"],
+            "vol": round(vol * 100, 2),
+        })
+
+    return {"windows": windows, "rollingSeries": rolling_series}
+
+
 # ── Instrument data + correlations ───────────────────────────────────────
 
 def _build_quote(series: List[Dict]) -> Optional[Dict]:
@@ -457,6 +544,16 @@ def fetch_and_write_indicators(symbols: Optional[List[str]] = None) -> Optional[
     ma = calc_200wk_ma(btc_weekly)
     vol = calc_historical_vol(btc_daily) if btc_daily else {"windows": [], "rollingSeries": []}
 
+    # -- Hourly-granularity indicators (from BTC/USD hourly bars) --
+    btc_hourly = hourly_data.get("BTC/USD", [])
+    hourly_iv = calc_hourly_iv_zscore(btc_hourly, is_crypto=True) if btc_hourly else {
+        "source": None, "current": None, "mean": None, "std": None,
+        "zscore": None, "series": [],
+    }
+    hourly_vol = calc_hourly_vol(btc_hourly, is_crypto=True) if btc_hourly else {
+        "windows": [], "rollingSeries": [],
+    }
+
     # -- Correlations: BTC and QQQ vs major indexes --
     corr_windows = [5, 10, 15, 20, 25, 30, 35]  # 1W through 7W in trading days
     focus = ["BTC", "BTC/USD"]
@@ -475,6 +572,8 @@ def fetch_and_write_indicators(symbols: Optional[List[str]] = None) -> Optional[
         "flows": flows,
         "ma": ma,
         "vol": vol,
+        "hourly_iv": hourly_iv,
+        "hourly_vol": hourly_vol,
     }
 
     DASHBOARD_DIR.mkdir(exist_ok=True)

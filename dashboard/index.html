@@ -99,7 +99,7 @@
   <div class="section">
     <h2>Price Movement (Normalised %)</h2>
     <div class="cgrid c2">
-      <div class="cbox"><h3>BTC Trust vs Indexes</h3><canvas id="chartMove"></canvas></div>
+      <div class="cbox"><h3>BTC/USD vs Indexes (Normalised %)</h3><canvas id="chartMove"></canvas></div>
       <div class="cbox"><h3>BTC/USD Spot</h3><canvas id="chartBtcSpot"></canvas></div>
     </div>
   </div>
@@ -280,7 +280,8 @@ function renderCorr() {
 function renderMoveChart() {
   const cfg = RANGE_CFG[R];
   const sourceKey = cfg.useHourly ? 'hourly' : 'daily';
-  const syms = ['BTC','QQQ','SPY','GLD','DIA','IWM','EFA'];
+  // Use BTC/USD (not BTC ETF) to avoid gap-inflation from overnight moves
+  const syms = ['BTC/USD','QQQ','SPY','GLD','DIA','IWM','EFA'];
   const datasets = [];
 
   for (const sym of syms) {
@@ -319,17 +320,24 @@ function renderBtcSpotChart() {
 function renderStats() {
   const el = document.getElementById('statRow');
   const cards = [];
+  const useHourly = RANGE_CFG[R].useHourly;
 
-  if (D.iv && D.iv.current != null) {
-    const cls = D.iv.zscore > 1 ? 'up' : D.iv.zscore < -1 ? 'dn' : 'flat';
-    cards.push(`<div class="stat"><div class="lbl">IV Z-Score</div><div class="val ${cls}">${D.iv.zscore.toFixed(2)}</div><div class="sub">${D.iv.source || ''} ${D.iv.current.toFixed(1)}%</div></div>`);
+  // IV z-score: pick hourly or daily source
+  const ivSrc = (useHourly && D.hourly_iv && D.hourly_iv.current != null) ? D.hourly_iv : D.iv;
+  if (ivSrc && ivSrc.current != null) {
+    const cls = ivSrc.zscore > 1 ? 'up' : ivSrc.zscore < -1 ? 'dn' : 'flat';
+    cards.push(`<div class="stat"><div class="lbl">IV Z-Score</div><div class="val ${cls}">${ivSrc.zscore.toFixed(2)}</div><div class="sub">${ivSrc.source || ''} ${ivSrc.current.toFixed(1)}%</div></div>`);
   }
-  if (D.vol && D.vol.windows) {
-    for (const w of D.vol.windows) {
+
+  // Vol windows: hourly (4h/24h/1w) for short ranges, daily (30d/60d/...) for long
+  const volSrc = (useHourly && D.hourly_vol) ? D.hourly_vol : D.vol;
+  if (volSrc && volSrc.windows) {
+    for (const w of volSrc.windows) {
       const cls = w.regime === 'high' || w.regime === 'extreme' ? 'dn' : w.regime === 'low' ? 'up' : 'flat';
       cards.push(`<div class="stat"><div class="lbl">Vol ${w.label}</div><div class="val ${cls}">${w.vol.toFixed(1)}%</div><div class="sub">${w.regime}</div></div>`);
     }
   }
+
   if (D.flows) {
     cards.push(`<div class="stat"><div class="lbl">ETF Flow 30d</div><div class="val">${fmtDollar(D.flows.recent30d)}</div><div class="sub">7d: ${fmtDollar(D.flows.recent7d)}</div></div>`);
   }
@@ -341,24 +349,36 @@ function renderStats() {
 
 /* ── indicator charts ── */
 function renderIV() {
-  const series = filterSeries((D.iv.series || []).map(d => ({t:d.timestamp, c:d.value})), R);
-  const datasets = [mkLine('IV', series.map(d => ({x:d.t, y:d.c})), '#fff')];
-  if (D.iv.mean != null) {
-    datasets.push(mkLine('Mean', series.map(d => ({x:d.t, y:D.iv.mean})), '#555', true));
-    if (D.iv.std != null) {
-      datasets.push(mkLine('+1\u03c3', series.map(d => ({x:d.t, y:D.iv.mean+D.iv.std})), '#a44', true));
-      datasets.push(mkLine('-1\u03c3', series.map(d => ({x:d.t, y:D.iv.mean-D.iv.std})), '#4a4', true));
+  const useHourly = RANGE_CFG[R].useHourly;
+  // For 1D/1W: use hourly IV (168h rolling). For 2W+: use daily IV (30d rolling).
+  const src = (useHourly && D.hourly_iv && D.hourly_iv.series && D.hourly_iv.series.length > 0)
+    ? D.hourly_iv : D.iv;
+  const series = filterSeries((src.series || []).map(d => ({t:d.timestamp, c:d.value})), R);
+  // If too few points after filtering (daily data on 1D view), show last 30 days instead
+  const fallback = series.length < 3;
+  const plotData = fallback
+    ? (src.series || []).slice(-30).map(d => ({t:d.timestamp, c:d.value}))
+    : series;
+
+  const datasets = [mkLine('IV', plotData.map(d => ({x:d.t, y:d.c})), '#fff')];
+  if (src.mean != null) {
+    datasets.push(mkLine('Mean', plotData.map(d => ({x:d.t, y:src.mean})), '#555', true));
+    if (src.std != null) {
+      datasets.push(mkLine('+1\u03c3', plotData.map(d => ({x:d.t, y:src.mean+src.std})), '#a44', true));
+      datasets.push(mkLine('-1\u03c3', plotData.map(d => ({x:d.t, y:src.mean-src.std})), '#4a4', true));
     }
   }
   destroyChart('iv');
   charts.iv = new Chart(document.getElementById('ivChart'), {
     type:'line', data:{datasets}, options: mkOpts(v => v.toFixed(0)+'%'),
   });
-  document.getElementById('ivTitle').textContent = 'IV Z-Score' + (D.iv.source ? ' ('+D.iv.source+')' : '');
+  document.getElementById('ivTitle').textContent = 'IV Z-Score' + (src.source ? ' ('+src.source+')' : '');
 }
 
 function renderFlows() {
-  const flows = filterSeries((D.flows.dailyFlows||[]).map(d=>({t:d.timestamp,c:d.cumulative})), R);
+  // ETF flows are daily-only; use min 30 data points so chart isn't empty
+  let flows = filterSeries((D.flows.dailyFlows||[]).map(d=>({t:d.timestamp,c:d.cumulative})), R);
+  if (flows.length < 3) flows = (D.flows.dailyFlows||[]).slice(-30).map(d=>({t:d.timestamp,c:d.cumulative}));
   destroyChart('flow');
   charts.flow = new Chart(document.getElementById('flowChart'), {
     type:'line',
@@ -373,12 +393,19 @@ function renderFlows() {
 }
 
 function renderVol() {
-  const series = filterSeries((D.vol.rollingSeries||[]).map(d=>({t:d.timestamp,c:d.vol})), R);
+  const useHourly = RANGE_CFG[R].useHourly;
+  // For 1D/1W: use hourly vol (24h rolling). For 2W+: use daily vol (30d rolling).
+  const src = (useHourly && D.hourly_vol && D.hourly_vol.rollingSeries && D.hourly_vol.rollingSeries.length > 0)
+    ? D.hourly_vol : D.vol;
+  let series = filterSeries((src.rollingSeries||[]).map(d=>({t:d.timestamp,c:d.vol})), R);
+  if (series.length < 3) series = (src.rollingSeries||[]).slice(-30).map(d=>({t:d.timestamp,c:d.vol}));
+
+  const label = useHourly && src === D.hourly_vol ? '24h Rolling Vol' : '30d Rolling Vol';
   destroyChart('vol');
   charts.vol = new Chart(document.getElementById('volChart'), {
     type:'line',
     data: { datasets: [{
-      label:'30d Vol',
+      label,
       data: series.map(d=>({x:d.t,y:d.c})),
       borderColor:'#fff', borderWidth:1.2, pointRadius:0, tension:0.15,
       fill:true, backgroundColor:'rgba(255,255,255,0.04)',
