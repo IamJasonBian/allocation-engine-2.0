@@ -945,6 +945,100 @@ class SafeCashBot:
             print(f"[ERR] Error getting open option orders: {e}")
             return []
 
+    def get_recent_orders(self, days=7):
+        """
+        Get recently filled and cancelled orders for this account.
+
+        Args:
+            days: Number of days of history to fetch (default 7)
+
+        Returns:
+            List of historical orders with same shape as get_open_orders()
+        """
+        try:
+            from datetime import timedelta
+            cutoff = datetime.utcnow() - timedelta(days=days)
+            cutoff_str = cutoff.strftime('%Y-%m-%dT00:00:00Z')
+
+            all_orders = r.orders.get_all_stock_orders(info=None)
+
+            orders = []
+            if not all_orders:
+                return orders
+
+            for order in all_orders:
+                state = order.get('state', '')
+                if state not in ('filled', 'cancelled', 'failed', 'rejected'):
+                    continue
+
+                updated_at_raw = order.get('updated_at', '')
+                if updated_at_raw and updated_at_raw < cutoff_str:
+                    continue
+
+                order_id = order.get('id', 'N/A')
+                symbol = order.get('symbol', 'N/A')
+
+                if symbol == 'N/A':
+                    instrument_id = order.get('instrument_id')
+                    if instrument_id:
+                        try:
+                            instrument = r.stocks.get_instrument_by_url(
+                                f"https://api.robinhood.com/instruments/{instrument_id}/"
+                            )
+                            if instrument:
+                                symbol = instrument.get('symbol', 'N/A')
+                        except Exception:
+                            pass
+
+                side = order.get('side', 'N/A')
+                order_type = order.get('type', 'N/A')
+                trigger = order.get('trigger', 'immediate')
+                quantity = float(order.get('quantity', 0))
+                limit_price = order.get('price')
+                stop_price = order.get('stop_price')
+                average_price = order.get('average_price')
+                cumulative_quantity = order.get('cumulative_quantity')
+                created_at = order.get('created_at', 'N/A')
+                updated_at = order.get('updated_at', 'N/A')
+
+                try:
+                    if created_at != 'N/A':
+                        created_dt = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+                        created_at = created_dt.strftime('%Y-%m-%d %H:%M:%S')
+                except Exception:
+                    pass
+
+                if trigger == 'stop' and order_type == 'limit':
+                    order_desc = 'Stop Limit'
+                elif trigger == 'stop':
+                    order_desc = 'Stop Loss'
+                elif order_type == 'limit':
+                    order_desc = 'Limit'
+                else:
+                    order_desc = 'Market'
+
+                orders.append({
+                    'order_id': order_id,
+                    'symbol': symbol,
+                    'side': side.upper() if side != 'N/A' else 'N/A',
+                    'order_type': order_desc,
+                    'trigger': trigger,
+                    'state': state,
+                    'quantity': quantity,
+                    'limit_price': float(limit_price) if limit_price else None,
+                    'stop_price': float(stop_price) if stop_price else None,
+                    'average_price': float(average_price) if average_price else None,
+                    'filled_quantity': float(cumulative_quantity) if cumulative_quantity else None,
+                    'created_at': created_at,
+                    'updated_at': updated_at,
+                })
+
+            return orders
+
+        except Exception as e:
+            print(f"❌ Error getting recent orders: {e}")
+            return []
+
     def validate_buy_order(self, symbol, quantity, price):
         """
         Validate a buy order before execution

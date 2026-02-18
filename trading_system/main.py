@@ -574,6 +574,8 @@ class TradingSystem:
         if self.strategy_name == 'momentum_dca_long':
             open_orders = self.trading_bot.get_open_orders()
 
+        recent_orders = self.trading_bot.get_recent_orders(days=7)
+
         # Print order book before processing through state manager
         if open_orders:
             # Filter to --ticker symbols when not in verbose mode
@@ -651,6 +653,7 @@ class TradingSystem:
             order_book=open_orders,
             portfolio=portfolio_data,
             drift_metrics=drift_metrics,
+            recent_orders=recent_orders,
         )
 
         # Refresh dashboard market indicators
