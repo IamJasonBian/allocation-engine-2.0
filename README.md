@@ -1,5 +1,7 @@
 ## Summary
 
+Version - 0.1.0 - This is part of the [allocation-manager](https://github.com/OptimChain/allocation-manager/) system.
+
 1. **Install dependencies**:
 ```bash
 pip install -r requirements.txt
