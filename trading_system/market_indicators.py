@@ -506,9 +506,11 @@ def _compact_hourly(series: List[Dict]) -> List[Dict]:
 
 # ── Main entry point ─────────────────────────────────────────────────────
 
-def fetch_and_write_indicators(symbols: Optional[List[str]] = None) -> Optional[str]:
+def fetch_and_write_indicators(symbols: Optional[List[str]] = None,
+                               extra_data: Optional[Dict] = None) -> Optional[str]:
     """
     Fetch market indicator data and write to dashboard/market_data.json.
+    extra_data: optional dict merged into the output (e.g. options positions).
     Returns the output file path on success.
     """
     print("\n  [indicators] Fetching market indicator data...")
@@ -575,6 +577,8 @@ def fetch_and_write_indicators(symbols: Optional[List[str]] = None) -> Optional[
         "hourly_iv": hourly_iv,
         "hourly_vol": hourly_vol,
     }
+    if extra_data:
+        result.update(extra_data)
 
     DASHBOARD_DIR.mkdir(exist_ok=True)
     DATA_FILE.write_text(json.dumps(result))
