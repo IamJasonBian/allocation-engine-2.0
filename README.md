@@ -1,6 +1,9 @@
 ## Summary
 
-Version - 0.1.0 - This is part of the [allocation-manager](https://github.com/OptimChain/allocation-manager/) system.
+Version - 0.1.0 - This is hobbyist client side agentic trading package (builds with the [allocation-manager](https://github.com/OptimChain/allocation-manager/) service). 
+
+<img width="487" height="537" alt="agentic" src="https://github.com/user-attachments/assets/6ecd8949-2ba0-4215-8b8e-4b7a5f62b049" />
+
 
 1. **Install dependencies**:
 ```bash
