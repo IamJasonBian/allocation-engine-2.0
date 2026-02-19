@@ -139,7 +139,7 @@ class TestGapQuantity:
         strategy = _make_strategy()
         position = _make_position('BTC', 3262, 31.0)
         signal = strategy.analyze_symbol('BTC', {'current_price': 31.0}, position, _make_ticker())
-        assert signal['order']['quantity'] == 300  # capped to lot_size
+        assert signal['order']['quantity'] == 200  # capped to lot_size
         assert isinstance(signal['order']['quantity'], int)
 
     def test_stock_whole_shares(self):

@@ -19,20 +19,20 @@ def verify_isolation():
     target_account = os.getenv('RH_AUTOMATED_ACCOUNT_NUMBER')
 
     print("\n" + "="*70)
-    print("🔍 ISOLATION VERIFICATION")
+    print("ISOLATION VERIFICATION")
     print("="*70 + "\n")
 
     print(f"Target Account: {target_account}")
 
     if target_account != "490706777":
-        print(f"❌ WARNING: Expected 490706777, got {target_account}")
+        print(f"[ERR] WARNING: Expected 490706777, got {target_account}")
         return False
 
     # Login
     auth = RobinhoodAuth()
     auth.login()
 
-    print("\n1️⃣ Checking all available accounts...")
+    print("\n[1] Checking all available accounts...")
     try:
         url = 'https://api.robinhood.com/accounts/?default_to_all_accounts=true'
         data = r.helper.request_get(url, dataType='regular')
@@ -44,13 +44,13 @@ def verify_isolation():
             for idx, acc in enumerate(accounts, 1):
                 acc_num = acc.get('account_number')
                 acc_type = acc.get('type')
-                is_target = "✅ TARGET" if acc_num == target_account else ""
+                is_target = "[OK] TARGET" if acc_num == target_account else ""
                 print(f"   Account {idx}: {acc_num} ({acc_type}) {is_target}")
 
     except Exception as e:
-        print(f"   ⚠️  Could not list all accounts: {e}")
+        print(f"   [WARN]  Could not list all accounts: {e}")
 
-    print("\n2️⃣ Checking target account details...")
+    print("\n[2] Checking target account details...")
     try:
         account = r.profiles.load_account_profile(account_number=target_account)
         portfolio = r.profiles.load_portfolio_profile(account_number=target_account)
@@ -60,37 +60,37 @@ def verify_isolation():
         buying_power = float(account.get('buying_power', 0))
         equity = float(portfolio.get('equity', 0))
 
-        print(f"   ✅ Successfully accessed account {target_account}")
+        print(f"   [OK] Successfully accessed account {target_account}")
         print(f"   Type: {acc_type}")
         print(f"   Cash: ${cash:,.2f}")
         print(f"   Buying Power: ${buying_power:,.2f}")
         print(f"   Equity: ${equity:,.2f}")
 
         if acc_type == 'cash':
-            print("   ✅ VERIFIED: Cash account (no margin)")
+            print("   [OK] VERIFIED: Cash account (no margin)")
         else:
-            print(f"   ⚠️  Account type is '{acc_type}', will still use cash only")
+            print(f"   [WARN]  Account type is '{acc_type}', will still use cash only")
 
     except Exception as e:
-        print(f"   ❌ ERROR: Cannot access account {target_account}")
+        print(f"   [ERR] ERROR: Cannot access account {target_account}")
         print(f"   {e}")
         auth.logout()
         return False
 
-    print("\n3️⃣ Checking API call isolation...")
+    print("\n[3] Checking API call isolation...")
     try:
         # Test that positions are filtered by account
         url = f'https://api.robinhood.com/positions/?account_number={target_account}'
         positions_data = r.helper.request_get(url, dataType='pagination')
 
-        print(f"   ✅ Positions API filtered to account {target_account}")
+        print(f"   [OK] Positions API filtered to account {target_account}")
         print(f"   Found {len([p for p in positions_data if float(p.get('quantity', 0)) > 0])} open positions")
 
     except Exception as e:
-        print(f"   ⚠️  Could not verify positions API: {e}")
+        print(f"   [WARN]  Could not verify positions API: {e}")
 
     print("\n" + "="*70)
-    print("✅ ISOLATION VERIFIED")
+    print("[OK] ISOLATION VERIFIED")
     print("="*70)
     print(f"\nBot is locked to account: {target_account}")
     print("All orders will be executed ONLY in this account")

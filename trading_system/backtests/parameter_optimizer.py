@@ -1,0 +1,264 @@
+"""
+Parameter optimization, rolling metrics, drift detection, and regime suggestions.
+
+- grid_search_params: 3D grid search over DCA simulation parameters
+- compute_rolling_metrics: rolling Sharpe, completion rate, vol
+- detect_drift: flag dates where rolling metrics cross thresholds
+- suggest_regime_params: recommend parameter adjustments based on volatility regime
+"""
+
+import math
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional, Tuple
+
+from trading_system.backtests.metrics import compute_metrics
+from trading_system.backtests.simulation import DailySnapshot, run_simulation
+
+
+# ---------------------------------------------------------------------------
+# Grid search
+# ---------------------------------------------------------------------------
+
+@dataclass
+class GridSearchResult:
+    """Ranked parameter combinations with metrics."""
+    rows: List[Dict]  # sorted by objective (best first)
+    best: Dict        # top row
+    grid_shape: Tuple[int, int, int]  # (stop_offset_count, buy_offset_count, coverage_count)
+
+
+def grid_search_params(
+    bars: List[Dict],
+    symbol: str,
+    shares: int,
+    price: float,
+    stop_offsets: Optional[List[float]] = None,
+    buy_offsets: Optional[List[float]] = None,
+    coverages: Optional[List[float]] = None,
+) -> GridSearchResult:
+    """
+    3D grid search over stop_offset_pct x buy_offset x coverage_threshold.
+
+    Objective: maximize Sharpe ratio.
+
+    Default grid:
+      stop_offset: [0.005, 0.01125, 0.0175, 0.02375, 0.03]  (5 values)
+      buy_offset:  [0.10, 0.20, 0.30, 0.40, 0.50]            (5 values)
+      coverage:    [0.10, 0.20, 0.30]                          (3 values)
+      Total: 75 combos
+    """
+    if stop_offsets is None:
+        stop_offsets = [0.005, 0.01125, 0.0175, 0.02375, 0.03]
+    if buy_offsets is None:
+        buy_offsets = [0.10, 0.20, 0.30, 0.40, 0.50]
+    if coverages is None:
+        coverages = [0.10, 0.20, 0.30]
+
+    rows: List[Dict] = []
+    total = len(stop_offsets) * len(buy_offsets) * len(coverages)
+    done = 0
+
+    for so in stop_offsets:
+        for bo in buy_offsets:
+            for cov in coverages:
+                result = run_simulation(
+                    bars=bars,
+                    symbol=symbol,
+                    initial_shares=shares,
+                    initial_price=price,
+                    stop_offset_pct=so,
+                    buy_offset=bo,
+                    coverage_threshold=cov,
+                )
+                m = compute_metrics(result)
+                rows.append({
+                    "stop_offset_pct": so,
+                    "buy_offset": bo,
+                    "coverage_threshold": cov,
+                    "sharpe_ratio": m.sharpe_ratio,
+                    "total_return_pct": m.total_return_pct,
+                    "annualized_return_pct": m.annualized_return_pct,
+                    "max_drawdown_pct": m.max_drawdown_pct,
+                    "completion_rate_pct": m.completion_rate_pct,
+                    "pairs_placed": m.pairs_placed,
+                    "pairs_completed": m.pairs_completed,
+                    "excess_return_pct": m.excess_return_pct,
+                })
+                done += 1
+                if done % 25 == 0:
+                    print(f"    Grid search: {done}/{total} combos evaluated...")
+
+    # Sort by Sharpe (descending)
+    rows.sort(key=lambda r: r["sharpe_ratio"], reverse=True)
+
+    return GridSearchResult(
+        rows=rows,
+        best=rows[0] if rows else {},
+        grid_shape=(len(stop_offsets), len(buy_offsets), len(coverages)),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Rolling metrics
+# ---------------------------------------------------------------------------
+
+def compute_rolling_metrics(
+    snapshots: List[DailySnapshot],
+    window: int = 21,
+    risk_free_rate: float = 0.05,
+) -> List[Dict]:
+    """
+    Compute rolling metrics over a sliding window of daily snapshots.
+
+    Returns a list of dicts: {date, rolling_sharpe, rolling_completion_rate,
+    rolling_return, rolling_vol}
+    """
+    if len(snapshots) < window + 1:
+        return []
+
+    results: List[Dict] = []
+    daily_rf = risk_free_rate / 252
+
+    for i in range(window, len(snapshots)):
+        win_snaps = snapshots[i - window: i + 1]
+
+        # Daily returns in window
+        daily_returns = []
+        for j in range(1, len(win_snaps)):
+            prev = win_snaps[j - 1].net_value
+            if prev > 0:
+                daily_returns.append((win_snaps[j].net_value - prev) / prev)
+
+        # Rolling return
+        start_val = win_snaps[0].net_value
+        end_val = win_snaps[-1].net_value
+        rolling_return = ((end_val - start_val) / start_val * 100) if start_val > 0 else 0.0
+
+        # Rolling vol (annualized)
+        if len(daily_returns) >= 2:
+            mean_r = sum(daily_returns) / len(daily_returns)
+            var = sum((r - mean_r) ** 2 for r in daily_returns) / (len(daily_returns) - 1)
+            std = math.sqrt(var) if var > 0 else 0.0
+            rolling_vol = std * math.sqrt(252) * 100  # as percentage
+        else:
+            rolling_vol = 0.0
+
+        # Rolling Sharpe
+        if len(daily_returns) >= 2:
+            mean_r = sum(daily_returns) / len(daily_returns)
+            var = sum((r - mean_r) ** 2 for r in daily_returns) / (len(daily_returns) - 1)
+            std = math.sqrt(var) if var > 0 else 0.0
+            if std > 0:
+                rolling_sharpe = (mean_r - daily_rf) / std * math.sqrt(252)
+            else:
+                rolling_sharpe = 0.0
+        else:
+            rolling_sharpe = 0.0
+
+        # Rolling completion rate: use coverage_pct as a proxy
+        # (actual pair completion requires pair-level tracking, so we use
+        # the coverage percentage which reflects active pair management)
+        rolling_completion = win_snaps[-1].coverage_pct
+
+        results.append({
+            "date": snapshots[i].date,
+            "rolling_sharpe": round(rolling_sharpe, 3),
+            "rolling_completion_rate": round(rolling_completion, 1),
+            "rolling_return": round(rolling_return, 2),
+            "rolling_vol": round(rolling_vol, 2),
+        })
+
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Drift detection
+# ---------------------------------------------------------------------------
+
+def detect_drift(
+    rolling_metrics: List[Dict],
+    sharpe_threshold: float = -1.0,
+    completion_threshold: float = 50.0,
+) -> List[Dict]:
+    """
+    Flag dates where rolling Sharpe < sharpe_threshold or
+    rolling completion rate < completion_threshold.
+
+    Returns list of drift alerts: {date, metric, value, threshold}.
+    """
+    alerts: List[Dict] = []
+    for rm in rolling_metrics:
+        if rm["rolling_sharpe"] < sharpe_threshold:
+            alerts.append({
+                "date": rm["date"],
+                "metric": "rolling_sharpe",
+                "value": rm["rolling_sharpe"],
+                "threshold": sharpe_threshold,
+            })
+        if rm["rolling_completion_rate"] < completion_threshold:
+            alerts.append({
+                "date": rm["date"],
+                "metric": "rolling_completion_rate",
+                "value": rm["rolling_completion_rate"],
+                "threshold": completion_threshold,
+            })
+    return alerts
+
+
+# ---------------------------------------------------------------------------
+# Regime-based parameter suggestions
+# ---------------------------------------------------------------------------
+
+def suggest_regime_params(
+    rolling_vol: float,
+    current_params: Optional[Dict] = None,
+) -> Dict:
+    """
+    Suggest parameter adjustments based on annualized volatility regime.
+
+    Regimes:
+      High vol (>30%): widen stop_offset, increase buy_offset
+      Low vol (<15%):  tighten stop_offset, decrease buy_offset
+      Medium:          keep defaults
+
+    Args:
+        rolling_vol: annualized volatility as percentage (e.g. 25.0 = 25%)
+        current_params: current parameters (for reference)
+
+    Returns:
+        Dict of suggested parameters with regime label.
+    """
+    if current_params is None:
+        current_params = {
+            "stop_offset_pct": 0.01,
+            "buy_offset": 0.20,
+            "coverage_threshold": 0.20,
+        }
+
+    if rolling_vol > 30.0:
+        return {
+            "regime": "HIGH_VOL",
+            "rolling_vol_pct": round(rolling_vol, 1),
+            "stop_offset_pct": 0.02,
+            "buy_offset": 0.35,
+            "coverage_threshold": 0.15,
+            "rationale": "Widen stops and buy offsets to avoid whipsaw in high volatility",
+        }
+    elif rolling_vol < 15.0:
+        return {
+            "regime": "LOW_VOL",
+            "rolling_vol_pct": round(rolling_vol, 1),
+            "stop_offset_pct": 0.0075,
+            "buy_offset": 0.15,
+            "coverage_threshold": 0.25,
+            "rationale": "Tighten stops and offsets to capture smaller moves in low volatility",
+        }
+    else:
+        return {
+            "regime": "MEDIUM_VOL",
+            "rolling_vol_pct": round(rolling_vol, 1),
+            "stop_offset_pct": current_params.get("stop_offset_pct", 0.01),
+            "buy_offset": current_params.get("buy_offset", 0.20),
+            "coverage_threshold": current_params.get("coverage_threshold", 0.20),
+            "rationale": "Moderate volatility -- default parameters appropriate",
+        }

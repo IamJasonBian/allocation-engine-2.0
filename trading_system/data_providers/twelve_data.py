@@ -19,7 +19,8 @@ class TwelveDataProvider:
         'BTC': 'BTC',
         'SPY': 'SPY',  # S&P 500 ETF
         'QQQ': 'QQQ',
-        'AMZN': 'AMZN'
+        'AMZN': 'AMZN',
+        'IWM': 'IWM',  # Russell 2000 ETF
     }
 
     def __init__(self, api_key: str):

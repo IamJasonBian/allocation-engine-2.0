@@ -28,7 +28,8 @@ def _get_config():
     return {"token": token, "site_id": site_id}
 
 
-def _serialize_state(state_manager, order_book=None, portfolio=None) -> dict:
+def _serialize_state(state_manager, order_book=None, portfolio=None,
+                     drift_metrics=None) -> dict:
     """Serialize StateManager state to a JSON-safe dictionary."""
     snapshot = {
         "timestamp": datetime.now().isoformat(),
@@ -47,6 +48,8 @@ def _serialize_state(state_manager, order_book=None, portfolio=None) -> dict:
         # Include options from the portfolio if present
         if isinstance(portfolio, dict) and portfolio.get("options"):
             snapshot["options"] = portfolio["options"]
+    if drift_metrics is not None:
+        snapshot["drift_metrics"] = drift_metrics
     return snapshot
 
 
@@ -57,10 +60,12 @@ def _serialize_value(obj):
     raise TypeError(f"Object of type {type(obj)} is not JSON serializable")
 
 
-def _log_local(state_manager, order_book=None, portfolio=None):
+def _log_local(state_manager, order_book=None, portfolio=None,
+               drift_metrics=None):
     """Write state snapshot to a local JSON file under state_logs/."""
     LOCAL_LOG_DIR.mkdir(exist_ok=True)
-    snapshot = _serialize_state(state_manager, order_book=order_book, portfolio=portfolio)
+    snapshot = _serialize_state(state_manager, order_book=order_book,
+                                portfolio=portfolio, drift_metrics=drift_metrics)
     blob_key = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
     payload = json.dumps(snapshot, default=_serialize_value, indent=2)
 
@@ -70,7 +75,8 @@ def _log_local(state_manager, order_book=None, portfolio=None):
     return str(out_path)
 
 
-def _log_remote(state_manager, order_book=None, portfolio=None):
+def _log_remote(state_manager, order_book=None, portfolio=None,
+                drift_metrics=None):
     """Upload state snapshot to Netlify Blobs."""
     config = _get_config()
     if not config:
@@ -78,7 +84,8 @@ def _log_remote(state_manager, order_book=None, portfolio=None):
               "NETLIFY_API_TOKEN or NETLIFY_SITE_ID not set")
         return None
 
-    snapshot = _serialize_state(state_manager, order_book=order_book, portfolio=portfolio)
+    snapshot = _serialize_state(state_manager, order_book=order_book,
+                                portfolio=portfolio, drift_metrics=drift_metrics)
     blob_key = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
     payload = json.dumps(snapshot, default=_serialize_value)
 
@@ -98,8 +105,11 @@ def _log_remote(state_manager, order_book=None, portfolio=None):
         return None
 
 
-def log_state_to_blob(state_manager, live=False, order_book=None, portfolio=None):
+def log_state_to_blob(state_manager, live=False, order_book=None,
+                      portfolio=None, drift_metrics=None):
     """Log StateManager state. Writes locally in dry-run, uploads to Netlify Blobs when live."""
     if live:
-        return _log_remote(state_manager, order_book=order_book, portfolio=portfolio)
-    return _log_local(state_manager, order_book=order_book, portfolio=portfolio)
+        return _log_remote(state_manager, order_book=order_book,
+                           portfolio=portfolio, drift_metrics=drift_metrics)
+    return _log_local(state_manager, order_book=order_book,
+                      portfolio=portfolio, drift_metrics=drift_metrics)

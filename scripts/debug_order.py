@@ -17,35 +17,35 @@ def debug_order():
     bot = SafeCashBot()
 
     print("\n" + "="*70)
-    print("🔍 DEBUG: Order Placement")
+    print("DEBUG: Order Placement")
     print("="*70 + "\n")
 
     # Check account
-    print("1️⃣ Checking account access...")
+    print("[1] Checking account access...")
     try:
         account = r.profiles.load_account_profile(account_number='490706777')
-        print(f"   ✅ Account: {account.get('account_number')}")
+        print(f"   [OK] Account: {account.get('account_number')}")
         print(f"   Type: {account.get('type')}")
         print(f"   Cash: ${float(account.get('cash', 0)):.2f}")
     except Exception as e:
-        print(f"   ❌ Error: {e}")
+        print(f"   [ERR] Error: {e}")
         bot.auth.logout()
         return
 
     # Get AAPL quote
-    print("\n2️⃣ Getting AAPL quote...")
+    print("\n[2] Getting AAPL quote...")
     try:
         quote = r.stocks.get_quotes('AAPL')[0]
         price = float(r.stocks.get_latest_price('AAPL')[0])
-        print(f"   ✅ Current price: ${price:.2f}")
+        print(f"   [OK] Current price: ${price:.2f}")
         print(f"   Ask price: ${float(quote.get('ask_price', 0)):.2f}")
     except Exception as e:
-        print(f"   ❌ Error: {e}")
+        print(f"   [ERR] Error: {e}")
         bot.auth.logout()
         return
 
     # Try placing order with detailed error catching
-    print("\n3️⃣ Attempting to place order...")
+    print("\n[3] Attempting to place order...")
     print("   Symbol: AAPL")
     print("   Quantity: 1")
     print(f"   Limit: ${price * 1.005:.2f}")
@@ -60,7 +60,7 @@ def debug_order():
             account_number='490706777'
         )
 
-        print("\n   ✅ Order Response:")
+        print("\n   [OK] Order Response:")
         print(f"   Type: {type(order)}")
         print(f"   Content: {order}")
 
@@ -73,12 +73,12 @@ def debug_order():
 
             # Check for reject reason
             if 'reject_reason' in order:
-                print(f"   ⚠️  Reject Reason: {order['reject_reason']}")
+                print(f"   [WARN]  Reject Reason: {order['reject_reason']}")
         else:
-            print("   ❌ Order returned None/empty")
+            print("   [ERR] Order returned None/empty")
 
     except Exception as e:
-        print("\n   ❌ Exception occurred:")
+        print("\n   [ERR] Exception occurred:")
         print(f"   Error: {e}")
         print(f"   Type: {type(e)}")
 
