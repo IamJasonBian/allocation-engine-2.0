@@ -199,8 +199,16 @@ function fmtDollar(n) {
 function filterSeries(series, rangeKey) {
   if (!series || !series.length) return [];
   const cfg = RANGE_CFG[rangeKey];
-  const ms = cfg.hours ? cfg.hours * 3600000 : cfg.days * 86400000;
-  const cutoff = Date.now() - ms;
+  let cutoff;
+  if (cfg.hours) {
+    cutoff = Date.now() - cfg.hours * 3600000;
+  } else {
+    // Align to start of today (midnight local) so daily candles at midnight
+    // aren't excluded by the time-of-day component of Date.now()
+    const now = new Date();
+    const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+    cutoff = midnight - cfg.days * 86400000;
+  }
   return series.filter(d => (d.t || d.timestamp) >= cutoff);
 }
 
@@ -334,14 +342,30 @@ function renderMoveChart() {
   // Store base prices for right-axis price labels
   const basePrices = {};
 
+  // Pass 1: filter each series and find the common (latest) start timestamp
+  // so all instruments are normalized from the same point in time
+  const filteredMap = {};
+  let commonStart = 0;
   for (const sym of syms) {
     const raw = (D[sourceKey] || {})[sym];
     if (!raw || !raw.length) continue;
     const filtered = filterSeries(raw, R);
     if (filtered.length < 2) continue;
-    const base = filtered[0].c;
+    filteredMap[sym] = filtered;
+    if (filtered[0].t > commonStart) commonStart = filtered[0].t;
+  }
+
+  // Pass 2: normalize each series from the common start
+  for (const sym of Object.keys(filteredMap)) {
+    const filtered = filteredMap[sym];
+    // Find first data point at or after the common start
+    const startIdx = filtered.findIndex(d => d.t >= commonStart);
+    if (startIdx < 0 || filtered.length - startIdx < 2) continue;
+    const base = filtered[startIdx].c;
     basePrices[sym] = base;
-    const normed = filtered.map(d => ({ x: d.t, y: ((d.c - base) / base) * 100 }));
+    const normed = filtered.slice(startIdx).map(d => ({
+      x: d.t, y: ((d.c - base) / base) * 100, price: d.c
+    }));
     datasets.push(mkLine(sym, normed, COLORS[sym] || '#666'));
   }
 
@@ -357,27 +381,12 @@ function renderMoveChart() {
     label: function(ctx) {
       const sym = ctx.dataset.label;
       const pct = ctx.parsed.y;
-      const base = basePrices[sym];
-      const price = base ? base * (1 + pct / 100) : null;
+      const price = ctx.raw.price;
       let line = sym + ': ' + (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%';
       if (price != null) line += '  ($' + price.toLocaleString(undefined,{maximumFractionDigits:2}) + ')';
       return line;
     }
   };
-  // Right y-axis: show representative price (use BTC/USD as reference)
-  const btcBase = basePrices['BTC/USD'];
-  if (btcBase) {
-    opts.scales.yPrice = {
-      position: 'right',
-      grid: { drawOnChartArea: false, color: '#2a2a2a' },
-      border: { color: '#555' },
-      ticks: {
-        color: '#aaa', font: { size: 10 },
-        callback: function(v) { return '$' + (btcBase * (1 + v / 100)).toLocaleString(undefined,{maximumFractionDigits:0}); }
-      },
-    };
-  }
-
   destroyChart('move');
   charts.move = new Chart(document.getElementById('chartMove'), {
     type: 'line', data: { datasets }, options: opts,
