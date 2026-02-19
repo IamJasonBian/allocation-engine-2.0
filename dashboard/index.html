@@ -713,11 +713,18 @@ function renderDriftPanel() {
   html += '<div class="rr"><span class="k">21d Sharpe</span><span class="v">' + dm.rolling_sharpe.toFixed(2) + '</span></div>';
   html += '<div class="rr"><span class="k">21d Return</span><span class="v">' + dm.rolling_return_pct.toFixed(2) + '%</span></div>';
   html += '<div class="rr"><span class="k">As Of</span><span class="v">' + dm.as_of + '</span></div>';
+  if (dm.grid_sharpe != null) {
+    html += '<div class="rr"><span class="k">Grid Sharpe</span><span class="v">' + dm.grid_sharpe.toFixed(3) + '</span></div>';
+    html += '<div class="rr"><span class="k">Source</span><span class="v" style="color:#4a4">grid search</span></div>';
+  } else {
+    html += '<div class="rr"><span class="k">Source</span><span class="v" style="color:#a44">heuristic</span></div>';
+  }
   html += '</div></div>';
 
   // Right: params comparison
+  var srcLabel = dm.source === 'grid_search' ? 'Suggested (grid)' : 'Suggested (heuristic)';
   html += '<div class="drift-card"><div class="card-title">Parameter Comparison</div>';
-  html += '<table class="params-table"><thead><tr><th>Param</th><th>Current</th><th>Suggested</th><th>Delta</th></tr></thead><tbody>';
+  html += '<table class="params-table"><thead><tr><th>Param</th><th>Current</th><th>' + srcLabel + '</th><th>Delta</th></tr></thead><tbody>';
   html += paramRow('Stop Offset', 'stop_offset_pct', pctFmt);
   html += paramRow('Buy Offset', 'buy_offset', numFmt);
   html += paramRow('Coverage Thr', 'coverage_threshold', pctFmt);

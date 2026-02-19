@@ -679,6 +679,7 @@ class TradingSystem:
         try:
             from trading_system.backtests.data_loader import DATA_DIR
             from trading_system.backtests.parameter_optimizer import (
+                load_grid_cache,
                 suggest_regime_params,
             )
             import json
@@ -718,8 +719,10 @@ class TradingSystem:
             end_val = closes[-1]
             rolling_return = ((end_val - start_val) / start_val * 100) if start_val > 0 else 0.0
 
-            # Regime suggestion
-            regime = suggest_regime_params(ann_vol)
+            # Regime suggestion (use grid search cache if available)
+            grid_cache = load_grid_cache("BTC")
+            grid_best = grid_cache.get("best") if grid_cache else None
+            regime = suggest_regime_params(ann_vol, grid_search_best=grid_best)
 
             # Drift alerts
             alerts = []
@@ -740,6 +743,8 @@ class TradingSystem:
                     "coverage_threshold": regime["coverage_threshold"],
                 },
                 "regime_rationale": regime["rationale"],
+                "source": regime.get("source", "heuristic"),
+                "grid_sharpe": regime.get("grid_sharpe"),
                 "drift_alerts": alerts,
             }
             return result
@@ -889,11 +894,25 @@ class TradingSystem:
         Args:
             interval_minutes: Minutes between runs
         """
+        import datetime as _dt
+
         print(f"\nStarting continuous mode (every {interval_minutes} minutes)")
         print("Press Ctrl+C to stop\n")
 
+        self._last_backtest_date = None
+
         try:
             while True:
+                # Weekly Sunday auto-backtest
+                today = _dt.date.today()
+                if today.weekday() == 6 and self._last_backtest_date != today:
+                    print("\n  [backtest] Weekly Sunday grid search...")
+                    try:
+                        self.run_backtest()
+                    except Exception as e:
+                        print(f"  [backtest] Error during weekly grid search: {e}")
+                    self._last_backtest_date = today
+
                 self.run_once()
 
                 print(f"\nWaiting {interval_minutes} minutes until next run...")
@@ -1035,6 +1054,11 @@ def main():
         verbose=args.verbose,
         dashboard=args.dashboard
     )
+
+    # Run backtest if requested (standalone mode — exit after)
+    if args.backtest:
+        system.run_backtest()
+        return
 
     # Run system
     if args.continuous:
