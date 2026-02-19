@@ -719,6 +719,15 @@ function renderDriftPanel() {
   } else {
     html += '<div class="rr"><span class="k">Source</span><span class="v" style="color:#a44">heuristic</span></div>';
   }
+  if (dm.mean_test_sharpe != null) {
+    html += '<div class="rr"><span class="k">CV Test Sharpe</span><span class="v">' + dm.mean_test_sharpe.toFixed(3) + '</span></div>';
+  }
+  if (dm.degradation != null) {
+    var degColor = dm.degradation >= 0.5 ? '#4a4' : '#a44';
+    var degLabel = dm.degradation >= 0.5 ? 'robust' : 'overfit risk';
+    html += '<div class="rr"><span class="k">Degradation</span><span class="v" style="color:' + degColor + '">' +
+        dm.degradation.toFixed(2) + 'x (' + degLabel + ')</span></div>';
+  }
   html += '</div></div>';
 
   // Right: params comparison

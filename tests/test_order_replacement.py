@@ -28,17 +28,17 @@ def _make_system():
     return system
 
 
-def _make_signal(current_price=450.0):
+def _make_signal(current_price=450.0, gap_qty=DEFAULT_LOT_SIZE, target_qty=None):
     """Create a COVER_GAP signal dict that process_signal would receive."""
     stop = round(current_price * (1 - 0.01), 2)
     buy = round(stop - 0.20, 2)
-    return {
+    sig = {
         'signal': 'COVER_GAP',
         'reason': 'test',
         'order': {
             'action': 'stop_limit_sell',
             'symbol': 'SPY',
-            'quantity': DEFAULT_LOT_SIZE,
+            'quantity': gap_qty,
             'stop_price': stop,
             'limit_price': stop,
             'current_price': current_price,
@@ -46,11 +46,14 @@ def _make_signal(current_price=450.0):
         'paired_buy': {
             'action': 'limit_buy',
             'symbol': 'SPY',
-            'quantity': DEFAULT_LOT_SIZE,
+            'quantity': gap_qty,
             'price': buy,
             'current_price': current_price,
         },
     }
+    if target_qty is not None:
+        sig['target_qty'] = target_qty
+    return sig
 
 
 def _buy_order(order_id='BUY-001', qty=DEFAULT_LOT_SIZE, created_at='2025-06-01 09:00:00'):
@@ -111,17 +114,19 @@ class TestReplacesAllLotOrders:
         assert cancelled_ids == {'SELL-OLD', 'BUY-OLD'}
 
 
-class TestQtyMismatchSkipsSide:
-    def test_qty_mismatch_skips_that_side(self):
-        """Buy qty != lot_size → only sell is cancelled, buy is left alone."""
+class TestQtyMismatchCancelsAll:
+    def test_qty_mismatch_still_cancels_all(self):
+        """Buy qty != lot_size → both orders still cancelled (no qty filter)."""
         system = _make_system()
         signal = _make_signal()
-        symbol_orders = [_sell_order(), _buy_order(qty=50)]  # lot_size=DEFAULT_LOT_SIZE, buy qty=50
+        symbol_orders = [_sell_order(), _buy_order(qty=50)]
 
         system._handle_order_replacement('SPY', signal, symbol_orders)
 
-        # Only the sell (qty=200) should be cancelled, not the buy (qty=50)
-        system.trading_bot.cancel_order_by_id.assert_called_once_with('SELL-001')
+        # Both should be cancelled regardless of quantity
+        calls = system.trading_bot.cancel_order_by_id.call_args_list
+        cancelled_ids = {c[0][0] for c in calls}
+        assert cancelled_ids == {'SELL-001', 'BUY-001'}
 
 
 class TestPdtCount2AlertsAndSkips:
@@ -230,9 +235,9 @@ class TestMomentumPricingUsed:
 
         system._handle_order_replacement('SPY', signal, symbol_orders)
 
-        # strategy defaults: stop_offset_pct=0.01, buy_offset=0.20
-        expected_stop = round(current_price * (1 - 0.01), 2)  # 495.0
-        expected_buy = round(expected_stop - 0.20, 2)  # 494.80
+        # strategy defaults: stop_offset_pct=0.0125, buy_offset=0.50
+        expected_stop = round(current_price * (1 - 0.0125), 2)  # 493.75
+        expected_buy = round(expected_stop - 0.50, 2)  # 493.25
 
         sell_call = system._execute_stop_limit_sell_order.call_args
         assert sell_call[0][1]['stop_price'] == expected_stop
@@ -246,7 +251,7 @@ class TestMomentumPricingUsed:
 
 class TestNormalFlowCancelsExistingSell:
     def test_stop_limit_sell_cancels_existing_sell(self):
-        """process_signal with < 2 orders still cancels existing lot-sized sell
+        """process_signal with < 2 orders still cancels existing sell
         before placing new one."""
         system = _make_system()
         signal = _make_signal()
@@ -260,5 +265,64 @@ class TestNormalFlowCancelsExistingSell:
 
         # Existing sell should be cancelled before new pair is placed
         system.trading_bot.cancel_order_by_id.assert_called_once_with('EXISTING-SELL')
+        system._execute_stop_limit_sell_order.assert_called_once()
+        system._execute_paired_limit_buy.assert_called_once()
+
+
+class TestConsolidatedQuantity:
+    def test_uses_target_qty_for_new_order(self):
+        """When target_qty is in the signal, the placed order uses target_qty
+        instead of the incremental gap_qty."""
+        system = _make_system()
+        # gap_qty=100 (incremental), target_qty=250 (full coverage)
+        signal = _make_signal(gap_qty=100, target_qty=250)
+        open_orders = [_sell_order('OLD-SELL', qty=282)]
+
+        system._execute_stop_limit_sell_order = MagicMock()
+        system._execute_paired_limit_buy = MagicMock()
+
+        system.process_signal('SPY', signal, open_orders)
+
+        # Old sell cancelled
+        system.trading_bot.cancel_order_by_id.assert_called_once_with('OLD-SELL')
+
+        # New sell uses target_qty (250), not gap_qty (100)
+        sell_order = system._execute_stop_limit_sell_order.call_args[0][1]
+        assert sell_order['quantity'] == 250
+
+        # Paired buy also uses target_qty
+        buy_order = system._execute_paired_limit_buy.call_args[0][1]
+        assert buy_order['quantity'] == 250
+
+    def test_does_not_mutate_original_signal(self):
+        """Shallow copy ensures the original signal dicts are not modified."""
+        system = _make_system()
+        signal = _make_signal(gap_qty=100, target_qty=250)
+
+        system._execute_stop_limit_sell_order = MagicMock()
+        system._execute_paired_limit_buy = MagicMock()
+
+        system.process_signal('SPY', signal, open_orders=[])
+
+        # Original signal order still has gap_qty
+        assert signal['order']['quantity'] == 100
+        assert signal['paired_buy']['quantity'] == 100
+
+
+class TestNormalFlowCancelsNonLotSell:
+    def test_non_lot_sized_sell_is_cancelled(self):
+        """A sell order with qty != lot_size is still cancelled in normal flow."""
+        system = _make_system()
+        signal = _make_signal()
+        # Non-lot-sized sell (282 shares instead of DEFAULT_LOT_SIZE)
+        open_orders = [_sell_order('PARTIAL-SELL', qty=282)]
+
+        system._execute_stop_limit_sell_order = MagicMock()
+        system._execute_paired_limit_buy = MagicMock()
+
+        system.process_signal('SPY', signal, open_orders)
+
+        # Non-lot-sized sell should still be cancelled
+        system.trading_bot.cancel_order_by_id.assert_called_once_with('PARTIAL-SELL')
         system._execute_stop_limit_sell_order.assert_called_once()
         system._execute_paired_limit_buy.assert_called_once()

@@ -100,13 +100,97 @@ def grid_search_params(
     )
 
 
+def walk_forward_cv(
+    bars: List[Dict],
+    symbol: str,
+    shares: int,
+    price: float,
+    n_folds: int = 3,
+    test_pct: float = 0.50,
+) -> List[Dict]:
+    """Walk-forward cross-validation with expanding training window.
+
+    The last ``test_pct`` fraction of *bars* is reserved for test folds.
+    Each fold trains on all bars before its test window (expanding window),
+    runs grid search to find the best params, then evaluates on the held-out
+    test chunk.
+
+    Args:
+        bars: Daily OHLCV bars (chronological order).
+        symbol: Ticker symbol.
+        shares: Initial share count for simulation.
+        price: Initial price for simulation.
+        n_folds: Number of test folds.
+        test_pct: Fraction of bars reserved for test folds (default 0.50).
+
+    Returns:
+        List of per-fold result dicts.
+    """
+    test_total = int(len(bars) * test_pct)
+    test_chunk = test_total // n_folds
+    train_start = len(bars) - test_total  # where the first test fold begins
+
+    fold_results: List[Dict] = []
+
+    for i in range(n_folds):
+        test_begin = train_start + i * test_chunk
+        # Last fold gets any remainder bars
+        test_end = (test_begin + test_chunk) if i < n_folds - 1 else len(bars)
+
+        bars_train = bars[:test_begin]
+        bars_test = bars[test_begin:test_end]
+
+        if len(bars_train) < 10 or len(bars_test) < 5:
+            continue
+
+        print(f"    Fold {i + 1}/{n_folds}: train {len(bars_train)} bars, test {len(bars_test)} bars")
+        grid_result = grid_search_params(bars_train, symbol, shares, price)
+        best = grid_result.best
+
+        # Evaluate best params on the test chunk
+        test_initial_price = bars_train[-1]["close"]
+        test_snapshots = run_simulation(
+            bars=bars_test,
+            symbol=symbol,
+            initial_shares=shares,
+            initial_price=test_initial_price,
+            stop_offset_pct=best["stop_offset_pct"],
+            buy_offset=best["buy_offset"],
+            coverage_threshold=best["coverage_threshold"],
+        )
+        test_metrics = compute_metrics(test_snapshots)
+
+        fold_results.append({
+            "fold": i + 1,
+            "train_bars": len(bars_train),
+            "test_bars": len(bars_test),
+            "train_sharpe": round(best["sharpe_ratio"], 4),
+            "test_sharpe": round(test_metrics.sharpe_ratio, 4),
+            "test_return_pct": round(test_metrics.total_return_pct, 4),
+            "test_max_drawdown_pct": round(test_metrics.max_drawdown_pct, 4),
+            "best_params": {
+                "stop_offset_pct": best["stop_offset_pct"],
+                "buy_offset": best["buy_offset"],
+                "coverage_threshold": best["coverage_threshold"],
+            },
+            "top_10": [row for row in grid_result.rows[:10]],
+        })
+
+    return fold_results
+
+
 def run_regime_grid_search(
     bars: List[Dict],
     symbol: str,
     shares: int,
     price: float,
 ) -> Dict:
-    """Run grid search on full historical data and return results with regime label.
+    """Run walk-forward CV and aggregate out-of-sample results.
+
+    Uses walk-forward cross-validation (3 folds, expanding training window)
+    instead of a single 80/20 holdout.  The last fold's best params are
+    returned as the recommended parameters since that fold trains on the
+    most data and is most recent.
 
     Args:
         bars: Daily OHLCV bars (chronological order).
@@ -115,11 +199,56 @@ def run_regime_grid_search(
         price: Initial price for simulation.
 
     Returns:
-        Dict with timestamp, symbol, best params/metrics, and top 10 rows.
+        Dict with timestamp, symbol, best params/metrics, per-fold CV
+        detail, aggregated Sharpe stats, and backward-compat keys.
     """
     from datetime import datetime, timezone
 
-    result = grid_search_params(bars, symbol, shares, price)
+    # --- Walk-forward CV ---
+    fold_results = walk_forward_cv(bars, symbol, shares, price)
+
+    if not fold_results:
+        # Fallback: not enough data for CV — return minimal result
+        return {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "symbol": symbol,
+            "regime": "UNKNOWN",
+            "rolling_vol_pct": 0.0,
+            "best": {},
+            "all_rows": [],
+            "cv_folds": [],
+            "n_folds": 0,
+            "mean_train_sharpe": None,
+            "mean_test_sharpe": None,
+            "std_test_sharpe": None,
+            "degradation": None,
+            "train_bars": 0,
+            "test_bars": 0,
+            "train_sharpe": 0,
+            "test_sharpe": 0,
+        }
+
+    # Aggregate across folds
+    train_sharpes = [f["train_sharpe"] for f in fold_results]
+    test_sharpes = [f["test_sharpe"] for f in fold_results]
+
+    mean_train_sharpe = sum(train_sharpes) / len(train_sharpes)
+    mean_test_sharpe = sum(test_sharpes) / len(test_sharpes)
+
+    if len(test_sharpes) >= 2:
+        variance = sum((s - mean_test_sharpe) ** 2 for s in test_sharpes) / (len(test_sharpes) - 1)
+        std_test_sharpe = math.sqrt(variance) if variance > 0 else 0.0
+    else:
+        std_test_sharpe = 0.0
+
+    if mean_train_sharpe > 0:
+        degradation = round(mean_test_sharpe / mean_train_sharpe, 4)
+    else:
+        degradation = None
+
+    # Use the last fold's best params (trained on most data, most recent)
+    last_fold = fold_results[-1]
+    total_test_bars = sum(f["test_bars"] for f in fold_results)
 
     # Determine current regime from rolling 21d vol of last window
     if len(bars) >= 22:
@@ -149,8 +278,19 @@ def run_regime_grid_search(
         "symbol": symbol,
         "regime": regime,
         "rolling_vol_pct": round(ann_vol, 2),
-        "best": result.best,
-        "all_rows": [row for row in result.rows[:10]],
+        "best": last_fold["best_params"],
+        "all_rows": last_fold["top_10"],
+        "cv_folds": fold_results,
+        "n_folds": len(fold_results),
+        "mean_train_sharpe": round(mean_train_sharpe, 4),
+        "mean_test_sharpe": round(mean_test_sharpe, 4),
+        "std_test_sharpe": round(std_test_sharpe, 4),
+        "degradation": degradation,
+        # Backward-compat keys
+        "train_bars": last_fold["train_bars"],
+        "test_bars": total_test_bars,
+        "train_sharpe": round(last_fold["train_sharpe"], 4),
+        "test_sharpe": round(mean_test_sharpe, 4),
     }
 
 

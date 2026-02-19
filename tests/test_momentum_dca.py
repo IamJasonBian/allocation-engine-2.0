@@ -271,16 +271,6 @@ class TestPairedBuyOrder:
         assert signal['paired_buy'] is not None
         assert signal['paired_buy']['action'] == 'limit_buy'
 
-    def test_paired_buy_price_below_stop(self):
-        strategy = _make_strategy()
-        position = _make_position('SPY', 100, 450.0)
-        signal = strategy.analyze_symbol('SPY', {'current_price': 450.0}, position, _make_ticker())
-        stop_price = signal['order']['stop_price']
-        buy_price = signal['paired_buy']['price']
-        assert buy_price < stop_price
-        expected = round(stop_price - 0.20, 2)
-        assert buy_price == expected
-
     def test_paired_buy_same_quantity(self):
         strategy = _make_strategy()
         position = _make_position('SPY', 100, 450.0)

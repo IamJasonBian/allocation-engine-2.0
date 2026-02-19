@@ -34,7 +34,8 @@ class TradingSystem:
                  position_size_pct: float = 0.25, dry_run: bool = True,
                  strategy_name: str = 'momentum_dca',
                  verbose: bool = False,
-                 dashboard: bool = False):
+                 dashboard: bool = False,
+                 recent_days: int = None):
         """
         Initialize trading system
 
@@ -46,12 +47,14 @@ class TradingSystem:
             strategy_name: Strategy to use ('momentum_dca' or 'breakout')
             verbose: If True, show detailed output (metrics, portfolio, etc.)
             dashboard: If True, fetch market indicators and write dashboard data each cycle
+            recent_days: If set, limit backtest to last N daily bars
         """
         self.symbols = symbols
         self.dry_run = dry_run
         self.strategy_name = strategy_name
         self.verbose = verbose
         self.dashboard = dashboard
+        self.recent_days = recent_days
 
         # Initialize components
         self.data_provider = TwelveDataProvider(twelve_data_api_key)
@@ -185,13 +188,22 @@ class TradingSystem:
         elif order['action'] == 'stop_limit_sell':
             has_paired_buy = signal.get('paired_buy') is not None
 
-            # Cancel existing lot-sized orders before placing new pair
-            # (prevents duplicate sells/buys)
-            self._cancel_lot_orders_by_side(symbol, 'SELL', open_orders)
+            # Cancel ALL existing orders for this side before placing consolidated order
+            self._cancel_orders_by_side(symbol, 'SELL', open_orders)
             if has_paired_buy:
-                self._cancel_lot_orders_by_side(symbol, 'BUY', open_orders)
+                self._cancel_orders_by_side(symbol, 'BUY', open_orders)
+
+            # Use target_qty (full coverage) instead of gap_qty (incremental)
+            target_qty = signal.get('target_qty')
+            if target_qty:
+                order = dict(order)
+                order['quantity'] = target_qty
 
             if has_paired_buy:
+                paired_buy = dict(signal['paired_buy'])
+                if target_qty:
+                    paired_buy['quantity'] = target_qty
+
                 # Default: place buy first, then sell.
                 # If first existing order is a buy, place sell first instead.
                 sell_first = False
@@ -203,47 +215,43 @@ class TradingSystem:
 
                 if sell_first:
                     self._execute_stop_limit_sell_order(symbol, order)
-                    self._execute_paired_limit_buy(symbol, signal['paired_buy'])
+                    self._execute_paired_limit_buy(symbol, paired_buy)
                 else:
-                    self._execute_paired_limit_buy(symbol, signal['paired_buy'])
+                    self._execute_paired_limit_buy(symbol, paired_buy)
                     self._execute_stop_limit_sell_order(symbol, order)
             else:
                 self._execute_stop_limit_sell_order(symbol, order)
         elif order['action'] == 'limit_sell':
-            # Cancel existing lot-sized sells before resubmit
-            self._cancel_lot_orders_by_side(symbol, 'SELL', open_orders)
+            # Cancel existing sells before resubmit
+            self._cancel_orders_by_side(symbol, 'SELL', open_orders)
             self._execute_limit_sell_resubmit(symbol, order)
 
-    def _cancel_lot_orders_by_side(self, symbol: str, side: str, open_orders: list) -> int:
-        """Cancel all open orders for symbol matching lot_size on the given side.
+    def _cancel_orders_by_side(self, symbol: str, side: str, open_orders: list) -> tuple:
+        """Cancel ALL open orders for symbol on the given side.
 
-        Enforces the invariant: max 1 buy + 1 sell per lot.
-        Returns the number of orders successfully cancelled.
+        Returns (cancelled_count, total_qty_cancelled).
         """
-        lot_size = getattr(self.strategy, 'lot_size', None)
-        if lot_size is None:
-            return 0
-
         cancelled = 0
+        qty_cancelled = 0
         for order in (open_orders or []):
             if (order.get('symbol') == symbol
-                    and order.get('side') == side
-                    and int(float(order.get('quantity', 0))) == lot_size):
+                    and order.get('side') == side):
                 order_id = order.get('order_id')
                 if order_id and self.trading_bot.cancel_order_by_id(order_id):
                     cancelled += 1
-                    print(f"  Cancelled {side} {order_id} (enforcing 1 buy + 1 sell per lot)")
-        return cancelled
+                    qty_cancelled += int(float(order.get('quantity', 0)))
+                    print(f"  Cancelled {side} {order_id} qty={int(float(order.get('quantity', 0)))}")
+        return cancelled, qty_cancelled
 
     def _handle_order_replacement(self, symbol: str, signal: Dict, symbol_orders: list):
-        """Cancel all lot-sized orders for the symbol and place a fresh
+        """Cancel all orders for the symbol and place a fresh
         stop-limit sell + paired buy at current momentum pricing.
 
         Ensures exactly 1 sell + 1 buy per lot on the book.
 
         Steps:
           1. PDT safety check
-          2. Cancel ALL existing lot-sized orders (buys and sells)
+          2. Cancel ALL existing orders (buys and sells)
           3. Place replacement stop-limit sell + paired buy
         """
         lot_size = getattr(self.strategy, 'lot_size', None)
@@ -263,9 +271,9 @@ class TradingSystem:
                 send_slack_alert(msg)
                 return
 
-        # Cancel ALL existing lot-sized orders for the symbol
-        sells_cancelled = self._cancel_lot_orders_by_side(symbol, 'SELL', symbol_orders)
-        buys_cancelled = self._cancel_lot_orders_by_side(symbol, 'BUY', symbol_orders)
+        # Cancel ALL existing orders for the symbol
+        sells_cancelled, _ = self._cancel_orders_by_side(symbol, 'SELL', symbol_orders)
+        buys_cancelled, _ = self._cancel_orders_by_side(symbol, 'BUY', symbol_orders)
         print(f"   Order replacement: cancelled {sells_cancelled} sell(s) + {buys_cancelled} buy(s) for {symbol}")
 
         # Build replacement orders using momentum pricing from the signal
@@ -745,6 +753,8 @@ class TradingSystem:
                 "regime_rationale": regime["rationale"],
                 "source": regime.get("source", "heuristic"),
                 "grid_sharpe": regime.get("grid_sharpe"),
+                "mean_test_sharpe": grid_cache.get("mean_test_sharpe") if grid_cache else None,
+                "degradation": grid_cache.get("degradation") if grid_cache else None,
                 "drift_alerts": alerts,
             }
             return result
@@ -857,6 +867,10 @@ class TradingSystem:
             with open(cache_path, "r") as f:
                 bars = json.load(f)
 
+            if self.recent_days and len(bars) > self.recent_days:
+                bars = bars[-self.recent_days:]
+                print(f"  [{symbol}] Trimmed to last {len(bars)} bars (--recent {self.recent_days})")
+
             if len(bars) < 30:
                 print(f"  [{symbol}] Only {len(bars)} bars — need at least 30, skipping")
                 continue
@@ -872,13 +886,31 @@ class TradingSystem:
             results[symbol] = grid_result
 
             best = grid_result["best"]
-            print(f"  [{symbol}] Best params:")
-            print(f"    stop_offset_pct:    {best['stop_offset_pct']}")
-            print(f"    buy_offset:         {best['buy_offset']}")
-            print(f"    coverage_threshold: {best['coverage_threshold']}")
-            print(f"    Sharpe ratio:       {best['sharpe_ratio']:.3f}")
-            print(f"    Completion rate:    {best['completion_rate_pct']:.1f}%")
+            if best:
+                print(f"  [{symbol}] Best params (last fold):")
+                print(f"    stop_offset_pct:    {best.get('stop_offset_pct', 'N/A')}")
+                print(f"    buy_offset:         {best.get('buy_offset', 'N/A')}")
+                print(f"    coverage_threshold: {best.get('coverage_threshold', 'N/A')}")
             print(f"    Regime:             {grid_result['regime']}")
+
+            # Walk-forward CV summary
+            cv_folds = grid_result.get("cv_folds", [])
+            n_folds = grid_result.get("n_folds", 0)
+            print(f"    --- Walk-forward CV ({n_folds} folds) ---")
+            for fold in cv_folds:
+                print(f"    Fold {fold['fold']}: train {fold['train_bars']}, test {fold['test_bars']}"
+                      f" | train Sharpe {fold['train_sharpe']:.3f}, test Sharpe {fold['test_sharpe']:.3f}")
+
+            mean_test = grid_result.get("mean_test_sharpe")
+            std_test = grid_result.get("std_test_sharpe")
+            if mean_test is not None and std_test is not None:
+                print(f"    Mean test Sharpe:   {mean_test:.3f} +/- {std_test:.3f}")
+
+            degradation = grid_result.get("degradation")
+            degradation_str = f"{degradation:.2f}x" if degradation is not None else "N/A (train Sharpe <= 0)"
+            print(f"    Degradation:        {degradation_str}")
+            if degradation is not None and degradation < 0.5:
+                print(f"    WARNING: Significant Sharpe degradation -- params may be overfit")
             print(f"    Cached to:          {cache_file}\n")
 
         if not results:
@@ -1021,6 +1053,10 @@ def main():
         action='store_true',
         help='Run parameter grid search on cached daily data and update regime suggestions'
     )
+    parser.add_argument(
+        '--recent', type=int, default=None, metavar='DAYS',
+        help='Limit backtest to the last N daily bars (e.g. --recent 90)'
+    )
 
     args = parser.parse_args()
 
@@ -1052,7 +1088,8 @@ def main():
         dry_run=not args.live,
         strategy_name=args.strategy,
         verbose=args.verbose,
-        dashboard=args.dashboard
+        dashboard=args.dashboard,
+        recent_days=args.recent,
     )
 
     # Run backtest if requested (standalone mode — exit after)
