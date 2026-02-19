@@ -1,0 +1,1 @@
+source venv/bin/activate && python -m trading_system.main --ticker BTC --live --continuous --interval 5
