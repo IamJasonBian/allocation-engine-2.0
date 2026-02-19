@@ -110,6 +110,49 @@
     .opt-reasons { font-size: 9px; color: #666; margin-top: 3px; }
     .opt-reasons span { margin-right: 6px; }
     .opt-empty { color: #333; font-size: 10px; padding: 12px 0; text-align: center; }
+
+    /* Drift alert banner */
+    .drift-alert { display: none; padding: 4px 10px; margin-bottom: 4px; border: 1px solid; font-size: 11px; align-items: center; gap: 8px; }
+    .drift-alert.red { border-color: #a44; background: rgba(170,68,68,0.12); color: #f66; }
+    .drift-alert.amber { border-color: #aa8833; background: rgba(170,136,51,0.10); color: #da3; }
+    .drift-alert.visible { display: flex; }
+    .drift-alert .pulse { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; animation: pulse 1.5s ease-in-out infinite; }
+    .drift-alert.red .pulse { background: #f44; }
+    .drift-alert.amber .pulse { background: #da3; }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+    .drift-alert .alert-text { flex: 1; }
+
+    /* Drift panel */
+    .drift-panel { display: none; margin-bottom: 4px; }
+    .drift-panel.visible { display: block; }
+    .drift-panel h2 { font-size: 10px; font-weight: 500; color: #555; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px; }
+    .drift-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+    @media (max-width: 700px) { .drift-grid { grid-template-columns: 1fr; } }
+    .drift-card { border: 1px solid #1a1a1a; padding: 6px 10px; }
+    .drift-card .card-title { font-size: 9px; color: #555; text-transform: uppercase; letter-spacing: 0.3px; margin-bottom: 4px; }
+
+    /* Regime badge */
+    .regime-badge { display: inline-block; font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 2px; letter-spacing: 0.3px; }
+    .regime-badge.high { background: #331a1a; color: #f66; }
+    .regime-badge.medium { background: #332d1a; color: #da3; }
+    .regime-badge.low { background: #1a331a; color: #4a4; }
+
+    /* Regime detail rows */
+    .regime-rows { margin-top: 4px; font-size: 10px; }
+    .regime-rows .rr { display: flex; justify-content: space-between; padding: 2px 0; border-bottom: 1px solid #111; }
+    .regime-rows .rr .k { color: #555; }
+    .regime-rows .rr .v { color: #ccc; }
+
+    /* Params comparison table */
+    .params-table { width: 100%; border-collapse: collapse; font-size: 10px; }
+    .params-table th { text-align: left; color: #555; font-weight: 500; padding: 2px 5px; border-bottom: 1px solid #222; text-transform: uppercase; font-size: 9px; letter-spacing: 0.3px; }
+    .params-table td { padding: 3px 5px; border-bottom: 1px solid #111; }
+    .params-table .match { color: #4a4; }
+    .params-table .mismatch { color: #f66; font-weight: 500; }
+
+    /* Drift stat card warning */
+    .stat.warn-card { border-color: #a44; }
+    .stat.warn-card .val { color: #f66; }
   </style>
 </head>
 <body>
@@ -117,6 +160,8 @@
     <h1>MARKET INDICATORS</h1>
     <div class="st"><span class="dot" id="dot"></span><span id="stxt">loading</span></div>
   </div>
+
+  <div class="drift-alert" id="driftAlert"><span class="pulse"></span><span class="alert-text"></span></div>
 
   <div class="range" id="rangeBar">
     <button data-key="1d" class="on">1D</button>
@@ -142,6 +187,8 @@
   </div>
 
   <div class="stats" id="statRow"></div>
+
+  <div class="drift-panel" id="driftPanel"></div>
 
   <div class="section">
     <h2>BTC Indicators</h2>
@@ -513,6 +560,19 @@ function renderStats() {
   if (D.ma && D.ma.ma200wk) {
     cards.push(`<div class="stat"><div class="lbl">200wk MA</div><div class="val">${fmtDollar(D.ma.ma200wk)}</div><div class="sub">${D.ma.pctAbove > 0 ? '+' : ''}${D.ma.pctAbove.toFixed(1)}% above</div></div>`);
   }
+
+  // Drift stat cards
+  const dm = D.drift_metrics;
+  if (dm) {
+    const sharpeWarn = dm.rolling_sharpe < -1.0;
+    const sharpeCls = sharpeWarn ? 'stat warn-card' : 'stat';
+    const sharpeIcon = sharpeWarn ? '\u26A0 ' : '';
+    cards.push(`<div class="${sharpeCls}"><div class="lbl">21d Sharpe</div><div class="val">${sharpeIcon}${dm.rolling_sharpe.toFixed(2)}</div><div class="sub">${dm.window_days}d rolling</div></div>`);
+    cards.push(`<div class="stat"><div class="lbl">21d Vol (ann.)</div><div class="val">${dm.rolling_vol_pct.toFixed(1)}%</div><div class="sub">${dm.regime}</div></div>`);
+    const retCls = dm.rolling_return_pct >= 0 ? 'up' : 'dn';
+    cards.push(`<div class="stat"><div class="lbl">21d Return</div><div class="val ${retCls}">${dm.rolling_return_pct >= 0 ? '+' : ''}${dm.rolling_return_pct.toFixed(2)}%</div><div class="sub">${dm.as_of}</div></div>`);
+  }
+
   el.innerHTML = cards.join('');
 }
 
@@ -583,14 +643,100 @@ function renderVol() {
   });
 }
 
+/* ── drift alert banner ── */
+function renderDriftAlert() {
+  const el = document.getElementById('driftAlert');
+  const dm = D.drift_metrics;
+  if (!dm) { el.className = 'drift-alert'; return; }
+
+  const alerts = dm.drift_alerts || [];
+  const sharpeAlert = alerts.find(a => a.metric === 'rolling_sharpe');
+  const highVol = dm.regime === 'HIGH_VOL';
+
+  if (sharpeAlert) {
+    el.className = 'drift-alert red visible';
+    el.querySelector('.alert-text').textContent =
+      '\u26A0 Rolling 21d Sharpe at ' + dm.rolling_sharpe.toFixed(2) +
+      ' (threshold: -1.0) \u2014 ' + dm.regime + ' regime, ' +
+      dm.rolling_vol_pct.toFixed(1) + '% annualised vol';
+  } else if (highVol) {
+    el.className = 'drift-alert amber visible';
+    el.querySelector('.alert-text').textContent =
+      '\u26A0 HIGH_VOL regime \u2014 ' + dm.rolling_vol_pct.toFixed(1) +
+      '% annualised vol (>30% threshold)';
+  } else {
+    el.className = 'drift-alert';
+  }
+}
+
+/* ── drift monitor panel ── */
+function renderDriftPanel() {
+  const panel = document.getElementById('driftPanel');
+  const dm = D.drift_metrics;
+  if (!dm) { panel.className = 'drift-panel'; panel.innerHTML = ''; return; }
+
+  panel.className = 'drift-panel visible';
+
+  // Regime badge class
+  const regCls = dm.regime === 'HIGH_VOL' ? 'high' : dm.regime === 'MEDIUM_VOL' ? 'medium' : 'low';
+
+  // Current strategy defaults
+  const current = { stop_offset_pct: 0.0125, buy_offset: 0.50, coverage_threshold: 0.20 };
+  const suggested = dm.suggested_params || {};
+
+  function paramRow(label, key, fmt) {
+    const cur = current[key];
+    const sug = suggested[key];
+    const curStr = fmt(cur);
+    const sugStr = sug != null ? fmt(sug) : '-';
+    const match = sug != null && Math.abs(cur - sug) < 1e-6;
+    const cls = match ? 'match' : 'mismatch';
+    let delta = '-';
+    if (sug != null && !match) {
+      delta = sug > cur ? '\u2191 wider' : '\u2193 tighter';
+    }
+    return '<tr><td style="color:#888">' + label + '</td><td>' + curStr +
+      '</td><td class="' + cls + '">' + sugStr + '</td><td style="color:#555">' + delta + '</td></tr>';
+  }
+
+  const pctFmt = v => (v * 100).toFixed(2) + '%';
+  const numFmt = v => v.toFixed(2);
+
+  let html = '<h2>Strategy Drift Monitor</h2><div class="drift-grid">';
+
+  // Left: regime card
+  html += '<div class="drift-card"><div class="card-title">Regime Status</div>';
+  html += '<span class="regime-badge ' + regCls + '">' + dm.regime + '</span>';
+  html += '<div class="regime-rows">';
+  html += '<div class="rr"><span class="k">Annualised Vol</span><span class="v">' + dm.rolling_vol_pct.toFixed(1) + '%</span></div>';
+  html += '<div class="rr"><span class="k">Rationale</span><span class="v">' + (dm.regime_rationale || '-') + '</span></div>';
+  html += '<div class="rr"><span class="k">21d Sharpe</span><span class="v">' + dm.rolling_sharpe.toFixed(2) + '</span></div>';
+  html += '<div class="rr"><span class="k">21d Return</span><span class="v">' + dm.rolling_return_pct.toFixed(2) + '%</span></div>';
+  html += '<div class="rr"><span class="k">As Of</span><span class="v">' + dm.as_of + '</span></div>';
+  html += '</div></div>';
+
+  // Right: params comparison
+  html += '<div class="drift-card"><div class="card-title">Parameter Comparison</div>';
+  html += '<table class="params-table"><thead><tr><th>Param</th><th>Current</th><th>Suggested</th><th>Delta</th></tr></thead><tbody>';
+  html += paramRow('Stop Offset', 'stop_offset_pct', pctFmt);
+  html += paramRow('Buy Offset', 'buy_offset', numFmt);
+  html += paramRow('Coverage Thr', 'coverage_threshold', pctFmt);
+  html += '</tbody></table></div>';
+
+  html += '</div>';
+  panel.innerHTML = html;
+}
+
 /* ── master render ── */
 function render() {
+  renderDriftAlert();
   renderFocus();
   renderTable();
   renderCorr();
   renderMoveChart();
   renderBook();
   renderStats();
+  renderDriftPanel();
   renderIV();
   renderFlows();
   renderVol();
