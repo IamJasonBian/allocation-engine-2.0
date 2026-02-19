@@ -29,11 +29,11 @@ class SafeCashBot:
         self.account_number = os.getenv('RH_AUTOMATED_ACCOUNT_NUMBER')
 
         if not self.account_number:
-            print("❌ ERROR: RH_AUTOMATED_ACCOUNT_NUMBER not set in .env")
+            print("[ERR] ERROR: RH_AUTOMATED_ACCOUNT_NUMBER not set in .env")
             sys.exit(1)
 
         if self.account_number != "490706777":
-            print(f"⚠️  WARNING: Expected account 490706777, got {self.account_number}")
+            print(f"[WARN]  WARNING: Expected account 490706777, got {self.account_number}")
             # Check if running in interactive mode
             if sys.stdin.isatty():
                 response = input("Continue anyway? (yes/no): ")
@@ -55,18 +55,18 @@ class SafeCashBot:
             account_type = _account.get('type', 'unknown')
 
             print(f"\n{'='*70}")
-            print(f"🔒 LOCKED TO ACCOUNT: {self.account_number}")
+            print(f"[LOCKED] LOCKED TO ACCOUNT: {self.account_number}")
             print(f"{'='*70}")
             print(f"   Account Type: {account_type}")
 
             if account_type != 'cash':
-                print(f"   ⚠️  WARNING: Account type is '{account_type}', not 'cash'")
+                print(f"   [WARN]  WARNING: Account type is '{account_type}', not 'cash'")
                 print("   Bot will still only use available cash, not margin")
 
             print(f"{'='*70}\n")
 
         except Exception as e:
-            print(f"❌ ERROR: Cannot access account {self.account_number}")
+            print(f"[ERR] ERROR: Cannot access account {self.account_number}")
             print(f"   {e}")
             sys.exit(1)
 
@@ -89,21 +89,26 @@ class SafeCashBot:
                 'tradeable_cash': available_cash  # This is what we'll use
             }
         except Exception as e:
-            print(f"❌ Error getting cash balance: {e}")
+            print(f"[ERR] Error getting cash balance: {e}")
             return None
 
-    def get_portfolio_summary(self):
-        """Get portfolio summary for this specific account"""
+    def get_portfolio_summary(self, symbols=None):
+        """Get portfolio summary for this specific account.
+
+        Args:
+            symbols: Optional list of ticker symbols to filter positions/orders to.
+                     When None, all positions/orders are shown.
+        """
         try:
             r.profiles.load_account_profile(account_number=self.account_number)
             portfolio = r.profiles.load_portfolio_profile(account_number=self.account_number)
 
             print(f"\n{'='*70}")
-            print(f"💼 PORTFOLIO SUMMARY - ACCOUNT {self.account_number}")
+            print(f"PORTFOLIO SUMMARY - ACCOUNT {self.account_number}")
             print(f"{'='*70}\n")
 
             # Account details
-            print("💰 Cash Balances:")
+            print("Cash Balances:")
             cash_info = self.get_cash_balance()
             print(f"   Available Cash: ${cash_info['tradeable_cash']:,.2f}")
             print(f"   Buying Power: ${cash_info['buying_power']:,.2f}")
@@ -113,12 +118,12 @@ class SafeCashBot:
             equity = float(portfolio.get('equity', 0))
             market_value = float(portfolio.get('market_value', 0))
 
-            print("\n📊 Portfolio:")
+            print("\nPortfolio:")
             print(f"   Total Equity: ${equity:,.2f}")
             print(f"   Market Value: ${market_value:,.2f}")
 
             # Margin Availability Summary
-            print("\n💳 Margin Availability:")
+            print("\nMargin Availability:")
             available_cash = cash_info['tradeable_cash']
             buying_power = cash_info['buying_power']
             margin_available = buying_power - available_cash
@@ -130,22 +135,27 @@ class SafeCashBot:
                 print(f"   Current Margin Used: ${margin_used:,.2f}")
                 print(f"   Margin Available: ${margin_available:,.2f}")
                 print(f"   Cash % of Equity: {cash_pct:.1f}%")
-                print(f"   Status: {'✅ Cash Only' if margin_used <= 0 else '⚠️ Using Margin'}")
+                print(f"   Status: {'[OK] Cash Only' if margin_used <= 0 else '[WARN] Using Margin'}")
             else:
                 print(f"   Margin Available: ${margin_available:,.2f}")
-                print(f"   Status: ✅ Cash Only (No positions)")
+                print(f"   Status: [OK] Cash Only (No positions)")
 
             # Order Book
             open_orders = self.get_open_orders()
-            print(f"\n📋 Order Book: {len(open_orders)} open order(s)")
+            if symbols:
+                display_orders = [o for o in open_orders if o['symbol'] in symbols]
+                print(f"\nOrder Book: {len(display_orders)} open order(s) (filtered; {len(open_orders)} total)")
+            else:
+                display_orders = open_orders
+                print(f"\nOrder Book: {len(open_orders)} open order(s)")
 
-            if open_orders:
+            if display_orders:
                 # Group orders by type
-                buy_orders = [o for o in open_orders if o['side'] == 'BUY']
-                sell_orders = [o for o in open_orders if o['side'] == 'SELL']
+                buy_orders = [o for o in display_orders if o['side'] == 'BUY']
+                sell_orders = [o for o in display_orders if o['side'] == 'SELL']
 
                 if buy_orders:
-                    print("\n   🟢 BUY ORDERS:")
+                    print("\n   BUY ORDERS:")
                     for order in buy_orders:
                         print(f"\n      {order['symbol']} - {order['order_type']}")
                         print(f"         Quantity: {order['quantity']:.0f} shares")
@@ -157,7 +167,7 @@ class SafeCashBot:
                         print(f"         Created: {order['created_at']}")
 
                 if sell_orders:
-                    print("\n   🔴 SELL ORDERS:")
+                    print("\n   SELL ORDERS:")
                     for order in sell_orders:
                         print(f"\n      {order['symbol']} - {order['order_type']}")
                         print(f"         Quantity: {order['quantity']:.0f} shares")
@@ -173,15 +183,15 @@ class SafeCashBot:
             # PDT Status
             pdt_info = self.get_pdt_status()
             if pdt_info:
-                print(f"\n⚠️  PDT Status:")
+                print(f"\n[WARN]  PDT Status:")
                 print(f"   Day Trades (last 5 days): {pdt_info['day_trade_count']}/3")
                 if pdt_info['flagged']:
-                    print(f"   Status: 🚨 PDT FLAGGED — only position-closing trades allowed")
+                    print(f"   Status: [ALERT] PDT FLAGGED — only position-closing trades allowed")
                 elif pdt_info['day_trade_count'] >= 2:
-                    print(f"   Status: ⚠️  WARNING — 1 day trade remaining")
+                    print(f"   Status: [WARN]  WARNING — 1 day trade remaining")
                 else:
                     remaining = 3 - pdt_info['day_trade_count']
-                    print(f"   Status: ✅ OK — {remaining} day trade(s) remaining")
+                    print(f"   Status: [OK] OK — {remaining} day trade(s) remaining")
                 if pdt_info['trades']:
                     print(f"   Recent day trades:")
                     for t in pdt_info['trades']:
@@ -189,13 +199,18 @@ class SafeCashBot:
 
             # Positions
             positions = self.get_positions()
-            print(f"\n📈 Positions: {len(positions)}")
+            if symbols:
+                display_positions = [p for p in positions if p['symbol'] in symbols]
+                print(f"\nPositions: {len(display_positions)} (filtered; {len(positions)} total)")
+            else:
+                display_positions = positions
+                print(f"\nPositions: {len(positions)}")
 
-            if positions:
+            if display_positions:
                 # Calculate total position value for allocation percentages
                 total_position_value = sum(pos['equity'] for pos in positions)
 
-                for pos in positions:
+                for pos in display_positions:
                     allocation_pct = (pos['equity'] / equity) * 100 if equity > 0 else 0
                     print(f"\n   {pos['symbol']}")
                     print(f"      Quantity: {pos['quantity']}")
@@ -206,8 +221,8 @@ class SafeCashBot:
                     print(f"      P/L: ${pos['profit_loss']:+,.2f} ({pos['profit_loss_pct']:+.2f}%)")
 
                 # Stock Distribution (within invested portion)
-                print(f"\n📊 Stock Distribution (of invested capital):")
-                for pos in positions:
+                print(f"\nStock Distribution (of invested capital):")
+                for pos in display_positions:
                     stock_pct = (pos['equity'] / total_position_value) * 100 if total_position_value > 0 else 0
                     print(f"   {pos['symbol']}: {stock_pct:.1f}% (${pos['equity']:,.2f})")
 
@@ -221,7 +236,7 @@ class SafeCashBot:
 
             if option_positions:
                 print(f"\n{'='*70}")
-                print(f"📋 OPTIONS BOOK: {len(option_positions)} active position(s)")
+                print(f"OPTIONS BOOK: {len(option_positions)} active position(s)")
                 print(f"{'='*70}")
 
                 for op in option_positions:
@@ -284,21 +299,21 @@ class SafeCashBot:
 
                     # Recommended Action
                     rec = op['recommended_action']
-                    action_icon = {'CLOSE': '🚨', 'HOLD': '✅'}.get(rec['action'], '⚡')
+                    action_icon = {'CLOSE': '[ALERT]', 'HOLD': '[OK]'}.get(rec['action'], '[!]')
                     print(f"      Recommendation: {action_icon} {rec['action']}")
                     for reason in rec['reasons']:
                         print(f"         - {reason}")
 
             # Portfolio Allocation Summary
-            print(f"\n📊 Portfolio Allocation Summary:")
+            print(f"\nPortfolio Allocation Summary:")
             cash_allocation_pct = (available_cash / equity) * 100 if equity > 0 else 100
             invested_pct = (total_position_value / equity) * 100 if equity > 0 else 0
             options_pct = (total_options_value / equity) * 100 if equity > 0 else 0
-            print(f"   💵 Cash: {cash_allocation_pct:.1f}% (${available_cash:,.2f})")
-            print(f"   📈 Stocks: {invested_pct:.1f}% (${total_position_value:,.2f})")
+            print(f"   Cash: {cash_allocation_pct:.1f}% (${available_cash:,.2f})")
+            print(f"   Stocks: {invested_pct:.1f}% (${total_position_value:,.2f})")
             if option_positions:
-                print(f"   📋 Options: {options_pct:.1f}% (${total_options_value:,.2f})")
-            print(f"   📊 Total Equity: ${equity:,.2f}")
+                print(f"   Options: {options_pct:.1f}% (${total_options_value:,.2f})")
+            print(f"   Total Equity: ${equity:,.2f}")
 
             print(f"\n{'='*70}\n")
 
@@ -312,7 +327,7 @@ class SafeCashBot:
             }
 
         except Exception as e:
-            print(f"❌ Error getting portfolio: {e}")
+            print(f"[ERR] Error getting portfolio: {e}")
             return None
 
     def get_pdt_status(self):
@@ -397,7 +412,7 @@ class SafeCashBot:
             return positions
 
         except Exception as e:
-            print(f"❌ Error getting positions: {e}")
+            print(f"[ERR] Error getting positions: {e}")
             return []
 
     def get_option_positions(self):
@@ -812,7 +827,7 @@ class SafeCashBot:
             return orders
 
         except Exception as e:
-            print(f"❌ Error getting open orders: {e}")
+            print(f"[ERR] Error getting open orders: {e}")
             return []
 
     def validate_buy_order(self, symbol, quantity, price):
@@ -891,6 +906,37 @@ class SafeCashBot:
 
         return cancelled_qty
 
+    def cancel_order_by_id(self, order_id):
+        """Cancel a single order by ID after verifying it is still open.
+
+        Only cancels if order state is queued, unconfirmed, or confirmed.
+        Returns False if the order has already filled, been cancelled, or
+        cannot be found (prevents race conditions).
+
+        Args:
+            order_id: Robinhood order ID string.
+
+        Returns:
+            True if the order was successfully cancelled, False otherwise.
+        """
+        try:
+            order_info = r.orders.get_stock_order_info(order_id)
+            if not order_info or not isinstance(order_info, dict):
+                print(f"   cancel_order_by_id: order {order_id} not found")
+                return False
+
+            state = order_info.get('state', '')
+            if state not in ('queued', 'unconfirmed', 'confirmed'):
+                print(f"   cancel_order_by_id: order {order_id} in state '{state}', cannot cancel")
+                return False
+
+            r.orders.cancel_stock_order(order_id)
+            print(f"   cancel_order_by_id: cancelled order {order_id}")
+            return True
+        except Exception as e:
+            print(f"   cancel_order_by_id: error cancelling {order_id}: {e}")
+            return False
+
     def place_cash_buy_order(self, symbol, quantity, price, dry_run=True):
         """
         Place a limit buy order using CASH ONLY.
@@ -904,7 +950,7 @@ class SafeCashBot:
             dry_run: If True, simulates order without execution
         """
         print(f"\n{'='*70}")
-        print(f"🛒 BUY ORDER - {'DRY RUN' if dry_run else 'LIVE'}")
+        print(f"BUY ORDER - {'DRY RUN' if dry_run else 'LIVE'}")
         print(f"{'='*70}")
 
         # Validate order
@@ -915,21 +961,21 @@ class SafeCashBot:
         print(f"   Quantity: {quantity}")
         print(f"   Limit Price: ${price:.2f}")
         print(f"   Total Cost: ${quantity * price:.2f}")
-        print(f"   Validation: {'✅ ' + reason if is_valid else '❌ ' + reason}")
+        print(f"   Validation: {'[OK] ' + reason if is_valid else '[ERR] ' + reason}")
 
         if not is_valid:
-            print(f"\n❌ Order rejected: {reason}")
+            print(f"\n[ERR] Order rejected: {reason}")
             print(f"{'='*70}\n")
             return None
 
         if dry_run:
-            print("\n⚠️  DRY RUN MODE - Order not executed")
+            print("\n[WARN]  DRY RUN MODE - Order not executed")
             print("   To execute real orders, call with dry_run=False")
             print(f"{'='*70}\n")
             return None
 
         try:
-            print("\n🚀 Executing order...")
+            print("\nExecuting order...")
             order = r.orders.order_buy_limit(
                 symbol=symbol,
                 quantity=quantity,
@@ -941,7 +987,7 @@ class SafeCashBot:
             order_state = order.get('state') if isinstance(order, dict) else None
 
             if order_id:
-                print("✅ Order placed successfully!")
+                print("[OK] Order placed successfully!")
                 print(f"   Order ID: {order_id}")
                 print(f"   State: {order_state or 'N/A'}")
                 print(f"{'='*70}\n")
@@ -951,7 +997,7 @@ class SafeCashBot:
             detail = None
             if isinstance(order, dict):
                 detail = order.get('detail') or order.get('non_field_errors') or order.get('message')
-            print(f"❌ Buy order failed!")
+            print(f"[ERR] Buy order failed!")
             print(f"   Reason: {detail or order}")
 
             if isinstance(detail, str) and 'pdt' in detail.lower():
@@ -967,7 +1013,7 @@ class SafeCashBot:
                     )
                     retry_id = retry.get('id') if isinstance(retry, dict) else None
                     if retry_id:
-                        print("✅ Order placed successfully!")
+                        print("[OK] Order placed successfully!")
                         print(f"   Order ID: {retry_id}")
                         print(f"   State: {retry.get('state', 'N/A')}")
                         print(f"{'='*70}\n")
@@ -984,7 +1030,7 @@ class SafeCashBot:
             return order
 
         except Exception as e:
-            print(f"❌ Order failed: {e}")
+            print(f"[ERR] Order failed: {e}")
             print(f"{'='*70}\n")
             return None
 
@@ -999,7 +1045,7 @@ class SafeCashBot:
             dry_run: If True, simulates order without execution
         """
         print(f"\n{'='*70}")
-        print(f"💵 SELL ORDER - {'DRY RUN' if dry_run else 'LIVE'}")
+        print(f"SELL ORDER - {'DRY RUN' if dry_run else 'LIVE'}")
         print(f"{'='*70}")
 
         # Check if we have the position
@@ -1013,28 +1059,28 @@ class SafeCashBot:
         print(f"   Total Value: ${quantity * price:.2f}")
 
         if not position:
-            print(f"   Validation: ❌ No position in {symbol}")
-            print(f"\n❌ Order rejected: You don't own {symbol}")
+            print(f"   Validation: [ERR] No position in {symbol}")
+            print(f"\n[ERR] Order rejected: You don't own {symbol}")
             print(f"{'='*70}\n")
             return None
 
         if quantity > position['quantity']:
-            print(f"   Validation: ❌ Insufficient shares (have {position['quantity']})")
-            print(f"\n❌ Order rejected: Can't sell {quantity} shares, only own {position['quantity']}")
+            print(f"   Validation: [ERR] Insufficient shares (have {position['quantity']})")
+            print(f"\n[ERR] Order rejected: Can't sell {quantity} shares, only own {position['quantity']}")
             print(f"{'='*70}\n")
             return None
 
-        print("   Validation: ✅ Valid sell order")
+        print("   Validation: [OK] Valid sell order")
 
         if dry_run:
-            print("\n⚠️  DRY RUN MODE - Order not executed")
+            print("\n[WARN]  DRY RUN MODE - Order not executed")
             print("   To execute real orders, call with dry_run=False")
             print(f"{'='*70}\n")
             return None
 
         # Execute real order
         try:
-            print("\n🚀 Executing order...")
+            print("\nExecuting order...")
             order = r.orders.order_sell_limit(
                 symbol=symbol,
                 quantity=quantity,
@@ -1042,7 +1088,7 @@ class SafeCashBot:
                 account_number=self.account_number
             )
 
-            print("✅ Order placed successfully!")
+            print("[OK] Order placed successfully!")
             print(f"   Order ID: {order.get('id', 'N/A')}")
             print(f"   State: {order.get('state', 'N/A')}")
             print(f"{'='*70}\n")
@@ -1050,7 +1096,7 @@ class SafeCashBot:
             return order
 
         except Exception as e:
-            print(f"❌ Order failed: {e}")
+            print(f"[ERR] Order failed: {e}")
             print(f"{'='*70}\n")
             return None
 
@@ -1168,7 +1214,7 @@ class SafeCashBot:
             quote = r.stocks.get_quotes(symbol)[0]
             price = float(r.stocks.get_latest_price(symbol)[0])
 
-            print(f"\n📊 {symbol} Quote:")
+            print(f"\n{symbol} Quote:")
             print(f"   Price: ${price:.2f}")
             print(f"   Bid: ${float(quote.get('bid_price', 0)):.2f}")
             print(f"   Ask: ${float(quote.get('ask_price', 0)):.2f}")
@@ -1177,7 +1223,7 @@ class SafeCashBot:
 
             return price
         except Exception as e:
-            print(f"❌ Error fetching quote: {e}")
+            print(f"[ERR] Error fetching quote: {e}")
             return None
 
     def run_example(self):
@@ -1191,23 +1237,23 @@ class SafeCashBot:
 
             # Example buy order (DRY RUN)
             print("\n" + "="*70)
-            print("📋 EXAMPLE: Placing a dry run buy order")
+            print("EXAMPLE: Placing a dry run buy order")
             print("="*70)
             self.place_cash_buy_order('AAPL', 1, 150.00, dry_run=True)
 
-            print("\n💡 To execute real orders:")
+            print("\nTo execute real orders:")
             print("   bot.place_cash_buy_order('AAPL', 1, 150.00, dry_run=False)")
 
         except Exception as e:
-            print(f"❌ Error: {e}")
+            print(f"[ERR] Error: {e}")
         finally:
             self.auth.logout()
 
 
 def main():
     """Run the safe cash bot - just show portfolio"""
-    print("\n🤖 Safe Cash-Only Trading Bot")
-    print(f"⏰ {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+    print("\nSafe Cash-Only Trading Bot")
+    print(f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
 
     bot = SafeCashBot()
 
@@ -1215,7 +1261,7 @@ def main():
         # Just show portfolio for automated account
         bot.get_portfolio_summary()
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f"[ERR] Error: {e}")
     finally:
         bot.auth.logout()
 

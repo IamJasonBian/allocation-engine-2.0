@@ -153,6 +153,10 @@ class StateManager:
             'Stop Loss': OrderType.STOP,
             'Stop Limit': OrderType.STOP_LIMIT,
         }
+        SIDE_MAP = {
+            'BUY': OrderSide.BUY,
+            'SELL': OrderSide.SELL,
+        }
 
         orders = []
         for raw in broker_orders:
@@ -163,7 +167,11 @@ class StateManager:
             order_type = ORDER_TYPE_MAP.get(raw.get('order_type'), OrderType.MARKET)
             price = raw.get('limit_price') or raw.get('stop_price') or 0
             size = float(raw.get('quantity', 0))
-            orders.append(Order(size=size, price=price, order_type=order_type))
+            side = SIDE_MAP.get(raw.get('side'))
+            order_id = raw.get('order_id')
+            created_at = raw.get('created_at')
+            orders.append(Order(size=size, price=price, order_type=order_type,
+                                side=side, order_id=order_id, created_at=created_at))
 
         self.tickers[symbol] = Ticker(orders)
 

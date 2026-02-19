@@ -185,6 +185,12 @@ class TradingSystem:
         elif order['action'] == 'stop_limit_sell':
             has_paired_buy = signal.get('paired_buy') is not None
 
+            # Cancel existing lot-sized orders before placing new pair
+            # (prevents duplicate sells/buys)
+            self._cancel_lot_orders_by_side(symbol, 'SELL', open_orders)
+            if has_paired_buy:
+                self._cancel_lot_orders_by_side(symbol, 'BUY', open_orders)
+
             if has_paired_buy:
                 # Default: place buy first, then sell.
                 # If first existing order is a buy, place sell first instead.
@@ -204,39 +210,43 @@ class TradingSystem:
             else:
                 self._execute_stop_limit_sell_order(symbol, order)
         elif order['action'] == 'limit_sell':
+            # Cancel existing lot-sized sells before resubmit
+            self._cancel_lot_orders_by_side(symbol, 'SELL', open_orders)
             self._execute_limit_sell_resubmit(symbol, order)
 
+    def _cancel_lot_orders_by_side(self, symbol: str, side: str, open_orders: list) -> int:
+        """Cancel all open orders for symbol matching lot_size on the given side.
+
+        Enforces the invariant: max 1 buy + 1 sell per lot.
+        Returns the number of orders successfully cancelled.
+        """
+        lot_size = getattr(self.strategy, 'lot_size', None)
+        if lot_size is None:
+            return 0
+
+        cancelled = 0
+        for order in (open_orders or []):
+            if (order.get('symbol') == symbol
+                    and order.get('side') == side
+                    and int(float(order.get('quantity', 0))) == lot_size):
+                order_id = order.get('order_id')
+                if order_id and self.trading_bot.cancel_order_by_id(order_id):
+                    cancelled += 1
+                    print(f"  Cancelled {side} {order_id} (enforcing 1 buy + 1 sell per lot)")
+        return cancelled
+
     def _handle_order_replacement(self, symbol: str, signal: Dict, symbol_orders: list):
-        """Replace the oldest buy order (matching lot_size) with a new
+        """Cancel all lot-sized orders for the symbol and place a fresh
         stop-limit sell + paired buy at current momentum pricing.
 
+        Ensures exactly 1 sell + 1 buy per lot on the book.
+
         Steps:
-          1. Classify orders by side
-          2. If no buys exist, log ideal state and return
-          3. Find oldest buy matching strategy lot_size
-          4. PDT safety check (alert via Slack if concerning)
-          5. Cancel the target buy
-          6. Place replacement stop-limit sell + paired buy
+          1. PDT safety check
+          2. Cancel ALL existing lot-sized orders (buys and sells)
+          3. Place replacement stop-limit sell + paired buy
         """
-        buy_orders = [o for o in symbol_orders if o.get('side') == 'BUY']
-        sell_orders = [o for o in symbol_orders if o.get('side') == 'SELL']
-
-        if not buy_orders:
-            print(f"   Order replacement: {symbol} has {len(sell_orders)} sell(s), 0 buys — ideal state, skipping")
-            return
-
-        # Sort buys by created_at ascending, find first with quantity == lot_size
         lot_size = getattr(self.strategy, 'lot_size', None)
-        sorted_buys = sorted(buy_orders, key=lambda o: o.get('created_at') or '')
-        target = None
-        for o in sorted_buys:
-            if lot_size is not None and int(o.get('quantity', 0)) == lot_size:
-                target = o
-                break
-
-        if target is None:
-            print(f"   Order replacement: no buy order with qty={lot_size} found for {symbol}, skipping")
-            return
 
         # PDT safety check
         pdt_info = self.trading_bot.get_pdt_status()
@@ -253,16 +263,10 @@ class TradingSystem:
                 send_slack_alert(msg)
                 return
 
-        # Cancel the target buy order
-        target_order_id = target.get('order_id')
-        if not target_order_id:
-            print(f"   Order replacement: target buy has no order_id, skipping")
-            return
-
-        cancelled = self.trading_bot.cancel_order_by_id(target_order_id)
-        if not cancelled:
-            print(f"   Order replacement: cancel failed for {target_order_id} (may have filled), skipping")
-            return
+        # Cancel ALL existing lot-sized orders for the symbol
+        sells_cancelled = self._cancel_lot_orders_by_side(symbol, 'SELL', symbol_orders)
+        buys_cancelled = self._cancel_lot_orders_by_side(symbol, 'BUY', symbol_orders)
+        print(f"   Order replacement: cancelled {sells_cancelled} sell(s) + {buys_cancelled} buy(s) for {symbol}")
 
         # Build replacement orders using momentum pricing from the signal
         current_price = signal['order'].get('current_price', 0)
@@ -292,7 +296,7 @@ class TradingSystem:
             'current_price': current_price,
         }
 
-        print(f"   Order replacement: replacing buy {target_order_id} with sell @ ${stop_price:.2f} + buy @ ${buy_price:.2f}")
+        print(f"   Order replacement: placing sell @ ${stop_price:.2f} + buy @ ${buy_price:.2f}")
         self._execute_stop_limit_sell_order(symbol, sell_order)
         self._execute_paired_limit_buy(symbol, paired_buy)
 
@@ -493,8 +497,9 @@ class TradingSystem:
         print(f"{'='*70}\n")
 
         try:
-            # Get portfolio summary data
-            portfolio_data = self.trading_bot.get_portfolio_summary()
+            # Get portfolio summary data (filter display to --ticker symbols)
+            symbols_filter = None if self.verbose else self.symbols
+            portfolio_data = self.trading_bot.get_portfolio_summary(symbols=symbols_filter)
 
             if not portfolio_data:
                 print("Unable to retrieve portfolio data")
@@ -513,10 +518,10 @@ class TradingSystem:
 
             print(f"Total Portfolio Value: ${equity:,.2f}\n")
             print(f"Asset Allocation:")
-            print(f"  Cash:     {cash_allocation_pct:>6.2f}%  (${available_cash:>12,.2f})")
-            print(f"  Invested: {invested_pct:>6.2f}%  (${total_position_value:>12,.2f})")
+            print(f"  💵 Cash:     {cash_allocation_pct:>6.2f}%  (${available_cash:>12,.2f})")
+            print(f"  📈 Invested: {invested_pct:>6.2f}%  (${total_position_value:>12,.2f})")
             print(f"  {'─' * 40}")
-            print(f"  Total:    100.00%  (${equity:>12,.2f})\n")
+            print(f"  📊 Total:    100.00%  (${equity:>12,.2f})\n")
 
             if positions:
                 # Filter to --ticker symbols when not in verbose mode
@@ -531,7 +536,7 @@ class TradingSystem:
 
                 for pos in sorted_positions:
                     allocation_pct = (pos['equity'] / equity) * 100 if equity > 0 else 0
-                    pl_indicator = "(+)" if pos['profit_loss'] >= 0 else "(-)"
+                    pl_indicator = "📈" if pos['profit_loss'] >= 0 else "📉"
 
                     print(f"  {pos['symbol']:>6}:   {allocation_pct:>6.2f}%  (${pos['equity']:>12,.2f})  "
                           f"{pl_indicator} {pos['profit_loss_pct']:+.2f}%")
@@ -570,11 +575,11 @@ class TradingSystem:
             else:
                 display_orders = [o for o in open_orders if o['symbol'] in self.symbols]
                 filter_note = f" (filtered to {', '.join(self.symbols)}; {len(open_orders)} total)"
-            print(f"\nOrder Book: {len(display_orders)} open order(s){filter_note}")
+            print(f"\n📋 Order Book: {len(display_orders)} open order(s){filter_note}")
             buy_orders = [o for o in display_orders if o['side'] == 'BUY']
             sell_orders = [o for o in display_orders if o['side'] == 'SELL']
             if buy_orders:
-                print("\n   BUY ORDERS:")
+                print("\n   🟢 BUY ORDERS:")
                 for order in buy_orders:
                     print(f"\n      {order['symbol']} - {order['order_type']}")
                     print(f"         Quantity: {order['quantity']:.0f} shares")
@@ -585,7 +590,7 @@ class TradingSystem:
                     print(f"         Status: {order['state']}")
                     print(f"         Created: {order['created_at']}")
             if sell_orders:
-                print("\n   SELL ORDERS:")
+                print("\n   🔴 SELL ORDERS:")
                 for order in sell_orders:
                     print(f"\n      {order['symbol']} - {order['order_type']}")
                     print(f"         Quantity: {order['quantity']:.0f} shares")
@@ -626,12 +631,18 @@ class TradingSystem:
             time.sleep(1)
 
         # Log state: local file in dry-run, Netlify Blobs when live
-        portfolio_data = self.trading_bot.get_portfolio_summary()
+        symbols_filter = None if self.verbose else self.symbols
+        portfolio_data = self.trading_bot.get_portfolio_summary(symbols=symbols_filter)
+
+        # Compute drift metrics from cached daily bars (if available)
+        drift_metrics = self._compute_drift_metrics()
+
         log_state_to_blob(
             self.state_manager,
             live=not self.dry_run,
             order_book=open_orders,
             portfolio=portfolio_data,
+            drift_metrics=drift_metrics,
         )
 
         # Refresh dashboard market indicators
@@ -658,6 +669,84 @@ class TradingSystem:
 
         # Send oncall Slack summary every cycle
         self._send_oncall_summary(open_orders, portfolio_data)
+
+    def _compute_drift_metrics(self) -> dict:
+        """Compute rolling drift metrics from cached BTC daily bars.
+
+        Returns a dict with rolling_sharpe, rolling_vol, regime, and
+        suggested parameters — or None if data is unavailable.
+        """
+        try:
+            from trading_system.backtests.data_loader import DATA_DIR
+            from trading_system.backtests.parameter_optimizer import (
+                suggest_regime_params,
+            )
+            import json
+            import math
+
+            cache_path = DATA_DIR / "BTC_daily.json"
+            if not cache_path.exists():
+                return None
+
+            with open(cache_path, "r") as f:
+                bars = json.load(f)
+
+            if len(bars) < 22:
+                return None
+
+            # Use last 22 bars (21 returns) for rolling metrics
+            window_bars = bars[-22:]
+            closes = [b["close"] for b in window_bars]
+            daily_rets = []
+            for i in range(1, len(closes)):
+                if closes[i - 1] > 0:
+                    daily_rets.append((closes[i] - closes[i - 1]) / closes[i - 1])
+
+            if len(daily_rets) < 2:
+                return None
+
+            mean_r = sum(daily_rets) / len(daily_rets)
+            var = sum((r - mean_r) ** 2 for r in daily_rets) / (len(daily_rets) - 1)
+            std = math.sqrt(var) if var > 0 else 0.0
+            ann_vol = std * math.sqrt(252) * 100  # percentage
+
+            daily_rf = 0.05 / 252
+            rolling_sharpe = ((mean_r - daily_rf) / std * math.sqrt(252)) if std > 0 else 0.0
+
+            # Rolling return
+            start_val = closes[0]
+            end_val = closes[-1]
+            rolling_return = ((end_val - start_val) / start_val * 100) if start_val > 0 else 0.0
+
+            # Regime suggestion
+            regime = suggest_regime_params(ann_vol)
+
+            # Drift alerts
+            alerts = []
+            if rolling_sharpe < -1.0:
+                alerts.append({"metric": "rolling_sharpe", "value": round(rolling_sharpe, 3),
+                               "threshold": -1.0})
+
+            result = {
+                "as_of": window_bars[-1]["date"],
+                "window_days": 21,
+                "rolling_sharpe": round(rolling_sharpe, 3),
+                "rolling_vol_pct": round(ann_vol, 2),
+                "rolling_return_pct": round(rolling_return, 2),
+                "regime": regime["regime"],
+                "suggested_params": {
+                    "stop_offset_pct": regime["stop_offset_pct"],
+                    "buy_offset": regime["buy_offset"],
+                    "coverage_threshold": regime["coverage_threshold"],
+                },
+                "regime_rationale": regime["rationale"],
+                "drift_alerts": alerts,
+            }
+            return result
+
+        except Exception as e:
+            print(f"  [drift] Could not compute drift metrics: {e}")
+            return None
 
     def _send_oncall_summary(self, open_orders: List[Dict], portfolio_data: Dict):
         """Send a concise oncall status summary to Slack after each run_once() cycle."""

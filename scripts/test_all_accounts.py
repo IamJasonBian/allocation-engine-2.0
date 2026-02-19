@@ -20,11 +20,11 @@ def test_account(account_number):
     try:
         # Get account info
         account = r.profiles.load_account_profile(account_number=account_number)
-        print(f"✅ Account Type: {account.get('type')}")
-        print(f"✅ Cash: ${float(account.get('cash', 0)):.2f}")
+        print(f"[OK] Account Type: {account.get('type')}")
+        print(f"[OK] Cash: ${float(account.get('cash', 0)):.2f}")
 
         # Try placing a test order (will fail but shows error)
-        print("\n🔍 Testing order placement...")
+        print("\nTesting order placement...")
         order = r.orders.order_buy_limit(
             symbol='AAPL',
             quantity=1,
@@ -33,25 +33,25 @@ def test_account(account_number):
         )
 
         if order and 'id' in order:
-            print("✅ CAN TRADE - Order placed successfully")
+            print("[OK] CAN TRADE - Order placed successfully")
             print(f"   Order ID: {order['id']}")
             print(f"   State: {order['state']}")
 
             # Cancel the test order immediately
             try:
                 r.orders.cancel_stock_order(order['id'])
-                print("   ✅ Test order cancelled")
+                print("   [OK] Test order cancelled")
             except Exception:
-                print("   ⚠️  Could not cancel - check Robinhood app")
+                print("   [WARN]  Could not cancel - check Robinhood app")
 
         elif order and 'non_field_errors' in order:
-            print("❌ CANNOT TRADE")
+            print("[ERR] CANNOT TRADE")
             print(f"   Reason: {order['non_field_errors'][0]}")
         else:
-            print(f"⚠️  Unknown response: {order}")
+            print(f"[WARN]  Unknown response: {order}")
 
     except Exception as e:
-        print(f"❌ Error: {e}")
+        print(f"[ERR] Error: {e}")
 
     print(f"{'='*70}\n")
 
@@ -62,7 +62,7 @@ def main():
     auth.login()
 
     print("\n" + "="*70)
-    print("🔍 TESTING ALL ACCOUNTS FOR TRADING CAPABILITY")
+    print("TESTING ALL ACCOUNTS FOR TRADING CAPABILITY")
     print("="*70)
 
     # Get all accounts

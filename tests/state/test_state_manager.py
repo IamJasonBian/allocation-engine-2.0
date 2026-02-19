@@ -1,6 +1,6 @@
 from trading_system.state.state_manager import StateManager
 from trading_system.entities.Order import Order
-from trading_system.entities.OrderType import OrderType
+from trading_system.entities.OrderType import OrderType, OrderSide
 from trading_system.entities.Ticker import Ticker
 
 
@@ -81,6 +81,24 @@ class TestTickerHoldsBrokerOrders:
         assert all(isinstance(o, Order) for o in ticker.orders)
         assert ticker.orders[0].order_type == OrderType.LIMIT
         assert ticker.orders[1].order_type == OrderType.STOP_LIMIT
+
+    def test_side_and_order_id_preserved(self):
+        mgr = StateManager()
+        broker_orders = [
+            {'symbol': 'BTC', 'side': 'SELL', 'order_type': 'Limit',
+             'quantity': '100', 'limit_price': 31.0,
+             'order_id': 'ORD-001', 'created_at': '2025-06-01 10:00:00'},
+            {'symbol': 'BTC', 'side': 'BUY', 'order_type': 'Limit',
+             'quantity': '50', 'limit_price': 28.0,
+             'order_id': 'ORD-002', 'created_at': '2025-06-01 11:00:00'},
+        ]
+        mgr.load_broker_orders('BTC', broker_orders)
+        ticker = mgr.get_ticker('BTC')
+        assert ticker.orders[0].side == OrderSide.SELL
+        assert ticker.orders[0].order_id == 'ORD-001'
+        assert ticker.orders[0].created_at == '2025-06-01 10:00:00'
+        assert ticker.orders[1].side == OrderSide.BUY
+        assert ticker.orders[1].order_id == 'ORD-002'
 
     def test_valid_orders_in_active_response(self):
         mgr = StateManager()

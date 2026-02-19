@@ -66,14 +66,14 @@ class RobinhoodAuth:
         # Try to use stored token first
         if use_stored_token:
             try:
-                print(f"🔄 Attempting to login with stored token for '{account}' account...")
+                print(f"Attempting to login with stored token for '{account}' account...")
                 login_response = r.login(pickle_name=f'rh_{account}')
-                print(f"✅ Successfully logged in with stored token: {creds['email']}")
+                print(f"[OK] Successfully logged in with stored token: {creds['email']}")
                 self.current_session = account
                 return login_response
             except Exception as e:
-                print(f"⚠️  Stored token failed or expired: {e}")
-                print("🔄 Logging in with credentials...")
+                print(f"[WARN]  Stored token failed or expired: {e}")
+                print("Logging in with credentials...")
 
         # Fresh login with credentials
         try:
@@ -83,25 +83,25 @@ class RobinhoodAuth:
                 store_session=True,
                 pickle_name=f'rh_{account}'
             )
-            print(f"✅ Successfully logged in: {creds['email']}")
+            print(f"[OK] Successfully logged in: {creds['email']}")
             self.current_session = account
             return login_response
         except Exception as e:
-            print(f"❌ Login failed: {e}")
+            print(f"[ERR] Login failed: {e}")
             sys.exit(1)
 
     def logout(self):
         """Logout from current Robinhood session"""
         try:
             r.logout()
-            print(f"✅ Logged out from {self.current_session} account")
+            print(f"[OK] Logged out from {self.current_session} account")
             self.current_session = None
         except Exception as e:
-            print(f"⚠️  Logout warning: {e}")
+            print(f"[WARN]  Logout warning: {e}")
 
     def switch_account(self, account_name: str):
         """Switch to a different account"""
-        print(f"🔄 Switching from {self.current_session} to {account_name}...")
+        print(f"Switching from {self.current_session} to {account_name}...")
         return self.login(account_name)
 
     def get_account_info(self) -> Dict:
@@ -117,7 +117,7 @@ class RobinhoodAuth:
                 'buying_power': portfolio.get('buying_power', 'N/A'),
             }
         except Exception as e:
-            print(f"❌ Failed to fetch account info: {e}")
+            print(f"[ERR] Failed to fetch account info: {e}")
             return {}
 
 
@@ -130,7 +130,7 @@ def main():
 
     # Get account info
     info = auth.get_account_info()
-    print("\n📊 Account Info:")
+    print("\nAccount Info:")
     for key, value in info.items():
         print(f"   {key}: {value}")
 

@@ -14,7 +14,7 @@ def place_single_order():
     """Interactive script to place a single order"""
 
     print("\n" + "="*70)
-    print("🛒 PLACE SINGLE ORDER - Account 490706777")
+    print("PLACE SINGLE ORDER - Account 490706777")
     print("="*70 + "\n")
 
     # Initialize bot
@@ -24,14 +24,14 @@ def place_single_order():
     bot.get_portfolio_summary()
 
     print("\n" + "="*70)
-    print("📝 ORDER DETAILS")
+    print("ORDER DETAILS")
     print("="*70 + "\n")
 
     # Get order details from user
     symbol = input("Enter stock symbol (e.g., AAPL): ").strip().upper()
 
     if not symbol:
-        print("❌ No symbol entered. Exiting.")
+        print("[ERR] No symbol entered. Exiting.")
         bot.auth.logout()
         return
 
@@ -40,7 +40,7 @@ def place_single_order():
     current_price = bot.get_quote(symbol)
 
     if not current_price:
-        print(f"❌ Could not get quote for {symbol}")
+        print(f"[ERR] Could not get quote for {symbol}")
         bot.auth.logout()
         return
 
@@ -53,7 +53,7 @@ def place_single_order():
     order_type = input("Select (1 or 2): ").strip()
 
     if order_type not in ['1', '2']:
-        print("❌ Invalid selection. Exiting.")
+        print("[ERR] Invalid selection. Exiting.")
         bot.auth.logout()
         return
 
@@ -64,11 +64,11 @@ def place_single_order():
     try:
         quantity = int(quantity_str)
         if quantity <= 0:
-            print("❌ Quantity must be positive")
+            print("[ERR] Quantity must be positive")
             bot.auth.logout()
             return
     except ValueError:
-        print("❌ Invalid quantity")
+        print("[ERR] Invalid quantity")
         bot.auth.logout()
         return
 
@@ -80,11 +80,11 @@ def place_single_order():
         try:
             price = float(price_str)
             if price <= 0:
-                print("❌ Price must be positive")
+                print("[ERR] Price must be positive")
                 bot.auth.logout()
                 return
         except ValueError:
-            print("❌ Invalid price")
+            print("[ERR] Invalid price")
             bot.auth.logout()
             return
     else:
@@ -92,7 +92,7 @@ def place_single_order():
 
     # Dry run or live
     print("\n" + "="*70)
-    print("⚠️  EXECUTION MODE")
+    print("[WARN]  EXECUTION MODE")
     print("="*70)
     print("\n1. DRY RUN (simulate order)")
     print("2. LIVE (execute real order)")
@@ -100,7 +100,7 @@ def place_single_order():
     mode = input("\nSelect mode (1 or 2): ").strip()
 
     if mode not in ['1', '2']:
-        print("❌ Invalid selection. Exiting.")
+        print("[ERR] Invalid selection. Exiting.")
         bot.auth.logout()
         return
 
@@ -108,7 +108,7 @@ def place_single_order():
 
     # Confirm order
     print("\n" + "="*70)
-    print("📋 ORDER SUMMARY")
+    print("ORDER SUMMARY")
     print("="*70)
     print("   Account: 490706777")
     print(f"   Type: {'BUY' if is_buy else 'SELL'}")
@@ -116,13 +116,13 @@ def place_single_order():
     print(f"   Quantity: {quantity}")
     print(f"   Limit Price: ${price:.2f}")
     print(f"   Total: ${quantity * price:.2f}")
-    print(f"   Mode: {'DRY RUN' if dry_run else '⚠️  LIVE'}")
+    print(f"   Mode: {'DRY RUN' if dry_run else '[WARN]  LIVE'}")
     print("="*70 + "\n")
 
     confirm = input("Confirm order? (yes/no): ").strip().lower()
 
     if confirm != 'yes':
-        print("\n❌ Order cancelled by user\n")
+        print("\n[ERR] Order cancelled by user\n")
         bot.auth.logout()
         return
 
@@ -135,15 +135,15 @@ def place_single_order():
     # Show result
     if order:
         print("\n" + "="*70)
-        print("✅ ORDER SUBMITTED")
+        print("[OK] ORDER SUBMITTED")
         print("="*70)
         print(f"   Order ID: {order.get('id', 'N/A')}")
         print(f"   State: {order.get('state', 'N/A')}")
         print("="*70 + "\n")
     elif dry_run:
-        print("\n✅ Dry run completed - no real order placed\n")
+        print("\n[OK] Dry run completed - no real order placed\n")
     else:
-        print("\n❌ Order failed - see error above\n")
+        print("\n[ERR] Order failed - see error above\n")
 
     # Logout
     bot.auth.logout()
@@ -162,7 +162,7 @@ def quick_order(symbol, quantity, price=None, order_type='buy', dry_run=True):
     if price is None:
         current_price = bot.get_quote(symbol)
         if not current_price:
-            print(f"❌ Could not get price for {symbol}")
+            print(f"[ERR] Could not get price for {symbol}")
             bot.auth.logout()
             return None
 
@@ -170,13 +170,13 @@ def quick_order(symbol, quantity, price=None, order_type='buy', dry_run=True):
         price = current_price * 1.005 if order_type == 'buy' else current_price * 0.995
 
     print(f"\n{'='*70}")
-    print("📝 QUICK ORDER")
+    print("QUICK ORDER")
     print(f"{'='*70}")
     print(f"   Type: {order_type.upper()}")
     print(f"   Symbol: {symbol}")
     print(f"   Quantity: {quantity}")
     print(f"   Limit Price: ${price:.2f}")
-    print(f"   Mode: {'DRY RUN' if dry_run else '⚠️  LIVE'}")
+    print(f"   Mode: {'DRY RUN' if dry_run else '[WARN]  LIVE'}")
     print(f"{'='*70}\n")
 
     # Execute
@@ -202,7 +202,7 @@ if __name__ == "__main__":
 
             quick_order(symbol, quantity, price, order_type, dry_run)
         except Exception as e:
-            print(f"❌ Error: {e}")
+            print(f"[ERR] Error: {e}")
             print("\nUsage:")
             print("  python place_single_order.py AAPL 1 250.00 buy --live")
             print("  python place_single_order.py MSFT 2 400.00 sell")

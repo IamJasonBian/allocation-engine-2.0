@@ -17,7 +17,7 @@ def list_accounts():
     load_dotenv()
 
     print("\n" + "="*60)
-    print("📋 CONFIGURED ROBINHOOD ACCOUNTS")
+    print("CONFIGURED ROBINHOOD ACCOUNTS")
     print("="*60 + "\n")
 
     accounts = {
@@ -39,10 +39,10 @@ def list_accounts():
                          and 'example.com' not in creds['email'])
 
         print(f"{'='*60}")
-        print(f"📱 {account_name.upper()} ACCOUNT {is_active}")
+        print(f"{account_name.upper()} ACCOUNT {is_active}")
         print(f"{'='*60}")
         print(f"   Email: {creds['email']}")
-        print(f"   Configured: {'✅ Yes' if has_creds else '❌ No'}")
+        print(f"   Configured: {'[OK] Yes' if has_creds else '[ERR] No'}")
 
         if has_creds:
             try:
@@ -62,10 +62,10 @@ def list_accounts():
                 print(f"   Open Positions: {len(positions)}")
 
                 auth.logout()
-                print("   Status: ✅ Connected")
+                print("   Status: [OK] Connected")
 
             except Exception as e:
-                print("   Status: ❌ Failed to connect")
+                print("   Status: [ERR] Failed to connect")
                 print(f"   Error: {str(e)[:50]}...")
 
         print()

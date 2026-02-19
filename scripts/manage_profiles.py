@@ -40,17 +40,17 @@ class ProfileManager:
 
             if 'results' in data:
                 self.accounts = data['results']
-                print(f"✅ Found {len(self.accounts)} account(s)")
+                print(f"[OK] Found {len(self.accounts)} account(s)")
                 return self.accounts
             else:
                 # Fallback to single account
                 account = r.profiles.load_account_profile()
                 self.accounts = [account] if account else []
-                print("✅ Found 1 account")
+                print("[OK] Found 1 account")
                 return self.accounts
 
         except Exception as e:
-            print(f"❌ Error fetching accounts: {e}")
+            print(f"[ERR] Error fetching accounts: {e}")
             return []
 
     def list_all_accounts(self):
@@ -60,7 +60,7 @@ class ProfileManager:
             return
 
         print("\n" + "="*80)
-        print("📋 ALL ROBINHOOD ACCOUNTS")
+        print("ALL ROBINHOOD ACCOUNTS")
         print("="*80 + "\n")
 
         for idx, account in enumerate(self.accounts, 1):
@@ -83,7 +83,7 @@ class ProfileManager:
             print(f"{'─'*80}")
             print(f"   Account Number: {account_number}")
             print(f"   Type: {account_type}")
-            print(f"   Status: {'❌ Deactivated' if is_deactivated else '✅ Active'}")
+            print(f"   Status: {'[ERR] Deactivated' if is_deactivated else '[OK] Active'}")
             print(f"   Equity: ${equity:,.2f}")
             print(f"   Market Value: ${market_value:,.2f}")
             print(f"   Cash: ${cash:,.2f}")
@@ -99,7 +99,7 @@ class ProfileManager:
             portfolio = r.profiles.load_portfolio_profile(account_number=account_number)
 
             print(f"\n{'='*80}")
-            print(f"📊 ACCOUNT DETAILS: {account_number}")
+            print(f"ACCOUNT DETAILS: {account_number}")
             print(f"{'='*80}\n")
 
             print("Account Info:")
@@ -121,7 +121,7 @@ class ProfileManager:
             return account
 
         except Exception as e:
-            print(f"❌ Error fetching account {account_number}: {e}")
+            print(f"[ERR] Error fetching account {account_number}: {e}")
             return None
 
     def find_account_by_name(self, name_hint):
@@ -134,7 +134,7 @@ class ProfileManager:
             print("No accounts loaded. Please run login() first.")
             return None
 
-        print(f"\n🔍 Searching for account matching: '{name_hint}'")
+        print(f"\nSearching for account matching: '{name_hint}'")
 
         for account in self.accounts:
             account_number = account.get('account_number', '')
@@ -142,10 +142,10 @@ class ProfileManager:
 
             # Check if name_hint matches account number or type
             if name_hint.lower() in account_number.lower() or name_hint.lower() in account_type.lower():
-                print(f"✅ Found match: {account_number} ({account_type})")
+                print(f"[OK] Found match: {account_number} ({account_type})")
                 return account
 
-        print(f"❌ No account found matching '{name_hint}'")
+        print(f"[ERR] No account found matching '{name_hint}'")
         return None
 
     def use_robinhood_web_interface(self):
@@ -153,7 +153,7 @@ class ProfileManager:
         Instructions for finding account IDs via Robinhood web interface
         """
         print("\n" + "="*80)
-        print("🌐 FINDING ACCOUNT IDS VIA ROBINHOOD WEB INTERFACE")
+        print("FINDING ACCOUNT IDS VIA ROBINHOOD WEB INTERFACE")
         print("="*80 + "\n")
 
         print("To find your account numbers and profile names:")
@@ -195,7 +195,7 @@ class ProfileManager:
         with open(filename, 'w') as f:
             json.dump(config, f, indent=2)
 
-        print(f"✅ Saved account configuration to {filename}")
+        print(f"[OK] Saved account configuration to {filename}")
         print("   You can edit this file to add custom aliases for your accounts")
 
     def logout(self):
@@ -208,7 +208,7 @@ def main():
     manager = ProfileManager()
 
     # Login and fetch all accounts
-    print("🔐 Logging in...")
+    print("Logging in...")
     manager.login()
 
     # List all accounts

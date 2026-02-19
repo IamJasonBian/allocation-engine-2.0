@@ -7,7 +7,7 @@ import os
 
 def setup_credentials():
     """Interactively set up Robinhood credentials"""
-    print("🔐 Robinhood Credentials Setup")
+    print("Robinhood Credentials Setup")
     print("=" * 60)
     print("\nThis script will help you configure your Robinhood credentials.")
     print("Your credentials will be stored in .env file (never committed to git).\n")
@@ -25,7 +25,7 @@ def setup_credentials():
                     env_lines[key] = value
 
     # Automated account (primary)
-    print("📱 AUTOMATED TRADING ACCOUNT")
+    print("AUTOMATED TRADING ACCOUNT")
     print("-" * 60)
     auto_email = input(f"Enter automated account email [{env_lines.get('RH_AUTO_EMAIL', '')}]: ").strip()
     auto_password = input("Enter automated account password [hidden]: ").strip()
@@ -36,7 +36,7 @@ def setup_credentials():
         env_lines['RH_AUTO_PASSWORD'] = auto_password
 
     # Main account (optional)
-    print("\n📱 MAIN ACCOUNT (Optional - press Enter to skip)")
+    print("\nMAIN ACCOUNT (Optional - press Enter to skip)")
     print("-" * 60)
     main_email = input(f"Enter main account email [{env_lines.get('RH_MAIN_EMAIL', '')}]: ").strip()
     main_password = input("Enter main account password [hidden]: ").strip()
@@ -47,7 +47,7 @@ def setup_credentials():
         env_lines['RH_MAIN_PASSWORD'] = main_password
 
     # Active account
-    print("\n⚙️  CONFIGURATION")
+    print("\n CONFIGURATION")
     print("-" * 60)
     active = input("Which account to use by default? (automated/main) [automated]: ").strip() or 'automated'
     env_lines['RH_ACTIVE_ACCOUNT'] = active
@@ -71,13 +71,13 @@ def setup_credentials():
     # Set restrictive permissions
     os.chmod(env_path, 0o600)
 
-    print("\n✅ Credentials saved to .env file")
+    print("\n[OK] Credentials saved to .env file")
     print("   File permissions set to 600 (owner read/write only)")
-    print("\n🔒 Security reminders:")
+    print("\n[LOCKED] Security reminders:")
     print("   • .env file is in .gitignore (won't be committed)")
     print("   • Enable 2FA on your Robinhood accounts")
     print("   • Keep your .env file secure and never share it")
-    print("\n📝 Next steps:")
+    print("\nNext steps:")
     print("   1. Test connection: python rh_auth.py")
     print("   2. Run trading bot: python trading_bot.py")
     print("=" * 60)
