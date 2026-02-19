@@ -3,9 +3,10 @@ Safe Cash-Only Trading Bot for Account 919433888
 ISOLATED: Only trades with cash in the specified account
 """
 
+import math
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, date
 
 import robin_stocks.robinhood as r
 from dotenv import load_dotenv
@@ -169,6 +170,23 @@ class SafeCashBot:
             else:
                 print("   No open orders")
 
+            # PDT Status
+            pdt_info = self.get_pdt_status()
+            if pdt_info:
+                print(f"\n⚠️  PDT Status:")
+                print(f"   Day Trades (last 5 days): {pdt_info['day_trade_count']}/3")
+                if pdt_info['flagged']:
+                    print(f"   Status: 🚨 PDT FLAGGED — only position-closing trades allowed")
+                elif pdt_info['day_trade_count'] >= 2:
+                    print(f"   Status: ⚠️  WARNING — 1 day trade remaining")
+                else:
+                    remaining = 3 - pdt_info['day_trade_count']
+                    print(f"   Status: ✅ OK — {remaining} day trade(s) remaining")
+                if pdt_info['trades']:
+                    print(f"   Recent day trades:")
+                    for t in pdt_info['trades']:
+                        print(f"      {t}")
+
             # Positions
             positions = self.get_positions()
             print(f"\n📈 Positions: {len(positions)}")
@@ -193,18 +211,94 @@ class SafeCashBot:
                     stock_pct = (pos['equity'] / total_position_value) * 100 if total_position_value > 0 else 0
                     print(f"   {pos['symbol']}: {stock_pct:.1f}% (${pos['equity']:,.2f})")
 
-                # Portfolio Allocation Summary
-                print(f"\n📊 Portfolio Allocation Summary:")
-                cash_allocation_pct = (available_cash / equity) * 100 if equity > 0 else 100
-                invested_pct = (total_position_value / equity) * 100 if equity > 0 else 0
-                print(f"   💵 Cash: {cash_allocation_pct:.1f}% (${available_cash:,.2f})")
-                print(f"   📈 Invested: {invested_pct:.1f}% (${total_position_value:,.2f})")
-                print(f"   📊 Total Equity: ${equity:,.2f}")
             else:
                 print("   No open positions")
-                print(f"\n📊 Portfolio Allocation Summary:")
-                print(f"   💵 Cash: 100.0% (${available_cash:,.2f})")
-                print(f"   📈 Invested: 0.0% ($0.00)")
+                total_position_value = 0
+
+            # Options Positions
+            option_positions = self.get_option_positions()
+            total_options_value = sum(op['current_value'] for op in option_positions)
+
+            if option_positions:
+                print(f"\n{'='*70}")
+                print(f"📋 OPTIONS BOOK: {len(option_positions)} active position(s)")
+                print(f"{'='*70}")
+
+                for op in option_positions:
+                    direction = 'LONG' if op['position_type'] == 'long' else 'SHORT'
+                    otype = (op['option_type'] or '').upper()
+                    print(f"\n   {op['chain_symbol']} ${op['strike']:.2f} {otype} "
+                          f"exp {op['expiration']} [{direction} x{op['quantity']:.0f}]")
+
+                    # Underlying & moneyness
+                    if op['underlying_price']:
+                        moneyness = ''
+                        if otype == 'CALL':
+                            moneyness = 'ITM' if op['underlying_price'] >= op['strike'] else 'OTM'
+                        elif otype == 'PUT':
+                            moneyness = 'ITM' if op['underlying_price'] <= op['strike'] else 'OTM'
+                        print(f"      Underlying: ${op['underlying_price']:.2f}  |  {moneyness}"
+                              f"  |  DTE: {op['dte'] if op['dte'] is not None else 'N/A'}")
+
+                    # Pricing
+                    print(f"      Mark: ${op['mark_price']:.2f}" if op['mark_price'] else "      Mark: N/A", end='')
+                    print(f"  |  Avg Cost: ${op['avg_price']:.2f}", end='')
+                    if op['break_even']:
+                        print(f"  |  Break-even: ${op['break_even']:.2f}")
+                    else:
+                        print()
+                    print(f"      Value: ${op['current_value']:,.2f}  |  "
+                          f"Cost Basis: ${op['cost_basis']:,.2f}  |  "
+                          f"P/L: ${op['unrealized_pl']:+,.2f} ({op['unrealized_pl_pct']:+.1f}%)")
+
+                    # Greeks
+                    g = op['greeks']
+                    print(f"      Greeks: "
+                          f"Δ={g['delta']:.4f}  " if g['delta'] is not None else "      Greeks: Δ=N/A  ", end='')
+                    print(f"Γ={g['gamma']:.4f}  " if g['gamma'] is not None else "Γ=N/A  ", end='')
+                    print(f"Θ={g['theta']:.4f}  " if g['theta'] is not None else "Θ=N/A  ", end='')
+                    print(f"V={g['vega']:.4f}  " if g['vega'] is not None else "V=N/A  ", end='')
+                    print(f"ρ={g['rho']:.4f}" if g['rho'] is not None else "ρ=N/A")
+                    if g['iv'] is not None:
+                        print(f"      IV: {g['iv']:.1%}", end='')
+                    if op['chance_of_profit'] is not None:
+                        print(f"  |  Prob of Profit: {op['chance_of_profit']:.1%}", end='')
+                    print()
+
+                    # Expected P&L
+                    epl = op['expected_pl']
+                    if epl:
+                        print(f"      Expected P&L:  "
+                              f"-5%: ${epl.get('-5%', 0):+,.2f}  "
+                              f"-1%: ${epl.get('-1%', 0):+,.2f}  "
+                              f"+1%: ${epl.get('+1%', 0):+,.2f}  "
+                              f"+5%: ${epl.get('+5%', 0):+,.2f}")
+                        if 'theta_daily' in epl:
+                            print(f"      Daily Theta P&L: ${epl['theta_daily']:+,.2f}")
+
+                    # BTC Correlation
+                    btc_corr = op.get('btc_correlation')
+                    if btc_corr is not None:
+                        corr_label = 'Strong' if abs(btc_corr) > 0.7 else 'Moderate' if abs(btc_corr) > 0.4 else 'Weak'
+                        print(f"      BTC Correlation: {btc_corr:+.3f} ({corr_label})")
+
+                    # Recommended Action
+                    rec = op['recommended_action']
+                    action_icon = {'CLOSE': '🚨', 'HOLD': '✅'}.get(rec['action'], '⚡')
+                    print(f"      Recommendation: {action_icon} {rec['action']}")
+                    for reason in rec['reasons']:
+                        print(f"         - {reason}")
+
+            # Portfolio Allocation Summary
+            print(f"\n📊 Portfolio Allocation Summary:")
+            cash_allocation_pct = (available_cash / equity) * 100 if equity > 0 else 100
+            invested_pct = (total_position_value / equity) * 100 if equity > 0 else 0
+            options_pct = (total_options_value / equity) * 100 if equity > 0 else 0
+            print(f"   💵 Cash: {cash_allocation_pct:.1f}% (${available_cash:,.2f})")
+            print(f"   📈 Stocks: {invested_pct:.1f}% (${total_position_value:,.2f})")
+            if option_positions:
+                print(f"   📋 Options: {options_pct:.1f}% (${total_options_value:,.2f})")
+            print(f"   📊 Total Equity: ${equity:,.2f}")
 
             print(f"\n{'='*70}\n")
 
@@ -213,11 +307,63 @@ class SafeCashBot:
                 'equity': equity,
                 'market_value': market_value,
                 'positions': positions,
-                'open_orders': open_orders
+                'open_orders': open_orders,
+                'options': option_positions,
             }
 
         except Exception as e:
             print(f"❌ Error getting portfolio: {e}")
+            return None
+
+    def get_pdt_status(self):
+        """Get Pattern Day Trading status for this account"""
+        try:
+            # Check if account is flagged (position-closing only)
+            account = r.profiles.load_account_profile(account_number=self.account_number)
+            flagged = account.get('only_position_closing_trades', False)
+
+            # Get recent day trades
+            day_trade_data = r.account.get_day_trades()
+            trades = []
+            day_trade_count = 0
+
+            if isinstance(day_trade_data, dict):
+                day_trade_count = day_trade_data.get('equity_day_trade_count', 0)
+                for dt in day_trade_data.get('equity_day_trades', []):
+                    instrument_url = dt.get('instrument', '')
+                    opened = dt.get('opened_at', 'N/A')
+                    closed = dt.get('closed_at', 'N/A')
+                    # Try to format dates
+                    try:
+                        if opened != 'N/A':
+                            opened = datetime.fromisoformat(opened.replace('Z', '+00:00')).strftime('%Y-%m-%d %H:%M')
+                        if closed != 'N/A':
+                            closed = datetime.fromisoformat(closed.replace('Z', '+00:00')).strftime('%Y-%m-%d %H:%M')
+                    except Exception:
+                        pass
+                    trades.append(f"opened {opened} → closed {closed}")
+            elif isinstance(day_trade_data, list):
+                day_trade_count = len(day_trade_data)
+                for dt in day_trade_data:
+                    instrument_url = dt.get('instrument', '') if isinstance(dt, dict) else ''
+                    opened = dt.get('opened_at', 'N/A') if isinstance(dt, dict) else 'N/A'
+                    closed = dt.get('closed_at', 'N/A') if isinstance(dt, dict) else 'N/A'
+                    try:
+                        if opened != 'N/A':
+                            opened = datetime.fromisoformat(opened.replace('Z', '+00:00')).strftime('%Y-%m-%d %H:%M')
+                        if closed != 'N/A':
+                            closed = datetime.fromisoformat(closed.replace('Z', '+00:00')).strftime('%Y-%m-%d %H:%M')
+                    except Exception:
+                        pass
+                    trades.append(f"opened {opened} → closed {closed}")
+
+            return {
+                'day_trade_count': day_trade_count,
+                'flagged': flagged,
+                'trades': trades
+            }
+        except Exception as e:
+            print(f"   Could not fetch PDT status: {e}")
             return None
 
     def get_positions(self):
@@ -253,6 +399,338 @@ class SafeCashBot:
         except Exception as e:
             print(f"❌ Error getting positions: {e}")
             return []
+
+    def get_option_positions(self):
+        """
+        Get open option positions with greeks, expected P&L, BTC correlation,
+        and recommended action.
+
+        Returns:
+            List of option position dicts with analytics
+        """
+        try:
+            raw_positions = r.options.get_open_option_positions(
+                account_number=self.account_number
+            )
+            if not raw_positions:
+                return []
+
+            positions = []
+            # Collect underlying symbols for correlation calc
+            underlying_symbols = set()
+
+            for pos in raw_positions:
+                quantity = float(pos.get('quantity', 0))
+                if quantity == 0:
+                    continue
+
+                chain_symbol = pos.get('chain_symbol', 'N/A')
+                underlying_symbols.add(chain_symbol)
+                avg_price = float(pos.get('average_price', 0)) / 100  # per-share cost
+                pos_type = pos.get('type', 'long')  # 'long' or 'short'
+                multiplier = float(pos.get('trade_value_multiplier', '100'))
+
+                # Get instrument details (strike, expiration, call/put)
+                option_url = pos.get('option', '')
+                option_id = option_url.rstrip('/').split('/')[-1] if option_url else None
+
+                instrument = {}
+                if option_id:
+                    try:
+                        instrument = r.options.get_option_instrument_data_by_id(option_id) or {}
+                    except Exception:
+                        pass
+
+                strike = float(instrument.get('strike_price', 0))
+                expiration = instrument.get('expiration_date', 'N/A')
+                option_type = instrument.get('type', 'N/A')  # 'call' or 'put'
+
+                # Get market data (greeks)
+                greeks = {}
+                market_data = {}
+                if option_id:
+                    try:
+                        md = r.options.get_option_market_data_by_id(option_id)
+                        if md and isinstance(md, list) and len(md) > 0:
+                            market_data = md[0]
+                        elif md and isinstance(md, dict):
+                            market_data = md
+                    except Exception:
+                        pass
+
+                delta = self._safe_float(market_data.get('delta'))
+                gamma = self._safe_float(market_data.get('gamma'))
+                theta = self._safe_float(market_data.get('theta'))
+                vega = self._safe_float(market_data.get('vega'))
+                rho = self._safe_float(market_data.get('rho'))
+                iv = self._safe_float(market_data.get('implied_volatility'))
+                mark_price = self._safe_float(market_data.get('adjusted_mark_price'))
+                chance_profit_long = self._safe_float(market_data.get('chance_of_profit_long'))
+                chance_profit_short = self._safe_float(market_data.get('chance_of_profit_short'))
+                break_even = self._safe_float(market_data.get('break_even_price'))
+
+                greeks = {
+                    'delta': delta,
+                    'gamma': gamma,
+                    'theta': theta,
+                    'vega': vega,
+                    'rho': rho,
+                    'iv': iv,
+                }
+
+                # Get current underlying price
+                underlying_price = None
+                try:
+                    price_data = r.stocks.get_latest_price(chain_symbol)
+                    if price_data and price_data[0]:
+                        underlying_price = float(price_data[0])
+                except Exception:
+                    pass
+
+                # Days to expiration
+                dte = None
+                if expiration and expiration != 'N/A':
+                    try:
+                        exp_date = datetime.strptime(expiration, '%Y-%m-%d').date()
+                        dte = (exp_date - date.today()).days
+                    except Exception:
+                        pass
+
+                # Expected P&L for a 1% move in the underlying
+                expected_pl = self._calc_expected_pl(
+                    delta, gamma, theta, vega,
+                    underlying_price, mark_price, avg_price,
+                    quantity, multiplier, pos_type
+                )
+
+                # Recommended action
+                action = self._recommend_option_action(
+                    option_type, pos_type, delta, theta, iv, dte,
+                    mark_price, avg_price, underlying_price, strike,
+                    chance_profit_long, chance_profit_short
+                )
+
+                # Current P&L
+                current_value = mark_price * quantity * multiplier if mark_price else 0
+                cost_basis = avg_price * quantity * multiplier
+                unrealized_pl = current_value - cost_basis if pos_type == 'long' else cost_basis - current_value
+                unrealized_pl_pct = (unrealized_pl / cost_basis * 100) if cost_basis > 0 else 0
+
+                positions.append({
+                    'chain_symbol': chain_symbol,
+                    'option_type': option_type,
+                    'strike': strike,
+                    'expiration': expiration,
+                    'dte': dte,
+                    'quantity': quantity,
+                    'position_type': pos_type,
+                    'avg_price': avg_price,
+                    'mark_price': mark_price,
+                    'multiplier': multiplier,
+                    'cost_basis': round(cost_basis, 2),
+                    'current_value': round(current_value, 2),
+                    'unrealized_pl': round(unrealized_pl, 2),
+                    'unrealized_pl_pct': round(unrealized_pl_pct, 2),
+                    'underlying_price': underlying_price,
+                    'break_even': break_even,
+                    'greeks': greeks,
+                    'expected_pl': expected_pl,
+                    'chance_of_profit': chance_profit_long if pos_type == 'long' else chance_profit_short,
+                    'recommended_action': action,
+                })
+
+            # Compute BTC correlation for each unique underlying
+            btc_correlations = self._compute_btc_correlations(list(underlying_symbols))
+            for pos in positions:
+                pos['btc_correlation'] = btc_correlations.get(pos['chain_symbol'])
+
+            return positions
+
+        except Exception as e:
+            print(f"   Error getting option positions: {e}")
+            return []
+
+    @staticmethod
+    def _safe_float(val):
+        """Convert value to float, returning None if not possible."""
+        if val is None:
+            return None
+        try:
+            return float(val)
+        except (ValueError, TypeError):
+            return None
+
+    def _calc_expected_pl(self, delta, gamma, theta, vega,
+                          underlying_price, mark_price, avg_price,
+                          quantity, multiplier, pos_type):
+        """
+        Calculate expected P&L scenarios using greeks.
+        Returns P&L for -5%, -1%, +1%, +5% moves in the underlying,
+        plus daily theta decay.
+        """
+        if not underlying_price or delta is None:
+            return None
+
+        sign = 1.0 if pos_type == 'long' else -1.0
+        scenarios = {}
+
+        for pct_label, pct in [('-5%', -0.05), ('-1%', -0.01), ('+1%', 0.01), ('+5%', 0.05)]:
+            dollar_move = underlying_price * pct
+            # Option price change = delta * dS + 0.5 * gamma * dS^2
+            option_delta_price = (delta or 0) * dollar_move
+            if gamma:
+                option_delta_price += 0.5 * gamma * dollar_move ** 2
+            pl = sign * option_delta_price * quantity * multiplier
+            scenarios[pct_label] = round(pl, 2)
+
+        # Daily theta decay
+        if theta is not None:
+            scenarios['theta_daily'] = round(sign * theta * quantity * multiplier, 2)
+
+        return scenarios
+
+    def _recommend_option_action(self, option_type, pos_type, delta, theta, iv,
+                                 dte, mark_price, avg_price, underlying_price,
+                                 strike, chance_profit_long, chance_profit_short):
+        """
+        Generate a recommended action for an option position based on greeks,
+        time decay, moneyness, and probability of profit.
+        """
+        reasons = []
+        action = 'HOLD'
+
+        if dte is not None and dte <= 0:
+            return {'action': 'CLOSE', 'reasons': ['Expired or expiring today']}
+
+        chance_of_profit = chance_profit_long if pos_type == 'long' else chance_profit_short
+
+        # --- Long positions ---
+        if pos_type == 'long':
+            # Take profit if up significantly
+            if mark_price and avg_price and avg_price > 0:
+                gain_pct = (mark_price - avg_price) / avg_price * 100
+                if gain_pct >= 100:
+                    action = 'CLOSE'
+                    reasons.append(f'Up {gain_pct:.0f}% — take profit')
+                elif gain_pct >= 50:
+                    reasons.append(f'Up {gain_pct:.0f}% — consider partial close')
+
+            # Theta bleed warning
+            if dte is not None and dte <= 7 and theta is not None and theta < -0.03:
+                action = 'CLOSE'
+                reasons.append(f'DTE={dte}, heavy theta decay (${theta:.3f}/day)')
+            elif dte is not None and dte <= 14:
+                reasons.append(f'DTE={dte} — monitor theta decay')
+
+            # Low probability of profit
+            if chance_of_profit is not None and chance_of_profit < 0.20:
+                action = 'CLOSE'
+                reasons.append(f'Low probability of profit ({chance_of_profit:.0%})')
+
+            # Deep OTM
+            if underlying_price and strike and option_type in ('call', 'put'):
+                if option_type == 'call' and underlying_price < strike * 0.90:
+                    reasons.append('Deep OTM call')
+                elif option_type == 'put' and underlying_price > strike * 1.10:
+                    reasons.append('Deep OTM put')
+
+        # --- Short positions ---
+        else:
+            # Profit target reached (option decayed significantly)
+            if mark_price and avg_price and avg_price > 0:
+                decay_pct = (avg_price - mark_price) / avg_price * 100
+                if decay_pct >= 80:
+                    action = 'CLOSE'
+                    reasons.append(f'Captured {decay_pct:.0f}% of premium — close to lock in')
+                elif decay_pct >= 50:
+                    reasons.append(f'Captured {decay_pct:.0f}% of premium — consider closing')
+
+            # IV spike risk
+            if iv is not None and iv > 0.80:
+                reasons.append(f'High IV ({iv:.0%}) — increased risk of adverse move')
+
+            # Assignment risk
+            if dte is not None and dte <= 3:
+                if underlying_price and strike:
+                    if option_type == 'call' and underlying_price >= strike:
+                        action = 'CLOSE'
+                        reasons.append('ITM near expiration — assignment risk')
+                    elif option_type == 'put' and underlying_price <= strike:
+                        action = 'CLOSE'
+                        reasons.append('ITM near expiration — assignment risk')
+
+        if not reasons:
+            reasons.append('No immediate signals')
+
+        return {'action': action, 'reasons': reasons}
+
+    def _compute_btc_correlations(self, symbols):
+        """
+        Compute 30-day correlation of each symbol against BTC using
+        recent daily returns from Robinhood historicals.
+        Returns dict of symbol -> correlation value.
+        """
+        correlations = {}
+        if not symbols:
+            return correlations
+
+        # Fetch BTC daily returns (use BTC Trust as reference)
+        btc_returns = self._get_daily_returns('BTC')
+        if not btc_returns:
+            return correlations
+
+        for sym in symbols:
+            if sym == 'BTC':
+                correlations[sym] = 1.0
+                continue
+            sym_returns = self._get_daily_returns(sym)
+            if not sym_returns:
+                correlations[sym] = None
+                continue
+            corr = self._pearson_from_return_dicts(btc_returns, sym_returns)
+            correlations[sym] = round(corr, 3) if corr is not None else None
+
+        return correlations
+
+    def _get_daily_returns(self, symbol):
+        """Get last 30 daily returns for a symbol using Robinhood historicals."""
+        try:
+            historicals = r.stocks.get_stock_historicals(
+                symbol, interval='day', span='3month'
+            )
+            if not historicals or len(historicals) < 5:
+                return None
+
+            returns = {}
+            for i in range(1, len(historicals)):
+                prev_close = float(historicals[i - 1].get('close_price', 0))
+                curr_close = float(historicals[i].get('close_price', 0))
+                if prev_close > 0 and curr_close > 0:
+                    dt = historicals[i].get('begins_at', '')[:10]
+                    returns[dt] = math.log(curr_close / prev_close)
+            return returns
+        except Exception:
+            return None
+
+    @staticmethod
+    def _pearson_from_return_dicts(a_dict, b_dict):
+        """Pearson correlation from two date-keyed return dicts."""
+        common = sorted(set(a_dict.keys()) & set(b_dict.keys()))
+        # Use last 30 common dates
+        common = common[-30:] if len(common) > 30 else common
+        if len(common) < 5:
+            return None
+        a = [a_dict[d] for d in common]
+        b = [b_dict[d] for d in common]
+        n = len(a)
+        ma = sum(a) / n
+        mb = sum(b) / n
+        cov = sum((a[i] - ma) * (b[i] - mb) for i in range(n)) / (n - 1)
+        sa = math.sqrt(sum((x - ma) ** 2 for x in a) / (n - 1))
+        sb = math.sqrt(sum((x - mb) ** 2 for x in b) / (n - 1))
+        if sa == 0 or sb == 0:
+            return None
+        return cov / (sa * sb)
 
     def get_open_orders(self):
         """

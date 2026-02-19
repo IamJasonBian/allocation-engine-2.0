@@ -44,6 +44,9 @@ def _serialize_state(state_manager, order_book=None, portfolio=None) -> dict:
         snapshot["order_book"] = order_book
     if portfolio is not None:
         snapshot["portfolio"] = portfolio
+        # Include options from the portfolio if present
+        if isinstance(portfolio, dict) and portfolio.get("options"):
+            snapshot["options"] = portfolio["options"]
     return snapshot
 
 
