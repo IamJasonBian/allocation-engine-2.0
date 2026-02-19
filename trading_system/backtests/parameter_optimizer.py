@@ -7,8 +7,11 @@ Parameter optimization, rolling metrics, drift detection, and regime suggestions
 - suggest_regime_params: recommend parameter adjustments based on volatility regime
 """
 
+import json
 import math
+import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 from trading_system.backtests.metrics import compute_metrics
@@ -96,6 +99,96 @@ def grid_search_params(
         best=rows[0] if rows else {},
         grid_shape=(len(stop_offsets), len(buy_offsets), len(coverages)),
     )
+
+
+def run_regime_grid_search(
+    bars: List[Dict],
+    symbol: str,
+    shares: int,
+    price: float,
+) -> Dict:
+    """Run grid search on full historical data and return results with regime label.
+
+    Args:
+        bars: Daily OHLCV bars (chronological order).
+        symbol: Ticker symbol.
+        shares: Initial share count for simulation.
+        price: Initial price for simulation.
+
+    Returns:
+        Dict with timestamp, symbol, best params/metrics, and top 10 rows.
+    """
+    from datetime import datetime, timezone
+
+    result = grid_search_params(bars, symbol, shares, price)
+
+    # Determine current regime from rolling 21d vol of last window
+    if len(bars) >= 22:
+        closes = [b["close"] for b in bars[-22:]]
+        daily_rets = []
+        for i in range(1, len(closes)):
+            if closes[i - 1] > 0:
+                daily_rets.append((closes[i] - closes[i - 1]) / closes[i - 1])
+        if len(daily_rets) >= 2:
+            mean_r = sum(daily_rets) / len(daily_rets)
+            var = sum((r - mean_r) ** 2 for r in daily_rets) / (len(daily_rets) - 1)
+            ann_vol = math.sqrt(var) * math.sqrt(252) * 100 if var > 0 else 0.0
+        else:
+            ann_vol = 0.0
+    else:
+        ann_vol = 0.0
+
+    if ann_vol > 30.0:
+        regime = "HIGH_VOL"
+    elif ann_vol < 15.0:
+        regime = "LOW_VOL"
+    else:
+        regime = "MEDIUM_VOL"
+
+    return {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "symbol": symbol,
+        "regime": regime,
+        "rolling_vol_pct": round(ann_vol, 2),
+        "best": result.best,
+        "all_rows": [row for row in result.rows[:10]],
+    }
+
+
+# ---------------------------------------------------------------------------
+# Grid cache I/O
+# ---------------------------------------------------------------------------
+
+_CACHE_DIR = Path(__file__).parent / "data"
+
+
+def save_grid_cache(result: dict, symbol: str) -> Path:
+    """Write grid search result to backtests/data/{symbol}_grid_cache.json."""
+    _CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    path = _CACHE_DIR / f"{symbol}_grid_cache.json"
+    with open(path, "w") as f:
+        json.dump(result, f, indent=2)
+    return path
+
+
+def load_grid_cache(symbol: str) -> Optional[Dict]:
+    """Read grid cache; return None if missing or older than 7 days."""
+    path = _CACHE_DIR / f"{symbol}_grid_cache.json"
+    if not path.exists():
+        return None
+    try:
+        with open(path, "r") as f:
+            data = json.load(f)
+        # Check staleness (7 days)
+        from datetime import datetime, timezone, timedelta
+        ts = data.get("timestamp")
+        if ts:
+            cache_time = datetime.fromisoformat(ts)
+            if datetime.now(timezone.utc) - cache_time > timedelta(days=7):
+                return None
+        return data
+    except (json.JSONDecodeError, KeyError, ValueError):
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -212,9 +305,13 @@ def detect_drift(
 def suggest_regime_params(
     rolling_vol: float,
     current_params: Optional[Dict] = None,
+    grid_search_best: Optional[Dict] = None,
 ) -> Dict:
     """
     Suggest parameter adjustments based on annualized volatility regime.
+
+    If grid_search_best is provided (from a recent grid search), use its
+    optimized parameters instead of hardcoded heuristics.
 
     Regimes:
       High vol (>30%): widen stop_offset, increase buy_offset
@@ -224,6 +321,7 @@ def suggest_regime_params(
     Args:
         rolling_vol: annualized volatility as percentage (e.g. 25.0 = 25%)
         current_params: current parameters (for reference)
+        grid_search_best: best result from grid search (optional)
 
     Returns:
         Dict of suggested parameters with regime label.
@@ -235,6 +333,28 @@ def suggest_regime_params(
             "coverage_threshold": 0.20,
         }
 
+    # If grid search results are available, use them
+    if (grid_search_best
+            and "stop_offset_pct" in grid_search_best
+            and "buy_offset" in grid_search_best
+            and "coverage_threshold" in grid_search_best):
+        if rolling_vol > 30.0:
+            regime = "HIGH_VOL"
+        elif rolling_vol < 15.0:
+            regime = "LOW_VOL"
+        else:
+            regime = "MEDIUM_VOL"
+        return {
+            "regime": regime,
+            "rolling_vol_pct": round(rolling_vol, 1),
+            "stop_offset_pct": grid_search_best["stop_offset_pct"],
+            "buy_offset": grid_search_best["buy_offset"],
+            "coverage_threshold": grid_search_best["coverage_threshold"],
+            "rationale": "Optimized via grid search (Sharpe-maximizing parameters)",
+            "source": "grid_search",
+            "grid_sharpe": grid_search_best.get("sharpe_ratio"),
+        }
+
     if rolling_vol > 30.0:
         return {
             "regime": "HIGH_VOL",
@@ -243,6 +363,7 @@ def suggest_regime_params(
             "buy_offset": 0.35,
             "coverage_threshold": 0.15,
             "rationale": "Widen stops and buy offsets to avoid whipsaw in high volatility",
+            "source": "heuristic",
         }
     elif rolling_vol < 15.0:
         return {
@@ -252,6 +373,7 @@ def suggest_regime_params(
             "buy_offset": 0.15,
             "coverage_threshold": 0.25,
             "rationale": "Tighten stops and offsets to capture smaller moves in low volatility",
+            "source": "heuristic",
         }
     else:
         return {
@@ -261,4 +383,5 @@ def suggest_regime_params(
             "buy_offset": current_params.get("buy_offset", 0.20),
             "coverage_threshold": current_params.get("coverage_threshold", 0.20),
             "rationale": "Moderate volatility -- default parameters appropriate",
+            "source": "heuristic",
         }

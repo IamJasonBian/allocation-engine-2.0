@@ -825,6 +825,63 @@ class TradingSystem:
         except Exception as e:
             print(f"  [oncall] Error sending Slack summary: {e}")
 
+    def run_backtest(self):
+        """Run parameter grid search on cached daily data for each symbol.
+
+        Loads cached daily bars, runs grid search, saves results to JSON cache,
+        and prints a summary of best params.
+        """
+        import json
+        from trading_system.backtests.data_loader import DATA_DIR
+        from trading_system.backtests.parameter_optimizer import (
+            run_regime_grid_search,
+            save_grid_cache,
+        )
+
+        print(f"\n{'='*70}")
+        print("PARAMETER GRID SEARCH (BACKTEST)")
+        print(f"{'='*70}\n")
+
+        results = {}
+        for symbol in self.symbols:
+            cache_path = DATA_DIR / f"{symbol}_daily.json"
+            if not cache_path.exists():
+                print(f"  [{symbol}] No cached daily data at {cache_path} — skipping")
+                continue
+
+            with open(cache_path, "r") as f:
+                bars = json.load(f)
+
+            if len(bars) < 30:
+                print(f"  [{symbol}] Only {len(bars)} bars — need at least 30, skipping")
+                continue
+
+            print(f"  [{symbol}] Running grid search on {len(bars)} daily bars...")
+            grid_result = run_regime_grid_search(
+                bars=bars,
+                symbol=symbol,
+                shares=1,
+                price=bars[-1]["close"],
+            )
+            cache_file = save_grid_cache(grid_result, symbol)
+            results[symbol] = grid_result
+
+            best = grid_result["best"]
+            print(f"  [{symbol}] Best params:")
+            print(f"    stop_offset_pct:    {best['stop_offset_pct']}")
+            print(f"    buy_offset:         {best['buy_offset']}")
+            print(f"    coverage_threshold: {best['coverage_threshold']}")
+            print(f"    Sharpe ratio:       {best['sharpe_ratio']:.3f}")
+            print(f"    Completion rate:    {best['completion_rate_pct']:.1f}%")
+            print(f"    Regime:             {grid_result['regime']}")
+            print(f"    Cached to:          {cache_file}\n")
+
+        if not results:
+            print("  No symbols had cached data. Run the system first to populate daily caches.")
+
+        print(f"{'='*70}\n")
+        return results
+
     def run_continuous(self, interval_minutes: int = 5):
         """
         Run trading system continuously
@@ -939,6 +996,11 @@ def main():
         '--dashboard',
         action='store_true',
         help='Fetch market indicators and write dashboard/market_data.json each cycle'
+    )
+    parser.add_argument(
+        '--backtest',
+        action='store_true',
+        help='Run parameter grid search on cached daily data and update regime suggestions'
     )
 
     args = parser.parse_args()
