@@ -6,8 +6,11 @@ Coordinates market data, strategy execution, and order management
 import os
 import sys
 from datetime import datetime
+from pathlib import Path
 from typing import List, Dict
 import time
+
+import requests
 
 # Add parent directory to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -510,19 +513,25 @@ class TradingSystem:
 
             print(f"Total Portfolio Value: ${equity:,.2f}\n")
             print(f"Asset Allocation:")
-            print(f"  💵 Cash:     {cash_allocation_pct:>6.2f}%  (${available_cash:>12,.2f})")
-            print(f"  📈 Invested: {invested_pct:>6.2f}%  (${total_position_value:>12,.2f})")
+            print(f"  Cash:     {cash_allocation_pct:>6.2f}%  (${available_cash:>12,.2f})")
+            print(f"  Invested: {invested_pct:>6.2f}%  (${total_position_value:>12,.2f})")
             print(f"  {'─' * 40}")
-            print(f"  📊 Total:    100.00%  (${equity:>12,.2f})\n")
+            print(f"  Total:    100.00%  (${equity:>12,.2f})\n")
 
             if positions:
-                print(f"Position Breakdown ({len(positions)} holdings):")
+                # Filter to --ticker symbols when not in verbose mode
+                if self.verbose:
+                    display_positions = positions
+                    print(f"Position Breakdown ({len(positions)} holdings):")
+                else:
+                    display_positions = [p for p in positions if p['symbol'] in self.symbols]
+                    print(f"Position Breakdown ({len(display_positions)} holdings; filtered; {len(positions)} total):")
                 # Sort positions by equity value descending
-                sorted_positions = sorted(positions, key=lambda x: x['equity'], reverse=True)
+                sorted_positions = sorted(display_positions, key=lambda x: x['equity'], reverse=True)
 
                 for pos in sorted_positions:
                     allocation_pct = (pos['equity'] / equity) * 100 if equity > 0 else 0
-                    pl_indicator = "📈" if pos['profit_loss'] >= 0 else "📉"
+                    pl_indicator = "(+)" if pos['profit_loss'] >= 0 else "(-)"
 
                     print(f"  {pos['symbol']:>6}:   {allocation_pct:>6.2f}%  (${pos['equity']:>12,.2f})  "
                           f"{pl_indicator} {pos['profit_loss_pct']:+.2f}%")
@@ -554,11 +563,18 @@ class TradingSystem:
 
         # Print order book before processing through state manager
         if open_orders:
-            print(f"\n📋 Order Book: {len(open_orders)} open order(s)")
-            buy_orders = [o for o in open_orders if o['side'] == 'BUY']
-            sell_orders = [o for o in open_orders if o['side'] == 'SELL']
+            # Filter to --ticker symbols when not in verbose mode
+            if self.verbose:
+                display_orders = open_orders
+                filter_note = ""
+            else:
+                display_orders = [o for o in open_orders if o['symbol'] in self.symbols]
+                filter_note = f" (filtered to {', '.join(self.symbols)}; {len(open_orders)} total)"
+            print(f"\nOrder Book: {len(display_orders)} open order(s){filter_note}")
+            buy_orders = [o for o in display_orders if o['side'] == 'BUY']
+            sell_orders = [o for o in display_orders if o['side'] == 'SELL']
             if buy_orders:
-                print("\n   🟢 BUY ORDERS:")
+                print("\n   BUY ORDERS:")
                 for order in buy_orders:
                     print(f"\n      {order['symbol']} - {order['order_type']}")
                     print(f"         Quantity: {order['quantity']:.0f} shares")
@@ -569,7 +585,7 @@ class TradingSystem:
                     print(f"         Status: {order['state']}")
                     print(f"         Created: {order['created_at']}")
             if sell_orders:
-                print("\n   🔴 SELL ORDERS:")
+                print("\n   SELL ORDERS:")
                 for order in sell_orders:
                     print(f"\n      {order['symbol']} - {order['order_type']}")
                     print(f"         Quantity: {order['quantity']:.0f} shares")
@@ -640,6 +656,86 @@ class TradingSystem:
             print("\nFinal Portfolio Allocation:")
             self.print_portfolio_allocation()
 
+        # Send oncall Slack summary every cycle
+        self._send_oncall_summary(open_orders, portfolio_data)
+
+    def _send_oncall_summary(self, open_orders: List[Dict], portfolio_data: Dict):
+        """Send a concise oncall status summary to Slack after each run_once() cycle."""
+        try:
+            lines = []
+            now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            lines.append(f"Oncall Summary  {now}")
+            lines.append("=" * 40)
+
+            # PDT status
+            pdt_info = self.trading_bot.get_pdt_status()
+            if pdt_info is not None:
+                count = pdt_info.get('day_trade_count', 0)
+                if pdt_info.get('flagged'):
+                    pdt_label = f"PDT: {count}/3 day trades  [ALERT] FLAGGED"
+                elif count >= 2:
+                    pdt_label = f"PDT: {count}/3 day trades  [WARN]"
+                else:
+                    pdt_label = f"PDT: {count}/3 day trades  [OK]"
+                lines.append(pdt_label)
+            else:
+                lines.append("PDT: unavailable")
+
+            # Margin / cash info
+            if portfolio_data and isinstance(portfolio_data, dict):
+                cash_info = portfolio_data.get('cash')
+                if cash_info:
+                    cash = cash_info.get('tradeable_cash', 0)
+                    bp = cash_info.get('buying_power', 0)
+                    lines.append("")
+                    lines.append("Margin:")
+                    lines.append(f"  Cash:         ${cash:,.2f}")
+                    lines.append(f"  Buying Power: ${bp:,.2f}")
+
+            # Order book
+            if open_orders:
+                if self.verbose:
+                    display_orders = open_orders
+                else:
+                    display_orders = [o for o in open_orders if o['symbol'] in self.symbols]
+                symbols_label = ', '.join(self.symbols) if not self.verbose else 'all'
+                lines.append("")
+                lines.append(f"Order Book ({symbols_label}): {len(display_orders)} order(s)")
+                for o in display_orders:
+                    side = o.get('side', '?')
+                    sym = o.get('symbol', '?')
+                    qty = o.get('quantity', 0)
+                    otype = o.get('order_type', '?')
+                    lmt = f" lmt ${o['limit_price']:.2f}" if o.get('limit_price') else ""
+                    stp = f"  stp ${o['stop_price']:.2f}" if o.get('stop_price') else ""
+                    lines.append(f"  {side:<4} {sym:<6} x{qty:.0f}  {otype}{lmt}{stp}")
+            else:
+                lines.append("")
+                lines.append("Order Book: 0 order(s)")
+
+            # Positions
+            if portfolio_data and isinstance(portfolio_data, dict):
+                positions = portfolio_data.get('positions', [])
+                if self.verbose:
+                    display_positions = positions
+                else:
+                    display_positions = [p for p in positions if p['symbol'] in self.symbols]
+                symbols_label = ', '.join(self.symbols) if not self.verbose else 'all'
+                lines.append("")
+                lines.append(f"Positions ({symbols_label}): {len(display_positions)}")
+                for pos in display_positions:
+                    pl_sign = "(+)" if pos.get('profit_loss', 0) >= 0 else "(-)"
+                    lines.append(
+                        f"  {pos['symbol']:<6} x{pos['quantity']:<7}  "
+                        f"${pos['equity']:>10,.2f}  {pl_sign} {pos.get('profit_loss_pct', 0):+.2f}%"
+                    )
+
+            message = "```\n" + "\n".join(lines) + "\n```"
+            send_slack_alert(message, emoji=":chart_with_upwards_trend:")
+
+        except Exception as e:
+            print(f"  [oncall] Error sending Slack summary: {e}")
+
     def run_continuous(self, interval_minutes: int = 5):
         """
         Run trading system continuously
@@ -661,6 +757,45 @@ class TradingSystem:
             print("\n\nStopped by user")
 
 
+def _sync_slack_webhook_from_netlify():
+    """Fetch SLACK_WEBHOOK_URL from Netlify site env vars and persist to .env."""
+    token = os.getenv("NETLIFY_API_TOKEN")
+    site_id = os.getenv("NETLIFY_SITE_ID")
+    if not token or not site_id:
+        return
+
+    try:
+        resp = requests.get(
+            f"https://api.netlify.com/api/v1/sites/{site_id}/env",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=10,
+        )
+        resp.raise_for_status()
+        # /env returns a list of {key, values} objects
+        webhook_url = None
+        for var in resp.json():
+            if var.get("key") == "SLACK_WEBHOOK_URL":
+                values = var.get("values", [])
+                if values:
+                    webhook_url = values[0].get("value")
+                break
+        if not webhook_url:
+            return
+
+        os.environ["SLACK_WEBHOOK_URL"] = webhook_url
+
+        # Append to .env so future runs don't need the API call
+        env_path = Path(__file__).resolve().parent.parent / ".env"
+        if env_path.exists():
+            contents = env_path.read_text()
+            if "SLACK_WEBHOOK_URL" not in contents:
+                with open(env_path, "a") as f:
+                    f.write(f"\nSLACK_WEBHOOK_URL={webhook_url}\n")
+                print(f"Synced SLACK_WEBHOOK_URL from Netlify → .env")
+    except Exception as e:
+        print(f"Could not fetch SLACK_WEBHOOK_URL from Netlify: {e}")
+
+
 def main():
     """Main entry point"""
     import argparse
@@ -668,6 +803,10 @@ def main():
 
     # Load environment variables
     load_dotenv()
+
+    # Pull SLACK_WEBHOOK_URL from Netlify env if not set locally
+    if not os.getenv("SLACK_WEBHOOK_URL"):
+        _sync_slack_webhook_from_netlify()
 
     # Parse arguments
     parser = argparse.ArgumentParser(description='Trading System')
