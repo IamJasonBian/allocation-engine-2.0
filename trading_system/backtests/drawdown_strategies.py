@@ -12,6 +12,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
 from trading_system.backtests.simulation import run_simulation
+from trading_system.config import DEFAULT_LOT_SIZE
 
 
 @dataclass
@@ -77,7 +78,7 @@ def run_cash_reserve_strategy(
     buy_offset = 0.20
     coverage_threshold = 0.20
     proximity_pct = 0.0075
-    lot_size = 100
+    lot_size = DEFAULT_LOT_SIZE
     sell_expiry_days = 30
     buy_expiry_days = 30
 
@@ -285,7 +286,7 @@ def run_adaptive_sizing_strategy(
     High vol -> smaller lots (less exposed to whipsaw)
     Low vol  -> larger lots (capture more of the move)
 
-    Base lot_size = 100. Scaling factor = median_vol / current_vol,
+    Base lot_size = DEFAULT_LOT_SIZE. Scaling factor = median_vol / current_vol,
     clamped to [0.25, 2.0].
     """
     if not bars or len(bars) < 2:
@@ -341,7 +342,7 @@ def run_adaptive_sizing_strategy(
     buy_offset = 0.20
     coverage_threshold = 0.20
     proximity_pct = 0.0075
-    base_lot_size = 100
+    base_lot_size = DEFAULT_LOT_SIZE
     sell_expiry_days = 30
     buy_expiry_days = 30
 

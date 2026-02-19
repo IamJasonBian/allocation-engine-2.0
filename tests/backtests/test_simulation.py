@@ -3,6 +3,7 @@ Unit tests for the pairwise DCA backtest simulation engine.
 Tests fill logic, cost basis math, expiry, and edge cases.
 """
 
+from trading_system.config import DEFAULT_LOT_SIZE
 from trading_system.backtests.simulation import (
     PairState,
     PairedOrder,
@@ -60,7 +61,7 @@ class TestSellFillLogic:
             (100, 101, 98.00, 99.00), # day 1: low=98 <= stop=99 → sell fills
         ])
         result = run_simulation(bars, "TEST", 100, 100.0,
-                                stop_offset_pct=0.01, buy_offset=0.20, lot_size=100)
+                                stop_offset_pct=0.01, buy_offset=0.20, lot_size=DEFAULT_LOT_SIZE)
         # At least one pair should have been placed and sell-triggered
         triggered = [p for p in result.pairs if p.state != PairState.PENDING]
         assert len(triggered) >= 1
@@ -75,7 +76,7 @@ class TestSellFillLogic:
             (101, 102, 100.0, 101.0),   # still above
         ])
         result = run_simulation(bars, "TEST", 100, 100.0,
-                                stop_offset_pct=0.01, buy_offset=0.20, lot_size=100)
+                                stop_offset_pct=0.01, buy_offset=0.20, lot_size=DEFAULT_LOT_SIZE)
         # All pairs should still be PENDING (or cancelled if expired)
         for p in result.pairs:
             assert p.sell_fill_price is None
@@ -86,7 +87,7 @@ class TestSellFillLogic:
             (100, 101, 98.00, 99.00),  # triggers
         ])
         result = run_simulation(bars, "TEST", 100, 100.0,
-                                stop_offset_pct=0.01, buy_offset=0.20, lot_size=100)
+                                stop_offset_pct=0.01, buy_offset=0.20, lot_size=DEFAULT_LOT_SIZE)
         filled = [p for p in result.pairs if p.sell_fill_price is not None]
         assert len(filled) >= 1
         # Fill price should be the stop price
@@ -103,7 +104,7 @@ class TestBuyFillLogic:
             (100, 100, 97.00, 98.00),  # low=97 hits both stop=99 and buy=98.80
         ])
         result = run_simulation(bars, "TEST", 100, 100.0,
-                                stop_offset_pct=0.01, buy_offset=0.20, lot_size=100)
+                                stop_offset_pct=0.01, buy_offset=0.20, lot_size=DEFAULT_LOT_SIZE)
         completed = [p for p in result.pairs if p.state == PairState.COMPLETED]
         assert len(completed) >= 1
 
@@ -115,7 +116,7 @@ class TestBuyFillLogic:
             (99, 99.50, 98.50, 98.80),  # low=98.50 hits buy=98.80 → COMPLETED
         ])
         result = run_simulation(bars, "TEST", 100, 100.0,
-                                stop_offset_pct=0.01, buy_offset=0.20, lot_size=100)
+                                stop_offset_pct=0.01, buy_offset=0.20, lot_size=DEFAULT_LOT_SIZE)
         completed = [p for p in result.pairs if p.state == PairState.COMPLETED]
         assert len(completed) >= 1
 
@@ -125,7 +126,7 @@ class TestBuyFillLogic:
             (100, 100, 97.00, 98.00),
         ])
         result = run_simulation(bars, "TEST", 100, 100.0,
-                                stop_offset_pct=0.01, buy_offset=0.20, lot_size=100)
+                                stop_offset_pct=0.01, buy_offset=0.20, lot_size=DEFAULT_LOT_SIZE)
         completed = [p for p in result.pairs if p.state == PairState.COMPLETED]
         assert len(completed) >= 1
         assert completed[0].buy_fill_price == completed[0].buy_limit_price
@@ -142,7 +143,7 @@ class TestCostBasis:
             (98, 99, 97.50, 98.50),     # extra bar for snapshot
         ])
         result = run_simulation(bars, "TEST", 100, 100.0,
-                                stop_offset_pct=0.01, buy_offset=0.20, lot_size=100)
+                                stop_offset_pct=0.01, buy_offset=0.20, lot_size=DEFAULT_LOT_SIZE)
         completed = [p for p in result.pairs if p.state == PairState.COMPLETED]
         if completed:
             # Cost basis should be lower than initial
@@ -156,7 +157,7 @@ class TestCostBasis:
             (98, 99, 97.50, 98.50),
         ])
         result = run_simulation(bars, "TEST", 100, 100.0,
-                                stop_offset_pct=0.01, buy_offset=0.20, lot_size=100)
+                                stop_offset_pct=0.01, buy_offset=0.20, lot_size=DEFAULT_LOT_SIZE)
         # After completed pairs, shares should be back to original
         # (minus any SELL_TRIGGERED that haven't bought back yet)
         pending_sells = sum(p.quantity for p in result.pairs
@@ -171,7 +172,7 @@ class TestCostBasis:
             (98, 99, 97.50, 98.50),
         ])
         result = run_simulation(bars, "TEST", 100, 100.0,
-                                stop_offset_pct=0.01, buy_offset=0.20, lot_size=100)
+                                stop_offset_pct=0.01, buy_offset=0.20, lot_size=DEFAULT_LOT_SIZE)
         completed = [p for p in result.pairs if p.state == PairState.COMPLETED]
         if completed:
             # Each completed pair generates qty * (sell_price - buy_price) cash
@@ -192,7 +193,7 @@ class TestOrderExpiry:
         bars = _make_bars(prices)
         result = run_simulation(bars, "TEST", 100, 100.0,
                                 stop_offset_pct=0.01, buy_offset=0.20,
-                                sell_expiry_days=30, lot_size=100)
+                                sell_expiry_days=30, lot_size=DEFAULT_LOT_SIZE)
         cancelled = [p for p in result.pairs if p.state == PairState.CANCELLED]
         assert len(cancelled) > 0
 
@@ -207,7 +208,7 @@ class TestOrderExpiry:
         bars = _make_bars_ohlc(ohlc)
         result = run_simulation(bars, "TEST", 100, 100.0,
                                 stop_offset_pct=0.01, buy_offset=0.20,
-                                buy_expiry_days=30, lot_size=100)
+                                buy_expiry_days=30, lot_size=DEFAULT_LOT_SIZE)
         sell_only = [p for p in result.pairs if p.state == PairState.SELL_ONLY]
         assert len(sell_only) > 0
 
@@ -218,13 +219,13 @@ class TestCoverageCheck:
     def test_pair_placed_when_under_coverage(self):
         bars = _make_bars([100] * 5)
         result = run_simulation(bars, "TEST", 100, 100.0,
-                                coverage_threshold=0.20, lot_size=100)
+                                coverage_threshold=0.20, lot_size=DEFAULT_LOT_SIZE)
         assert len(result.pairs) > 0
 
     def test_gap_quantity_matches_threshold(self):
         bars = _make_bars([100] * 5)
         result = run_simulation(bars, "TEST", 100, 100.0,
-                                coverage_threshold=0.20, lot_size=100)
+                                coverage_threshold=0.20, lot_size=DEFAULT_LOT_SIZE)
         # First pair should be for 20 shares (20% of 100)
         assert result.pairs[0].quantity == 20
 
@@ -273,7 +274,7 @@ class TestNetValue:
             (100, 100, 97.00, 98.00),  # sell triggers
         ])
         result = run_simulation(bars, "TEST", 100, 100.0,
-                                stop_offset_pct=0.01, buy_offset=0.20, lot_size=100)
+                                stop_offset_pct=0.01, buy_offset=0.20, lot_size=DEFAULT_LOT_SIZE)
         # If sell triggered and buy also filled, cash should be small positive
         # If only sell triggered, cash = qty * stop_price
         assert result.snapshots[-1].cash >= 0
@@ -316,7 +317,7 @@ class TestEdgeCases:
     def test_single_share(self):
         bars = _make_bars([100] * 5)
         result = run_simulation(bars, "TEST", 1, 100.0,
-                                coverage_threshold=0.20, lot_size=100)
+                                coverage_threshold=0.20, lot_size=DEFAULT_LOT_SIZE)
         # Should not crash; may or may not place pairs
         assert len(result.snapshots) == 5
 
@@ -333,7 +334,7 @@ class TestEdgeCases:
             (100, 100, 97.00, 98.00),
         ])
         result = run_simulation(bars, "TEST", 100, 100.0,
-                                buy_offset=0.0, lot_size=100)
+                                buy_offset=0.0, lot_size=DEFAULT_LOT_SIZE)
         # Should not crash
         assert len(result.snapshots) == 2
 
@@ -341,7 +342,7 @@ class TestEdgeCases:
         """coverage_threshold=1.0 means 100% must be covered — always placing."""
         bars = _make_bars([100] * 3)
         result = run_simulation(bars, "TEST", 100, 100.0,
-                                coverage_threshold=1.0, lot_size=100)
+                                coverage_threshold=1.0, lot_size=DEFAULT_LOT_SIZE)
         # 100% threshold should still place up to lot_size
         assert result.portfolio.pairs_placed > 0
 

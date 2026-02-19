@@ -15,6 +15,7 @@ Uses Ticker/Order entities for order tracking (no raw dicts).
 
 from typing import Dict, Optional, List
 
+from trading_system.config import DEFAULT_LOT_SIZE
 from trading_system.entities.Ticker import Ticker
 from trading_system.strategies.base_strategy import BaseStrategy
 
@@ -35,7 +36,7 @@ class MomentumDcaLongStrategy(BaseStrategy):
                  stop_offset_pct: float = 0.0125, proximity_pct: float = 0.0075,
                  coverage_range_pct: float = 0.08,
                  buy_offset: float = 0.50,
-                 lot_size: int = 200,
+                 lot_size: int = DEFAULT_LOT_SIZE,
                  hedge_symbol_map: Dict = None):
         self.symbols = symbols
         self.coverage_threshold = coverage_threshold

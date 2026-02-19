@@ -3,6 +3,7 @@ Tests for _handle_order_replacement and lot-order enforcement in TradingSystem
 """
 from unittest.mock import MagicMock, patch, call
 
+from trading_system.config import DEFAULT_LOT_SIZE
 from trading_system.main import TradingSystem
 
 
@@ -37,7 +38,7 @@ def _make_signal(current_price=450.0):
         'order': {
             'action': 'stop_limit_sell',
             'symbol': 'SPY',
-            'quantity': 200,
+            'quantity': DEFAULT_LOT_SIZE,
             'stop_price': stop,
             'limit_price': stop,
             'current_price': current_price,
@@ -45,14 +46,14 @@ def _make_signal(current_price=450.0):
         'paired_buy': {
             'action': 'limit_buy',
             'symbol': 'SPY',
-            'quantity': 200,
+            'quantity': DEFAULT_LOT_SIZE,
             'price': buy,
             'current_price': current_price,
         },
     }
 
 
-def _buy_order(order_id='BUY-001', qty=200, created_at='2025-06-01 09:00:00'):
+def _buy_order(order_id='BUY-001', qty=DEFAULT_LOT_SIZE, created_at='2025-06-01 09:00:00'):
     return {
         'order_id': order_id,
         'symbol': 'SPY',
@@ -66,7 +67,7 @@ def _buy_order(order_id='BUY-001', qty=200, created_at='2025-06-01 09:00:00'):
     }
 
 
-def _sell_order(order_id='SELL-001', qty=200, created_at='2025-06-01 08:00:00'):
+def _sell_order(order_id='SELL-001', qty=DEFAULT_LOT_SIZE, created_at='2025-06-01 08:00:00'):
     return {
         'order_id': order_id,
         'symbol': 'SPY',
@@ -115,7 +116,7 @@ class TestQtyMismatchSkipsSide:
         """Buy qty != lot_size → only sell is cancelled, buy is left alone."""
         system = _make_system()
         signal = _make_signal()
-        symbol_orders = [_sell_order(), _buy_order(qty=50)]  # lot_size=200, buy qty=50
+        symbol_orders = [_sell_order(), _buy_order(qty=50)]  # lot_size=DEFAULT_LOT_SIZE, buy qty=50
 
         system._handle_order_replacement('SPY', signal, symbol_orders)
 
@@ -236,11 +237,11 @@ class TestMomentumPricingUsed:
         sell_call = system._execute_stop_limit_sell_order.call_args
         assert sell_call[0][1]['stop_price'] == expected_stop
         assert sell_call[0][1]['limit_price'] == expected_stop
-        assert sell_call[0][1]['quantity'] == 200
+        assert sell_call[0][1]['quantity'] == DEFAULT_LOT_SIZE
 
         buy_call = system._execute_paired_limit_buy.call_args
         assert buy_call[0][1]['price'] == expected_buy
-        assert buy_call[0][1]['quantity'] == 200
+        assert buy_call[0][1]['quantity'] == DEFAULT_LOT_SIZE
 
 
 class TestNormalFlowCancelsExistingSell:

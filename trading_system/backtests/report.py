@@ -8,6 +8,7 @@ import textwrap
 from pathlib import Path
 from typing import Dict, List, Optional
 
+from trading_system.config import DEFAULT_LOT_SIZE
 from trading_system.backtests.metrics import (
     BacktestMetrics,
     buy_hold_comparison,
@@ -261,7 +262,7 @@ def _write_paper(
     lines.append("| `buy_offset` | $0.20 | Buy limit placed at `stop_price - $0.20` |")
     lines.append("| `coverage_threshold` | 20% | Minimum fraction of position covered by pending pairs |")
     lines.append("| `proximity_pct` | 0.75% | Skip new pair if within this % of existing pair |")
-    lines.append("| `lot_size` | 100 | Maximum shares per paired order |")
+    lines.append(f"| `lot_size` | {DEFAULT_LOT_SIZE} | Maximum shares per paired order |")
     lines.append("| `sell_expiry_days` | 30 | Trading days before unfilled sell is cancelled |")
     lines.append("| `buy_expiry_days` | 30 | Trading days before unfilled buy expires |")
     lines.append("")
@@ -550,7 +551,7 @@ def generate_pdf(
         ("buy_offset", "$0.20", "Buy limit placed at stop_price - $0.20"),
         ("coverage_threshold", "20%", "Min fraction of position covered by pending pairs"),
         ("proximity_pct", "0.75%", "Skip new pair if within this % of existing pair"),
-        ("lot_size", "100", "Maximum shares per paired order"),
+        ("lot_size", str(DEFAULT_LOT_SIZE), "Maximum shares per paired order"),
         ("sell_expiry_days", "30", "Trading days before unfilled sell is cancelled"),
         ("buy_expiry_days", "30", "Trading days before unfilled buy expires"),
     ]

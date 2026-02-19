@@ -1,6 +1,7 @@
 """
 Tests for MomentumDcaStrategy using Ticker/Order entities
 """
+from trading_system.config import DEFAULT_LOT_SIZE
 from trading_system.strategies.momentum_dca_strategy import MomentumDcaLongStrategy
 from trading_system.entities.Order import Order
 from trading_system.entities.OrderType import OrderType
@@ -139,7 +140,7 @@ class TestGapQuantity:
         strategy = _make_strategy()
         position = _make_position('BTC', 3262, 31.0)
         signal = strategy.analyze_symbol('BTC', {'current_price': 31.0}, position, _make_ticker())
-        assert signal['order']['quantity'] == 200  # capped to lot_size
+        assert signal['order']['quantity'] == DEFAULT_LOT_SIZE  # capped to lot_size
         assert isinstance(signal['order']['quantity'], int)
 
     def test_stock_whole_shares(self):

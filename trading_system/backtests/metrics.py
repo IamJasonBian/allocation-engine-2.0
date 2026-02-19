@@ -9,6 +9,7 @@ import math
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
+from trading_system.config import DEFAULT_LOT_SIZE
 from trading_system.backtests.simulation import (
     PairState,
     PairedOrder,
@@ -149,7 +150,7 @@ def parameter_sensitivity(
         "buy_offset": 0.20,
         "coverage_threshold": 0.20,
         "proximity_pct": 0.0075,
-        "lot_size": 100,
+        "lot_size": DEFAULT_LOT_SIZE,
     }
     if base_params:
         defaults.update(base_params)

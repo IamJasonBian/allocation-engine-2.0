@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from trading_system.config import DEFAULT_LOT_SIZE
 from trading_system.backtests.metrics import BacktestMetrics
 from trading_system.backtests.options_metrics import OptionsBacktestMetrics
 from trading_system.backtests.pdf_helpers import (
@@ -644,7 +645,7 @@ def _drawdown_section(pdf, all_results: Dict, time_windows: List[int]):
                 stats.append(f"Exits: {meta.get('exit_count', 0)}, "
                              f"Re-entries: {meta.get('reentry_count', 0)}")
             elif strat_name == "Adaptive Sizing":
-                stats.append(f"Avg lot size: {meta.get('avg_adaptive_lot', 100):.0f}, "
+                stats.append(f"Avg lot size: {meta.get('avg_adaptive_lot', DEFAULT_LOT_SIZE):.0f}, "
                              f"Median vol: {meta.get('median_vol', 0):.2%}")
 
             for s in stats:

@@ -9,6 +9,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Dict, List, Optional
 
+from trading_system.config import DEFAULT_LOT_SIZE
+
 
 class PairState(Enum):
     PENDING = "PENDING"               # sell stop placed, not yet triggered
@@ -76,7 +78,7 @@ def run_simulation(
     buy_offset: float = 0.20,
     coverage_threshold: float = 0.20,
     proximity_pct: float = 0.0075,
-    lot_size: int = 100,
+    lot_size: int = DEFAULT_LOT_SIZE,
     sell_expiry_days: int = 30,
     buy_expiry_days: int = 30,
 ) -> SimulationResult:
