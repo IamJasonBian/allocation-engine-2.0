@@ -19,6 +19,8 @@ from trading_system.strategies.momentum_dca_strategy import MomentumDcaLongStrat
 from trading_system.state.state_manager import StateManager  # noqa: E402
 from trading_system.state.blob_logger import log_state_to_blob  # noqa: E402
 from trading_system.market_indicators import fetch_and_write_indicators  # noqa: E402
+from trading_system.utils.slack import send_slack_alert  # noqa: E402
+from trading_system.entities.OrderType import OrderSide  # noqa: E402
 from utils.safe_cash_bot import SafeCashBot  # noqa: E402
 
 
@@ -165,10 +167,10 @@ class TradingSystem:
         if not signal['order']:
             return
 
-        # Skip execution if 2 or more orders already on the book for this symbol
+        # If 2+ orders already on the book, attempt replacement instead of skipping
         symbol_orders = [o for o in (open_orders or []) if o.get('symbol') == symbol]
         if len(symbol_orders) >= 2:
-            print(f"⚠️  Skipping order execution: {len(symbol_orders)} orders on book for {symbol} (max 2)")
+            self._handle_order_replacement(symbol, signal, symbol_orders)
             return
 
         order = signal['order']
@@ -200,6 +202,96 @@ class TradingSystem:
                 self._execute_stop_limit_sell_order(symbol, order)
         elif order['action'] == 'limit_sell':
             self._execute_limit_sell_resubmit(symbol, order)
+
+    def _handle_order_replacement(self, symbol: str, signal: Dict, symbol_orders: list):
+        """Replace the oldest buy order (matching lot_size) with a new
+        stop-limit sell + paired buy at current momentum pricing.
+
+        Steps:
+          1. Classify orders by side
+          2. If no buys exist, log ideal state and return
+          3. Find oldest buy matching strategy lot_size
+          4. PDT safety check (alert via Slack if concerning)
+          5. Cancel the target buy
+          6. Place replacement stop-limit sell + paired buy
+        """
+        buy_orders = [o for o in symbol_orders if o.get('side') == 'BUY']
+        sell_orders = [o for o in symbol_orders if o.get('side') == 'SELL']
+
+        if not buy_orders:
+            print(f"   Order replacement: {symbol} has {len(sell_orders)} sell(s), 0 buys — ideal state, skipping")
+            return
+
+        # Sort buys by created_at ascending, find first with quantity == lot_size
+        lot_size = getattr(self.strategy, 'lot_size', None)
+        sorted_buys = sorted(buy_orders, key=lambda o: o.get('created_at') or '')
+        target = None
+        for o in sorted_buys:
+            if lot_size is not None and int(o.get('quantity', 0)) == lot_size:
+                target = o
+                break
+
+        if target is None:
+            print(f"   Order replacement: no buy order with qty={lot_size} found for {symbol}, skipping")
+            return
+
+        # PDT safety check
+        pdt_info = self.trading_bot.get_pdt_status()
+        if pdt_info is not None:
+            if pdt_info.get('flagged'):
+                msg = f":rotating_light: PDT FLAGGED on account — skipping order replacement for {symbol}"
+                print(f"   {msg}")
+                send_slack_alert(msg, emoji=":rotating_light:")
+                return
+            if pdt_info.get('day_trade_count', 0) >= 2:
+                count = pdt_info['day_trade_count']
+                msg = f":warning: PDT day trade count at {count}/3 — skipping order replacement for {symbol}"
+                print(f"   {msg}")
+                send_slack_alert(msg)
+                return
+
+        # Cancel the target buy order
+        target_order_id = target.get('order_id')
+        if not target_order_id:
+            print(f"   Order replacement: target buy has no order_id, skipping")
+            return
+
+        cancelled = self.trading_bot.cancel_order_by_id(target_order_id)
+        if not cancelled:
+            print(f"   Order replacement: cancel failed for {target_order_id} (may have filled), skipping")
+            return
+
+        # Build replacement orders using momentum pricing from the signal
+        current_price = signal['order'].get('current_price', 0)
+        stop_offset_pct = getattr(self.strategy, 'stop_offset_pct', 0.01)
+        buy_offset = getattr(self.strategy, 'buy_offset', 0.20)
+        hedge_symbol_map = getattr(self.strategy, 'hedge_symbol_map', {})
+
+        stop_price = round(current_price * (1 - stop_offset_pct), 2)
+        limit_price = stop_price
+        buy_price = round(stop_price - buy_offset, 2)
+        order_symbol = hedge_symbol_map.get(symbol, symbol)
+        qty = lot_size
+
+        sell_order = {
+            'action': 'stop_limit_sell',
+            'symbol': order_symbol,
+            'quantity': qty,
+            'stop_price': stop_price,
+            'limit_price': limit_price,
+            'current_price': current_price,
+        }
+        paired_buy = {
+            'action': 'limit_buy',
+            'symbol': order_symbol,
+            'quantity': qty,
+            'price': buy_price,
+            'current_price': current_price,
+        }
+
+        print(f"   Order replacement: replacing buy {target_order_id} with sell @ ${stop_price:.2f} + buy @ ${buy_price:.2f}")
+        self._execute_stop_limit_sell_order(symbol, sell_order)
+        self._execute_paired_limit_buy(symbol, paired_buy)
 
     def _execute_buy_order(self, symbol: str, order: Dict):
         """Execute buy order"""
@@ -518,12 +610,22 @@ class TradingSystem:
             time.sleep(1)
 
         # Log state: local file in dry-run, Netlify Blobs when live
-        log_state_to_blob(self.state_manager, live=not self.dry_run)
+        portfolio_data = self.trading_bot.get_portfolio_summary()
+        log_state_to_blob(
+            self.state_manager,
+            live=not self.dry_run,
+            order_book=open_orders,
+            portfolio=portfolio_data,
+        )
 
         # Refresh dashboard market indicators
         if self.dashboard:
             try:
-                fetch_and_write_indicators(self.symbols)
+                extra = {}
+                if portfolio_data and isinstance(portfolio_data, dict):
+                    extra['options'] = portfolio_data.get('options', [])
+                    extra['order_book'] = portfolio_data.get('open_orders', [])
+                fetch_and_write_indicators(self.symbols, extra_data=extra)
             except Exception as e:
                 print(f"  [indicators] Error refreshing dashboard: {e}")
 

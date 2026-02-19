@@ -6,73 +6,110 @@
   <title>Market Indicators</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns@3.0.0/dist/chartjs-adapter-date-fns.bundle.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
       font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
-      background: #000; color: #ccc; padding: 20px 24px;
+      background: #000; color: #ccc; padding: 4px 8px;
       -webkit-font-smoothing: antialiased;
     }
 
     /* Header */
-    .hdr { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 18px; border-bottom: 1px solid #222; padding-bottom: 10px; }
-    .hdr h1 { font-size: 15px; font-weight: 500; color: #fff; letter-spacing: 0.5px; }
-    .hdr .st { font-size: 11px; color: #555; }
+    .hdr { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px; border-bottom: 1px solid #222; padding-bottom: 3px; }
+    .hdr h1 { font-size: 14px; font-weight: 500; color: #fff; letter-spacing: 0.5px; }
+    .hdr .st { font-size: 10px; color: #555; }
     .hdr .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
     .hdr .dot.ok { background: #4a4; } .hdr .dot.warn { background: #aa4; }
 
     /* Range selector */
-    .range { display: flex; gap: 2px; margin-bottom: 16px; }
+    .range { display: flex; gap: 2px; margin-bottom: 4px; }
     .range button {
-      background: transparent; border: 1px solid #333; padding: 3px 10px;
-      color: #666; font-size: 11px; font-family: inherit; cursor: pointer;
+      background: transparent; border: 1px solid #333; padding: 2px 8px;
+      color: #666; font-size: 10px; font-family: inherit; cursor: pointer;
     }
     .range button:first-child { border-radius: 3px 0 0 3px; }
     .range button:last-child { border-radius: 0 3px 3px 0; }
     .range button.on { background: #fff; color: #000; border-color: #fff; }
 
     /* Focus prices (BTC + QQQ) */
-    .focus { display: flex; gap: 24px; margin-bottom: 18px; flex-wrap: wrap; }
-    .focus-card { min-width: 200px; }
-    .focus-card .name { font-size: 11px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; }
-    .focus-card .price { font-size: 28px; font-weight: 700; color: #fff; margin: 2px 0; }
-    .focus-card .meta { font-size: 12px; }
-    .focus-card .meta span { margin-right: 12px; }
+    .focus { display: flex; gap: 12px; margin-bottom: 4px; flex-wrap: wrap; }
+    .focus-card { min-width: 180px; }
+    .focus-card .name { font-size: 10px; color: #666; text-transform: uppercase; letter-spacing: 0.5px; }
+    .focus-card .price { font-size: 18px; font-weight: 700; color: #fff; margin: 0; }
+    .focus-card .meta { font-size: 11px; }
+    .focus-card .meta span { margin-right: 10px; }
     .up { color: #4a4; } .dn { color: #a44; } .flat { color: #666; }
 
     /* Instrument table */
-    table { width: 100%; border-collapse: collapse; margin-bottom: 18px; font-size: 12px; }
-    th { text-align: left; color: #555; font-weight: 500; padding: 4px 8px; border-bottom: 1px solid #222; text-transform: uppercase; font-size: 10px; letter-spacing: 0.3px; }
-    td { padding: 5px 8px; border-bottom: 1px solid #111; }
+    table { width: 100%; border-collapse: collapse; margin-bottom: 4px; font-size: 11px; }
+    th { text-align: left; color: #555; font-weight: 500; padding: 2px 5px; border-bottom: 1px solid #222; text-transform: uppercase; font-size: 9px; letter-spacing: 0.3px; }
+    td { padding: 2px 5px; border-bottom: 1px solid #111; }
     td.num { text-align: right; font-variant-numeric: tabular-nums; }
     tr:hover { background: #0a0a0a; }
 
     /* Correlation matrix */
-    .corr-wrap { margin-bottom: 18px; }
-    .corr-wrap h2 { font-size: 11px; font-weight: 500; color: #555; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+    .corr-wrap { margin-bottom: 4px; }
+    .corr-wrap h2 { font-size: 10px; font-weight: 500; color: #555; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px; }
     .corr { display: inline-block; }
     .corr table { width: auto; }
-    .corr th, .corr td { text-align: center; padding: 4px 10px; font-size: 11px; min-width: 56px; }
+    .corr th, .corr td { text-align: center; padding: 2px 6px; font-size: 10px; min-width: 44px; }
     .corr td.lbl { text-align: left; color: #888; font-weight: 500; }
 
     /* Sections */
-    .section { margin-bottom: 18px; }
-    .section h2 { font-size: 11px; font-weight: 500; color: #555; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+    .section { margin-bottom: 4px; }
+    .section h2 { font-size: 10px; font-weight: 500; color: #555; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 2px; }
 
     /* Chart grid */
-    .cgrid { display: grid; gap: 16px; margin-bottom: 18px; }
+    .cgrid { display: grid; gap: 4px; margin-bottom: 4px; }
     .cgrid.c2 { grid-template-columns: 1fr 1fr; }
     .cgrid.c3 { grid-template-columns: 1fr 1fr 1fr; }
     @media (max-width: 1000px) { .cgrid.c2, .cgrid.c3 { grid-template-columns: 1fr; } }
-    .cbox { border: 1px solid #1a1a1a; padding: 12px; }
-    .cbox h3 { font-size: 10px; font-weight: 500; color: #555; text-transform: uppercase; letter-spacing: 0.3px; margin-bottom: 6px; }
+    .cbox { border: 1px solid #1a1a1a; padding: 4px 6px; }
+    .cbox h3 { font-size: 9px; font-weight: 500; color: #555; text-transform: uppercase; letter-spacing: 0.3px; margin-bottom: 2px; }
 
     /* Stat cards row */
-    .stats { display: flex; gap: 16px; margin-bottom: 18px; flex-wrap: wrap; }
-    .stat { border: 1px solid #1a1a1a; padding: 10px 14px; min-width: 130px; }
-    .stat .lbl { font-size: 10px; color: #555; text-transform: uppercase; letter-spacing: 0.3px; }
-    .stat .val { font-size: 18px; font-weight: 700; color: #fff; margin-top: 2px; }
-    .stat .sub { font-size: 10px; color: #555; margin-top: 2px; }
+    .stats { display: flex; gap: 4px; margin-bottom: 4px; flex-wrap: wrap; }
+    .stat { border: 1px solid #1a1a1a; padding: 3px 8px; min-width: 100px; }
+    .stat .lbl { font-size: 9px; color: #555; text-transform: uppercase; letter-spacing: 0.3px; }
+    .stat .val { font-size: 14px; font-weight: 700; color: #fff; margin-top: 0; }
+    .stat .sub { font-size: 9px; color: #555; margin-top: 0; }
+
+    /* Book panel (shared for order book + options) */
+    .book-panel { overflow-y: auto; max-height: 360px; }
+    .book-section-title { font-size: 9px; font-weight: 500; color: #555; text-transform: uppercase; letter-spacing: 0.3px; margin: 3px 0 2px; border-bottom: 1px solid #1a1a1a; padding-bottom: 2px; }
+    .book-section-title:first-child { margin-top: 0; }
+
+    /* Order book rows */
+    .ob-row { display: flex; justify-content: space-between; align-items: baseline; padding: 3px 0; border-bottom: 1px solid #0d0d0d; font-size: 10px; }
+    .ob-row .ob-sym { color: #fff; font-weight: 500; min-width: 50px; }
+    .ob-row .ob-type { color: #555; font-size: 9px; }
+    .ob-row .ob-qty { color: #888; }
+    .ob-row .ob-price { color: #ccc; font-variant-numeric: tabular-nums; }
+    .ob-row.buy .ob-side { color: #4a4; }
+    .ob-row.sell .ob-side { color: #a44; }
+    .ob-empty { color: #333; font-size: 10px; padding: 12px 0; text-align: center; }
+
+    /* Options cards */
+    .opt-card { border: 1px solid #1a1a1a; padding: 4px 6px; margin-bottom: 4px; }
+    .opt-card .opt-hdr { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 4px; }
+    .opt-card .opt-title { font-size: 11px; font-weight: 600; color: #fff; }
+    .opt-card .opt-badge { font-size: 9px; padding: 1px 5px; border-radius: 2px; font-weight: 500; }
+    .opt-card .opt-badge.hold { background: #1a331a; color: #4a4; }
+    .opt-card .opt-badge.close { background: #331a1a; color: #a44; }
+    .opt-card .opt-row { display: flex; gap: 10px; flex-wrap: wrap; font-size: 10px; margin-bottom: 2px; }
+    .opt-card .opt-row .k { color: #555; }
+    .opt-card .opt-row .v { color: #ccc; }
+    .opt-greeks { display: flex; gap: 8px; font-size: 10px; margin: 3px 0; }
+    .opt-greeks span { color: #888; }
+    .opt-greeks .gv { color: #fff; font-weight: 500; }
+    .opt-pl-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 2px; margin: 3px 0; font-size: 9px; text-align: center; }
+    .opt-pl-grid .pl-lbl { color: #555; }
+    .opt-pl-grid .pl-val { font-weight: 500; }
+    .opt-reasons { font-size: 9px; color: #666; margin-top: 3px; }
+    .opt-reasons span { margin-right: 6px; }
+    .opt-empty { color: #333; font-size: 10px; padding: 12px 0; text-align: center; }
   </style>
 </head>
 <body>
@@ -100,7 +137,7 @@
     <h2>Price Movement (Normalised %)</h2>
     <div class="cgrid c2">
       <div class="cbox"><h3>BTC/USD vs Indexes (Normalised %)</h3><canvas id="chartMove"></canvas></div>
-      <div class="cbox"><h3>BTC/USD Spot</h3><canvas id="chartBtcSpot"></canvas></div>
+      <div class="cbox"><h3>Order Book</h3><div id="bookPanel" class="book-panel"></div></div>
     </div>
   </div>
 
@@ -180,12 +217,21 @@ function mkOpts(yFmt) {
     responsive: true, maintainAspectRatio: true,
     animation: { duration: 200 },
     plugins: {
-      legend: { display: true, position: 'bottom', labels: { color: '#555', font: { size: 10, family: 'inherit' }, boxWidth: 10, padding: 8 } },
-      tooltip: { backgroundColor: '#111', borderColor: '#333', borderWidth: 1, titleColor: '#888', bodyColor: '#ccc', padding: 6, titleFont: { size: 10 }, bodyFont: { size: 11 } },
+      legend: { display: true, position: 'bottom', labels: { color: '#bbb', font: { size: 10, family: 'inherit' }, boxWidth: 10, padding: 8 } },
+      tooltip: { backgroundColor: '#1a1a1a', borderColor: '#555', borderWidth: 1, titleColor: '#ddd', bodyColor: '#fff', padding: 8, titleFont: { size: 11 }, bodyFont: { size: 12 } },
+      zoom: {
+        pan: { enabled: true, mode: 'x', modifierKey: null },
+        zoom: {
+          wheel: { enabled: true, speed: 0.05 },
+          pinch: { enabled: true },
+          mode: 'x',
+          onZoomComplete: function({chart}) { chart.update('none'); },
+        },
+      },
     },
     scales: {
-      x: { type: 'time', grid: { color: '#111' }, ticks: { color: '#444', font: { size: 9 }, maxTicksLimit: 8 }, border: { color: '#222' } },
-      y: { grid: { color: '#111' }, ticks: { color: '#444', font: { size: 9 }, callback: yFmt || (v => v) }, border: { color: '#222' } },
+      x: { type: 'time', grid: { color: '#2a2a2a' }, ticks: { color: '#aaa', font: { size: 10 }, maxTicksLimit: 8 }, border: { color: '#555' } },
+      y: { grid: { color: '#2a2a2a' }, ticks: { color: '#aaa', font: { size: 10 }, callback: yFmt || (v => v) }, border: { color: '#555' } },
     },
   };
 }
@@ -193,9 +239,11 @@ function mkOpts(yFmt) {
 function mkLine(label, data, color, dashed) {
   return {
     label, data,
-    borderColor: color, borderWidth: 1.2,
+    borderColor: color, borderWidth: 1.5,
     borderDash: dashed ? [4,4] : [],
-    pointRadius: 0, tension: 0.15, fill: false,
+    pointRadius: 2, pointHoverRadius: 5,
+    pointBackgroundColor: color,
+    tension: 0.15, fill: false,
   };
 }
 
@@ -280,9 +328,11 @@ function renderCorr() {
 function renderMoveChart() {
   const cfg = RANGE_CFG[R];
   const sourceKey = cfg.useHourly ? 'hourly' : 'daily';
-  // Use BTC/USD (not BTC ETF) to avoid gap-inflation from overnight moves
   const syms = ['BTC/USD','QQQ','SPY','GLD','DIA','IWM','EFA'];
   const datasets = [];
+
+  // Store base prices for right-axis price labels
+  const basePrices = {};
 
   for (const sym of syms) {
     const raw = (D[sourceKey] || {})[sym];
@@ -290,30 +340,140 @@ function renderMoveChart() {
     const filtered = filterSeries(raw, R);
     if (filtered.length < 2) continue;
     const base = filtered[0].c;
+    basePrices[sym] = base;
     const normed = filtered.map(d => ({ x: d.t, y: ((d.c - base) / base) * 100 }));
     datasets.push(mkLine(sym, normed, COLORS[sym] || '#666'));
   }
 
+  // Build custom options: shorter chart, dual y-axes, bigger legend
+  const opts = mkOpts(v => v.toFixed(1) + '%');
+  opts.aspectRatio = 3.75; // another 66% shorter
+  // Bigger legend labels (166%)
+  opts.plugins.legend.labels.font = { size: 15, family: 'inherit' };
+  opts.plugins.legend.labels.boxWidth = 14;
+  opts.plugins.legend.labels.padding = 12;
+  // Tooltip: show both % and actual price
+  opts.plugins.tooltip.callbacks = {
+    label: function(ctx) {
+      const sym = ctx.dataset.label;
+      const pct = ctx.parsed.y;
+      const base = basePrices[sym];
+      const price = base ? base * (1 + pct / 100) : null;
+      let line = sym + ': ' + (pct >= 0 ? '+' : '') + pct.toFixed(2) + '%';
+      if (price != null) line += '  ($' + price.toLocaleString(undefined,{maximumFractionDigits:2}) + ')';
+      return line;
+    }
+  };
+  // Right y-axis: show representative price (use BTC/USD as reference)
+  const btcBase = basePrices['BTC/USD'];
+  if (btcBase) {
+    opts.scales.yPrice = {
+      position: 'right',
+      grid: { drawOnChartArea: false, color: '#2a2a2a' },
+      border: { color: '#555' },
+      ticks: {
+        color: '#aaa', font: { size: 10 },
+        callback: function(v) { return '$' + (btcBase * (1 + v / 100)).toLocaleString(undefined,{maximumFractionDigits:0}); }
+      },
+    };
+  }
+
   destroyChart('move');
   charts.move = new Chart(document.getElementById('chartMove'), {
-    type: 'line', data: { datasets },
-    options: mkOpts(v => v.toFixed(1) + '%'),
+    type: 'line', data: { datasets }, options: opts,
   });
 }
 
-function renderBtcSpotChart() {
-  const cfg = RANGE_CFG[R];
-  const sourceKey = cfg.useHourly ? 'hourly' : 'daily';
-  const raw = (D[sourceKey] || {})['BTC/USD'];
-  if (!raw || !raw.length) return;
-  const filtered = filterSeries(raw, R);
+function renderBook() {
+  const el = document.getElementById('bookPanel');
+  const orders = D.order_book || [];
+  const opts = D.options || [];
+  let html = '';
 
-  destroyChart('btcSpot');
-  charts.btcSpot = new Chart(document.getElementById('chartBtcSpot'), {
-    type: 'line',
-    data: { datasets: [mkLine('BTC/USD', filtered.map(d => ({ x: d.t, y: d.c })), '#999')] },
-    options: mkOpts(v => '$' + v.toLocaleString()),
-  });
+  // ── Stock Orders ──
+  html += '<div class="book-section-title">Stock Orders (' + orders.length + ')</div>';
+  if (orders.length) {
+    const buys = orders.filter(o => o.side === 'BUY');
+    const sells = orders.filter(o => o.side === 'SELL');
+    for (const o of buys) {
+      const price = o.limit_price ? '$'+o.limit_price.toFixed(2) : (o.stop_price ? 'stop $'+o.stop_price.toFixed(2) : 'MKT');
+      html += `<div class="ob-row buy"><span class="ob-sym">${o.symbol}</span><span class="ob-side">BUY</span><span class="ob-qty">${o.quantity.toFixed(0)}</span><span class="ob-type">${o.order_type}</span><span class="ob-price">${price}</span></div>`;
+    }
+    for (const o of sells) {
+      const price = o.limit_price ? '$'+o.limit_price.toFixed(2) : (o.stop_price ? 'stop $'+o.stop_price.toFixed(2) : 'MKT');
+      html += `<div class="ob-row sell"><span class="ob-sym">${o.symbol}</span><span class="ob-side">SELL</span><span class="ob-qty">${o.quantity.toFixed(0)}</span><span class="ob-type">${o.order_type}</span><span class="ob-price">${price}</span></div>`;
+    }
+  } else {
+    html += '<div class="ob-empty">No open stock orders</div>';
+  }
+
+  // ── Options ──
+  html += '<div class="book-section-title">Options (' + opts.length + ')</div>';
+  if (!opts.length) {
+    html += '<div class="opt-empty">No active options</div>';
+  }
+  for (const op of opts) {
+    const otype = (op.option_type || '').toUpperCase();
+    const dr = op.position_type === 'long' ? 'LONG' : 'SHORT';
+    const rec = op.recommended_action || {};
+    const badgeCls = rec.action === 'CLOSE' ? 'close' : 'hold';
+    const g = op.greeks || {};
+    const epl = op.expected_pl || {};
+    const btcCorr = op.btc_correlation;
+    let moneyness = '';
+    if (op.underlying_price && op.strike) {
+      if (otype === 'CALL') moneyness = op.underlying_price >= op.strike ? 'ITM' : 'OTM';
+      else if (otype === 'PUT') moneyness = op.underlying_price <= op.strike ? 'ITM' : 'OTM';
+    }
+
+    html += `<div class="opt-card">
+      <div class="opt-hdr">
+        <span class="opt-title">${op.chain_symbol} $${op.strike.toFixed(0)} ${otype} ${op.expiration}</span>
+        <span class="opt-badge ${badgeCls}">${rec.action || 'HOLD'}</span>
+      </div>
+      <div class="opt-row">
+        <span><span class="k">${dr} x</span><span class="v">${op.quantity}</span></span>
+        <span><span class="k">DTE </span><span class="v">${op.dte != null ? op.dte : 'N/A'}</span></span>
+        <span><span class="k">${moneyness}</span></span>
+        <span><span class="k">Udl </span><span class="v">${op.underlying_price ? '$'+op.underlying_price.toFixed(2) : 'N/A'}</span></span>
+      </div>
+      <div class="opt-row">
+        <span><span class="k">Mk </span><span class="v">${op.mark_price ? '$'+op.mark_price.toFixed(2) : 'N/A'}</span></span>
+        <span><span class="k">Cost </span><span class="v">$${op.avg_price.toFixed(2)}</span></span>
+        <span><span class="k">P/L </span><span class="v ${op.unrealized_pl >= 0 ? 'up' : 'dn'}">${s(op.unrealized_pl_pct)}%</span></span>
+        <span><span class="k">Val </span><span class="v">$${op.current_value.toLocaleString()}</span></span>
+      </div>
+      <div class="opt-greeks">
+        <span>\u0394 <span class="gv">${g.delta != null ? g.delta.toFixed(3) : '-'}</span></span>
+        <span>\u0393 <span class="gv">${g.gamma != null ? g.gamma.toFixed(3) : '-'}</span></span>
+        <span>\u0398 <span class="gv">${g.theta != null ? g.theta.toFixed(3) : '-'}</span></span>
+        <span>V <span class="gv">${g.vega != null ? g.vega.toFixed(3) : '-'}</span></span>
+        <span>IV <span class="gv">${g.iv != null ? (g.iv*100).toFixed(1)+'%' : '-'}</span></span>
+      </div>`;
+
+    if (epl['-5%'] != null) {
+      html += `<div class="opt-pl-grid">
+        <div><div class="pl-lbl">-5%</div><div class="pl-val ${epl['-5%']>=0?'up':'dn'}">${s(epl['-5%'])}</div></div>
+        <div><div class="pl-lbl">-1%</div><div class="pl-val ${epl['-1%']>=0?'up':'dn'}">${s(epl['-1%'])}</div></div>
+        <div><div class="pl-lbl">+1%</div><div class="pl-val ${epl['+1%']>=0?'up':'dn'}">${s(epl['+1%'])}</div></div>
+        <div><div class="pl-lbl">+5%</div><div class="pl-val ${epl['+5%']>=0?'up':'dn'}">${s(epl['+5%'])}</div></div>
+      </div>`;
+      if (epl.theta_daily != null) {
+        html += `<div class="opt-row"><span><span class="k">\u0398/day </span><span class="v ${epl.theta_daily>=0?'up':'dn'}">$${s(epl.theta_daily)}</span></span>`;
+        if (op.chance_of_profit != null) html += `<span><span class="k">PoP </span><span class="v">${(op.chance_of_profit*100).toFixed(1)}%</span></span>`;
+        if (btcCorr != null) {
+          const cl = Math.abs(btcCorr) > 0.7 ? 'Strong' : Math.abs(btcCorr) > 0.4 ? 'Moderate' : 'Weak';
+          html += `<span><span class="k">BTC </span><span class="v">${btcCorr > 0?'+':''}${btcCorr.toFixed(3)} (${cl})</span></span>`;
+        }
+        html += `</div>`;
+      }
+    }
+    if (rec.reasons && rec.reasons.length) {
+      html += `<div class="opt-reasons">${rec.reasons.map(r => '<span>'+r+'</span>').join('')}</div>`;
+    }
+    html += `</div>`;
+  }
+  el.innerHTML = html;
 }
 
 /* ── render stat cards ── */
@@ -420,7 +580,7 @@ function render() {
   renderTable();
   renderCorr();
   renderMoveChart();
-  renderBtcSpotChart();
+  renderBook();
   renderStats();
   renderIV();
   renderFlows();

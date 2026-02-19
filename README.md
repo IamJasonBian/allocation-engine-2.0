@@ -1,3 +1,9 @@
+# Allocation Engine and Dashboard
+
+A modular trading and allocation engine with highly tactile charting, real-time options analytics, and automated order management. The live dashboard surfaces greeks, expected P&L, BTC correlation, and actionable recommendations across your portfolio.
+
+![Dashboard](https://github.com/IamJasonBian/allocation-engine/releases/download/v2.1/dashboard.gif)
+
 ## Summary
 
 Version - 0.1.0 - This is hobbyist client side agentic trading package (builds with the [allocation-manager](https://github.com/OptimChain/allocation-manager/) service). 
