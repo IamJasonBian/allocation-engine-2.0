@@ -1,14 +1,14 @@
 """
 Momentum DCA Strategy
-Ensures at least 20% of each position is covered by sell orders
-within 8% of the current price.
+Ensures at least 10% of each position is covered by sell orders
+within 4% of the current price.
 If coverage is below threshold:
   - Price within 0.75% of existing order -> resubmit at original price
   - Price moved >0.75% -> place stop-limit at -1.25% below current price
     with paired buy at -$0.50 below stop
 
 Parameters optimized via grid search (see backtests/parameter_optimizer.py):
-  stop_offset_pct=1.25%, buy_offset=$0.50, coverage=20%
+  stop_offset_pct=1.25%, buy_offset=$0.50, coverage=10%
 
 Uses Ticker/Order entities for order tracking (no raw dicts).
 """
@@ -32,7 +32,7 @@ class MomentumDcaLongStrategy(BaseStrategy):
     # BTC is Grayscale Bitcoin Mini Trust ETF, no remapping needed
     DEFAULT_HEDGE_MAP = {}
 
-    def __init__(self, symbols: List[str], coverage_threshold: float = 0.20,
+    def __init__(self, symbols: List[str], coverage_threshold: float = 0.10,
                  stop_offset_pct: float = 0.0125, proximity_pct: float = 0.0075,
                  coverage_range_pct: float = 0.04,
                  buy_offset: float = 0.50,
