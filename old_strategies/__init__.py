@@ -1,1 +1,0 @@
-"""Old/legacy trading strategies"""
