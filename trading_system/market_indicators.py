@@ -22,7 +22,7 @@ DASHBOARD_DIR = Path(__file__).resolve().parent.parent / "dashboard"
 DATA_FILE = DASHBOARD_DIR / "market_data.json"
 
 # All instruments: focus (BTC, QQQ) + reference indexes
-INSTRUMENTS = ["BTC", "BTC/USD", "QQQ", "SPY", "GLD", "DIA", "IWM", "EFA"]
+INSTRUMENTS = ["BTC", "BTC/USD", "QQQ", "SPY", "GLD", "DIA", "IWM", "EFA", "AMZN"]
 INSTRUMENT_NAMES = {
     "BTC": "BTC Trust",
     "BTC/USD": "Bitcoin",
@@ -32,6 +32,7 @@ INSTRUMENT_NAMES = {
     "DIA": "Dow Jones",
     "IWM": "Russell 2000",
     "EFA": "MSCI EAFE",
+    "AMZN": "Amazon",
 }
 
 # Cache raw API responses to avoid hammering rate limits
