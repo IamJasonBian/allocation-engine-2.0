@@ -7,19 +7,19 @@ from alpaca.trading.requests import (
     MarketOrderRequest,
     StopLimitOrderRequest,
     StopOrderRequest,
+    TakeProfitRequest,
+    StopLossRequest,
 )
-from alpaca.trading.enums import OrderSide, TimeInForce, OrderType
+from alpaca.trading.enums import OrderClass, OrderSide, TimeInForce, OrderType
 from alpaca.common.exceptions import APIError
 
 from config import ALPACA_API_KEY, ALPACA_SECRET_KEY, ALPACA_PAPER
 
 log = logging.getLogger(__name__)
 
-# Alpaca uses standard ticker symbols — map any runtime-service aliases here.
-SYMBOL_MAP = {
-    "BTC": "BTC/USD",
-    "ETH": "ETH/USD",
-}
+# Map runtime-service symbols to Alpaca symbols if they differ.
+# BTC = Grayscale Bitcoin Mini Trust ETF (NYSE Arca) — no mapping needed.
+SYMBOL_MAP: dict[str, str] = {}
 
 
 def _map_symbol(symbol: str) -> str:
@@ -136,6 +136,40 @@ class AlpacaTrader:
         except APIError as e:
             log.error("Alpaca API error submitting %s %s %s: %s",
                       side.value, qty, symbol, e)
+            return None
+
+    def submit_oto(self, sell_order: dict, buy_order: dict) -> dict | None:
+        """Submit an OTO pair: SELL primary, BUY triggered on fill.
+
+        When the SELL fills, Alpaca automatically submits the BUY.
+        This avoids the wash-trade rejection from having both sides open.
+        """
+        symbol = _map_symbol(sell_order["symbol"])
+        sell_qty = float(sell_order["quantity"])
+        sell_price = float(sell_order["limit_price"])
+        buy_price = float(buy_order["limit_price"])
+
+        try:
+            req = LimitOrderRequest(
+                symbol=symbol,
+                qty=sell_qty,
+                side=OrderSide.SELL,
+                limit_price=sell_price,
+                time_in_force=TimeInForce.GTC,
+                order_class=OrderClass.OTO,
+                take_profit=TakeProfitRequest(limit_price=buy_price),
+            )
+            result = self.client.submit_order(req)
+            log.info("OTO submitted: SELL %s %s @ %s → BUY @ %s  (id=%s)",
+                     sell_qty, symbol, sell_price, buy_price, result.id)
+            return {
+                "id": str(result.id),
+                "symbol": result.symbol,
+                "status": result.status.value,
+                "type": "oto",
+            }
+        except APIError as e:
+            log.error("Alpaca API error submitting OTO %s: %s", symbol, e)
             return None
 
     def cancel_all(self):

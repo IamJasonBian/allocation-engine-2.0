@@ -2,7 +2,8 @@
 """Allocation Engine 2.0 — Alpaca-backed trade execution.
 
 Reads desired orders from the allocation-runtime-service, reconciles
-against live Alpaca state, and submits the delta.
+against live Alpaca state, submits via OTO pairing, and uploads
+gamma-tagged snapshots to the blob store.
 """
 
 import argparse
@@ -12,6 +13,7 @@ import time
 
 from config import POLL_INTERVAL_SECONDS, DRY_RUN
 from engine import AllocationEngine
+from order_book import print_audit
 
 logging.basicConfig(
     level=logging.INFO,
@@ -36,7 +38,7 @@ def run_loop(engine: AllocationEngine, interval: int):
 
 
 def status(engine: AllocationEngine):
-    """Print current Alpaca account + runtime service state."""
+    """Print Alpaca account, positions, open orders, OTO state, and runtime diff."""
     acct = engine.trader.account()
     positions = engine.trader.positions()
     alpaca_orders = engine.trader.open_orders()
@@ -47,20 +49,63 @@ def status(engine: AllocationEngine):
         print(f"  {k}: {v}")
 
     print(f"\n=== Alpaca Positions ({len(positions)}) ===")
+    if not positions:
+        print("  (none)")
     for p in positions:
         print(f"  {p['symbol']}: {p['qty']} shares, MV=${p['market_value']:.2f}, "
               f"PnL=${p['unrealized_pl']:.2f} ({p['unrealized_pl_pct']:.2%})")
 
+    # Group orders to show OTO legs
     print(f"\n=== Alpaca Open Orders ({len(alpaca_orders)}) ===")
     for o in alpaca_orders:
+        tag = ""
+        # check if this is tracked in the order book
+        book_rec = engine.book.orders.get(o["id"])
+        if book_rec and book_rec.get("order_type") == "oto":
+            tag = f" [OTO -> BUY @ {book_rec['oto_buy_price']}]"
         print(f"  {o['id'][:8]}  {o['side']} {o['qty']} {o['symbol']} "
-              f"{o['type']} @ {o['limit_price'] or 'MKT'}")
+              f"{o['type']} @ {o['limit_price'] or 'MKT'}{tag}")
 
     rt_stock = runtime_orders.get("stock_orders", [])
     print(f"\n=== Runtime Service Desired Orders ({len(rt_stock)}) ===")
     for o in rt_stock:
         print(f"  {o['side']} {o['quantity']} {o['symbol']} "
               f"{o.get('order_type', 'market')} @ {o.get('limit_price', 'MKT')}")
+
+    # Order book summary
+    summary = engine.book.summary()
+    print(f"\n=== Order Book (this session) ===")
+    print(f"  Tracked: {summary['total_tracked']}, "
+          f"Open: {summary['open']}, "
+          f"Resolved: {summary['resolved']}, "
+          f"Fills: {summary['fills_this_session']}")
+
+    # Diff: what's desired but not on Alpaca
+    alpaca_set = {(o["symbol"], o["side"], o["qty"], o["limit_price"])
+                  for o in alpaca_orders}
+    missing = []
+    for o in rt_stock:
+        key = (o["symbol"], o["side"].lower(), float(o["quantity"]), o.get("limit_price"))
+        if key not in alpaca_set:
+            missing.append(o)
+    if missing:
+        print(f"\n=== Desired But Not On Alpaca ({len(missing)}) ===")
+        for o in missing:
+            print(f"  {o['side']} {o['quantity']} {o['symbol']} @ {o.get('limit_price', 'MKT')}")
+        print("  (BUY orders are held back — submitted as OTO legs on sell fill)")
+
+
+def audit(engine: AllocationEngine):
+    """Run and print the order coverage audit."""
+    report = engine.get_audit()
+    print_audit(report)
+
+
+def replace(engine: AllocationEngine):
+    """Atomic cancel-all + resubmit from runtime service."""
+    log.info("Running atomic order replacement")
+    execution_log = engine.replace_all_orders()
+    log.info("Replacement complete: %d actions", len(execution_log))
 
 
 def main():
@@ -70,6 +115,8 @@ def main():
     sub.add_parser("run", help="Run continuous reconciliation loop")
     sub.add_parser("once", help="Run a single reconciliation tick")
     sub.add_parser("status", help="Print Alpaca + runtime service status")
+    sub.add_parser("audit", help="Run order coverage audit")
+    sub.add_parser("replace", help="Atomic cancel-all + resubmit")
 
     args = parser.parse_args()
     engine = AllocationEngine(dry_run=DRY_RUN)
@@ -80,6 +127,10 @@ def main():
         run_once(engine)
     elif args.command == "status":
         status(engine)
+    elif args.command == "audit":
+        audit(engine)
+    elif args.command == "replace":
+        replace(engine)
     else:
         parser.print_help()
         sys.exit(1)

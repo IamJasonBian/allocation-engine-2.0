@@ -38,4 +38,4 @@ class RuntimeClient:
 
     def snapshot(self, key: str) -> dict:
         """Full data for a specific snapshot."""
-        return self._get(f"/snapshots/{key}")
+        return self._get(f"/snapshots?key={key}")
