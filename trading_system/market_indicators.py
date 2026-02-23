@@ -22,7 +22,7 @@ DASHBOARD_DIR = Path(__file__).resolve().parent.parent / "dashboard"
 DATA_FILE = DASHBOARD_DIR / "market_data.json"
 
 # All instruments: focus (BTC, QQQ) + reference indexes
-INSTRUMENTS = ["BTC", "BTC/USD", "QQQ", "SPY", "GLD", "DIA", "IWM", "EFA"]
+INSTRUMENTS = ["BTC", "BTC/USD", "QQQ", "SPY", "GLD", "DIA", "IWM", "EFA", "AMZN"]
 INSTRUMENT_NAMES = {
     "BTC": "BTC Trust",
     "BTC/USD": "Bitcoin",
@@ -32,6 +32,7 @@ INSTRUMENT_NAMES = {
     "DIA": "Dow Jones",
     "IWM": "Russell 2000",
     "EFA": "MSCI EAFE",
+    "AMZN": "Amazon",
 }
 
 # Cache raw API responses to avoid hammering rate limits
@@ -583,4 +584,12 @@ def fetch_and_write_indicators(symbols: Optional[List[str]] = None,
     DASHBOARD_DIR.mkdir(exist_ok=True)
     DATA_FILE.write_text(json.dumps(result))
     print(f"  [indicators] Dashboard data written to {DATA_FILE}")
+
+    # Upload to Netlify Blobs so the hosted dashboard can read it
+    try:
+        from trading_system.state.blob_logger import upload_blob
+        upload_blob("market-data", "latest", result)
+    except Exception as e:
+        print(f"  [indicators] Blob upload skipped: {e}")
+
     return str(DATA_FILE)

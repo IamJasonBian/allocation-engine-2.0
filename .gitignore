@@ -82,3 +82,7 @@ dmypy.json
 # Backtest cached data and generated charts
 trading_system/backtests/data/
 docs/charts/
+
+# Node.js (Netlify Functions)
+node_modules/
+.netlify/
