@@ -317,12 +317,30 @@ class SafeCashBot:
 
             print(f"\n{'='*70}\n")
 
+            # Open option orders
+            open_option_orders = self.get_open_option_orders()
+            if open_option_orders:
+                print(f"\nOpen Option Orders: {len(open_option_orders)}")
+                for oo in open_option_orders:
+                    leg_descs = []
+                    for leg in oo.get('legs', []):
+                        leg_descs.append(
+                            f"{leg['side']} {leg['chain_symbol']} "
+                            f"${leg['strike']:.2f} {leg['option_type'].upper()} "
+                            f"exp {leg['expiration']}"
+                        )
+                    print(f"   {oo['order_type']} {oo['direction']} @ ${oo['price']:.2f} "
+                          f"x{oo['quantity']:.0f} [{oo['state']}]")
+                    for ld in leg_descs:
+                        print(f"      {ld}")
+
             return {
                 'cash': cash_info,
                 'equity': equity,
                 'market_value': market_value,
                 'positions': positions,
                 'open_orders': open_orders,
+                'open_option_orders': open_option_orders,
                 'options': option_positions,
             }
 
@@ -828,6 +846,103 @@ class SafeCashBot:
 
         except Exception as e:
             print(f"[ERR] Error getting open orders: {e}")
+            return []
+
+
+    def get_open_option_orders(self):
+        """
+        Get all open/pending option orders for this account.
+
+        Returns:
+            List of open option orders with details including leg info.
+        """
+        try:
+            raw_orders = r.orders.get_all_open_option_orders(
+                account_number=self.account_number
+            )
+            if not raw_orders:
+                return []
+
+            orders = []
+            for order in raw_orders:
+                order_id = order.get('id', 'N/A')
+                state = order.get('state', 'N/A')
+                quantity = float(order.get('quantity', 0))
+                price = float(order.get('price', 0) or 0)
+                premium = float(order.get('premium', 0) or 0)
+                direction = order.get('direction', 'N/A')  # 'debit' or 'credit'
+                order_type = order.get('type', 'N/A')  # 'limit' or 'market'
+                trigger = order.get('trigger', 'immediate')
+                time_in_force = order.get('time_in_force', 'N/A')
+                created_at = order.get('created_at', 'N/A')
+                updated_at = order.get('updated_at', 'N/A')
+                opening_strategy = order.get('opening_strategy') or order.get('closing_strategy') or 'N/A'
+
+                # Parse timestamp
+                try:
+                    if created_at != 'N/A':
+                        created_dt = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+                        created_at = created_dt.strftime('%Y-%m-%d %H:%M:%S')
+                except Exception:
+                    pass
+
+                # Extract leg details
+                legs = []
+                for leg in order.get('legs', []):
+                    option_url = leg.get('option', '')
+                    option_id = option_url.rstrip('/').split('/')[-1] if option_url else None
+                    side = leg.get('side', 'N/A')  # 'buy' or 'sell'
+                    position_effect = leg.get('position_effect', 'N/A')  # 'open' or 'close'
+                    leg_quantity = float(leg.get('quantity', quantity) or quantity)
+
+                    # Resolve instrument for strike/exp/type
+                    instrument = {}
+                    if option_id:
+                        try:
+                            instrument = r.options.get_option_instrument_data_by_id(option_id) or {}
+                        except Exception:
+                            pass
+
+                    legs.append({
+                        'side': side.upper() if side != 'N/A' else 'N/A',
+                        'position_effect': position_effect,
+                        'quantity': leg_quantity,
+                        'strike': float(instrument.get('strike_price', 0)),
+                        'expiration': instrument.get('expiration_date', 'N/A'),
+                        'option_type': instrument.get('type', 'N/A'),
+                        'chain_symbol': instrument.get('chain_symbol', 'N/A'),
+                    })
+
+                # Build order type description
+                if trigger == 'stop' and order_type == 'limit':
+                    order_desc = 'Stop Limit'
+                elif trigger == 'stop':
+                    order_desc = 'Stop Loss'
+                elif order_type == 'limit':
+                    order_desc = 'Limit'
+                else:
+                    order_desc = 'Market'
+
+                orders.append({
+                    'order_id': order_id,
+                    'state': state,
+                    'quantity': quantity,
+                    'price': price,
+                    'premium': premium,
+                    'direction': direction,
+                    'order_type': order_desc,
+                    'trigger': trigger,
+                    'time_in_force': time_in_force,
+                    'opening_strategy': opening_strategy,
+                    'created_at': created_at,
+                    'updated_at': updated_at,
+                    'legs': legs,
+                })
+
+            return orders
+
+        except Exception as e:
+            print(f"[ERR] Error getting open option orders: {e}")
             return []
 
     def validate_buy_order(self, symbol, quantity, price):
