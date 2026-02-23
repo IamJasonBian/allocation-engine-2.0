@@ -113,3 +113,29 @@ def log_state_to_blob(state_manager, live=False, order_book=None,
                            portfolio=portfolio, drift_metrics=drift_metrics)
     return _log_local(state_manager, order_book=order_book,
                       portfolio=portfolio, drift_metrics=drift_metrics)
+
+
+def upload_blob(store_name, blob_key, data):
+    """Upload arbitrary JSON data to a Netlify Blob store.
+
+    Returns the blob key on success, None on failure.
+    """
+    config = _get_config()
+    if not config:
+        return None
+
+    payload = json.dumps(data)
+    url = f"{NETLIFY_BLOBS_URL}/{config['site_id']}/{store_name}/{blob_key}"
+    headers = {
+        "Authorization": f"Bearer {config['token']}",
+        "Content-Type": "application/json",
+    }
+
+    try:
+        resp = requests.put(url, headers=headers, data=payload, timeout=15)
+        resp.raise_for_status()
+        print(f"  Blob uploaded: {store_name}/{blob_key}")
+        return blob_key
+    except requests.RequestException as e:
+        print(f"  Failed to upload blob {store_name}/{blob_key}: {e}")
+        return None
