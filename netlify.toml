@@ -1,0 +1,63 @@
+[build]
+  command = "cp -r dashboard public/dashboard"
+  publish = "public"
+  functions = "netlify/functions"
+
+[functions]
+  node_bundler = "esbuild"
+
+# Serve dashboard at root
+[[redirects]]
+  from = "/dashboard"
+  to = "/dashboard/index.html"
+  status = 200
+
+# API redirects to functions
+[[redirects]]
+  from = "/api/health"
+  to = "/.netlify/functions/health"
+  status = 200
+
+[[redirects]]
+  from = "/api/state"
+  to = "/.netlify/functions/state"
+  status = 200
+
+[[redirects]]
+  from = "/api/orders"
+  to = "/.netlify/functions/orders"
+  status = 200
+
+[[redirects]]
+  from = "/api/portfolio"
+  to = "/.netlify/functions/portfolio"
+  status = 200
+
+[[redirects]]
+  from = "/api/market-data"
+  to = "/.netlify/functions/market-data"
+  status = 200
+
+[[redirects]]
+  from = "/api/snapshots"
+  to = "/.netlify/functions/snapshots"
+  status = 200
+
+[[redirects]]
+  from = "/api/snapshots/:key"
+  to = "/.netlify/functions/snapshots?key=:key"
+  status = 200
+
+# Swagger UI
+[[redirects]]
+  from = "/docs"
+  to = "/swagger/index.html"
+  status = 200
+
+[[headers]]
+  for = "/api/*"
+  [headers.values]
+    Access-Control-Allow-Origin = "*"
+    Access-Control-Allow-Methods = "GET, OPTIONS"
+    Access-Control-Allow-Headers = "Content-Type"
+    Content-Type = "application/json"

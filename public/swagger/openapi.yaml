@@ -1,0 +1,422 @@
+openapi: 3.0.3
+info:
+  title: Allocation Engine API
+  description: |
+    REST API for the allocation engine trading system.
+    Reads state snapshots from Netlify Blobs written by the live trading engine.
+  version: 0.1.0
+  contact:
+    name: Allocation Engine
+
+servers:
+  - url: /api
+    description: Netlify Functions (production)
+
+paths:
+  /health:
+    get:
+      summary: Health check
+      operationId: getHealth
+      tags: [System]
+      responses:
+        "200":
+          description: Service is healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthResponse"
+
+  /state:
+    get:
+      summary: Latest trading state
+      description: Returns the most recent state snapshot including tickers, strategy state, and drift metrics.
+      operationId: getState
+      tags: [Trading]
+      responses:
+        "200":
+          description: Current trading state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StateResponse"
+        "404":
+          description: No state snapshots found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /orders:
+    get:
+      summary: Open orders
+      description: Returns all open stock orders and active options positions from the latest snapshot.
+      operationId: getOrders
+      tags: [Trading]
+      responses:
+        "200":
+          description: Current open orders
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrdersResponse"
+        "404":
+          description: No state snapshots found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /portfolio:
+    get:
+      summary: Portfolio snapshot
+      description: Returns the portfolio holdings from the latest state snapshot.
+      operationId: getPortfolio
+      tags: [Trading]
+      responses:
+        "200":
+          description: Current portfolio
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortfolioResponse"
+        "404":
+          description: No state snapshots found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /market-data:
+    get:
+      summary: Market data and metrics
+      description: Returns ticker-level metrics and drift analysis from the latest snapshot.
+      operationId: getMarketData
+      tags: [Market Data]
+      responses:
+        "200":
+          description: Market data and metrics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MarketDataResponse"
+        "404":
+          description: No state snapshots found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /snapshots:
+    get:
+      summary: List state snapshots
+      description: Returns the most recent 50 snapshot keys, sorted newest first.
+      operationId: listSnapshots
+      tags: [Snapshots]
+      responses:
+        "200":
+          description: List of snapshot keys
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SnapshotListResponse"
+
+  /snapshots/{key}:
+    get:
+      summary: Get a specific snapshot
+      description: Returns the full data for a specific snapshot by its timestamp key.
+      operationId: getSnapshot
+      tags: [Snapshots]
+      parameters:
+        - name: key
+          in: path
+          required: true
+          description: "Snapshot timestamp key (e.g. 2025-02-23T14-30-00)"
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Snapshot data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SnapshotResponse"
+        "404":
+          description: Snapshot not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+components:
+  schemas:
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+      required: [error]
+
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          example: ok
+        service:
+          type: string
+          example: allocation-engine-api
+        version:
+          type: string
+          example: 0.1.0
+        timestamp:
+          type: string
+          format: date-time
+
+    StockOrder:
+      type: object
+      properties:
+        symbol:
+          type: string
+          example: BTC
+        side:
+          type: string
+          enum: [BUY, SELL]
+        quantity:
+          type: number
+          example: 250
+        order_type:
+          type: string
+          example: limit
+        limit_price:
+          type: number
+          nullable: true
+          example: 95000.50
+        stop_price:
+          type: number
+          nullable: true
+
+    OptionPosition:
+      type: object
+      properties:
+        chain_symbol:
+          type: string
+          example: QQQ
+        strike:
+          type: number
+          example: 500
+        option_type:
+          type: string
+          enum: [call, put]
+        expiration:
+          type: string
+          example: "2025-03-21"
+        quantity:
+          type: number
+        position_type:
+          type: string
+          enum: [long, short]
+        mark_price:
+          type: number
+          nullable: true
+        avg_price:
+          type: number
+        current_value:
+          type: number
+        unrealized_pl:
+          type: number
+        unrealized_pl_pct:
+          type: number
+        dte:
+          type: integer
+          nullable: true
+        underlying_price:
+          type: number
+          nullable: true
+        greeks:
+          type: object
+          properties:
+            delta:
+              type: number
+              nullable: true
+            gamma:
+              type: number
+              nullable: true
+            theta:
+              type: number
+              nullable: true
+            vega:
+              type: number
+              nullable: true
+            iv:
+              type: number
+              nullable: true
+        recommended_action:
+          type: object
+          properties:
+            action:
+              type: string
+              enum: [HOLD, CLOSE]
+            reasons:
+              type: array
+              items:
+                type: string
+
+    TickerState:
+      type: object
+      properties:
+        orders:
+          type: array
+          items:
+            type: object
+            description: Order state from the trading engine
+        signal_orders:
+          type: array
+          items:
+            type: object
+            description: Signal-triggered orders
+
+    DriftMetrics:
+      type: object
+      properties:
+        rolling_sharpe:
+          type: number
+          example: 0.42
+        rolling_vol_pct:
+          type: number
+          example: 24.5
+        rolling_return_pct:
+          type: number
+          example: 1.23
+        regime:
+          type: string
+          enum: [LOW_VOL, MEDIUM_VOL, HIGH_VOL]
+        regime_rationale:
+          type: string
+        window_days:
+          type: integer
+          example: 21
+        as_of:
+          type: string
+        suggested_params:
+          type: object
+          properties:
+            stop_offset_pct:
+              type: number
+            buy_offset:
+              type: number
+            coverage_threshold:
+              type: number
+        grid_sharpe:
+          type: number
+          nullable: true
+        mean_test_sharpe:
+          type: number
+          nullable: true
+        degradation:
+          type: number
+          nullable: true
+        drift_alerts:
+          type: array
+          items:
+            type: object
+            properties:
+              metric:
+                type: string
+              value:
+                type: number
+              threshold:
+                type: number
+
+    StateResponse:
+      type: object
+      properties:
+        snapshot_key:
+          type: string
+          example: "2025-02-23T14-30-00"
+        timestamp:
+          type: string
+          format: date-time
+        state:
+          type: object
+          description: Raw strategy state
+        tickers:
+          type: object
+          additionalProperties:
+            $ref: "#/components/schemas/TickerState"
+        drift_metrics:
+          $ref: "#/components/schemas/DriftMetrics"
+
+    OrdersResponse:
+      type: object
+      properties:
+        snapshot_key:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        stock_orders:
+          type: array
+          items:
+            $ref: "#/components/schemas/StockOrder"
+        stock_order_count:
+          type: integer
+        options:
+          type: array
+          items:
+            $ref: "#/components/schemas/OptionPosition"
+        options_count:
+          type: integer
+
+    PortfolioResponse:
+      type: object
+      properties:
+        snapshot_key:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        portfolio:
+          type: object
+          nullable: true
+          description: Portfolio holdings and positions
+
+    MarketDataResponse:
+      type: object
+      properties:
+        snapshot_key:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        ticker_metrics:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              order_count:
+                type: integer
+              signal_order_count:
+                type: integer
+        drift_metrics:
+          $ref: "#/components/schemas/DriftMetrics"
+
+    SnapshotListResponse:
+      type: object
+      properties:
+        count:
+          type: integer
+          example: 42
+        snapshots:
+          type: array
+          items:
+            type: string
+          description: Snapshot keys (most recent 50), newest first
+
+    SnapshotResponse:
+      type: object
+      properties:
+        snapshot_key:
+          type: string
+        data:
+          type: object
+          description: Full snapshot data
