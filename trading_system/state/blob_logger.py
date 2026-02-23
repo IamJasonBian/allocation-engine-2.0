@@ -29,7 +29,7 @@ def _get_config():
 
 
 def _serialize_state(state_manager, order_book=None, portfolio=None,
-                     drift_metrics=None) -> dict:
+                     drift_metrics=None, recent_orders=None) -> dict:
     """Serialize StateManager state to a JSON-safe dictionary."""
     snapshot = {
         "timestamp": datetime.now().isoformat(),
@@ -45,11 +45,12 @@ def _serialize_state(state_manager, order_book=None, portfolio=None,
         snapshot["order_book"] = order_book
     if portfolio is not None:
         snapshot["portfolio"] = portfolio
-        # Include options from the portfolio if present
         if isinstance(portfolio, dict) and portfolio.get("options"):
             snapshot["options"] = portfolio["options"]
     if drift_metrics is not None:
         snapshot["drift_metrics"] = drift_metrics
+    if recent_orders:
+        snapshot["recent_orders"] = recent_orders
     return snapshot
 
 
@@ -61,11 +62,12 @@ def _serialize_value(obj):
 
 
 def _log_local(state_manager, order_book=None, portfolio=None,
-               drift_metrics=None):
+               drift_metrics=None, recent_orders=None):
     """Write state snapshot to a local JSON file under state_logs/."""
     LOCAL_LOG_DIR.mkdir(exist_ok=True)
     snapshot = _serialize_state(state_manager, order_book=order_book,
-                                portfolio=portfolio, drift_metrics=drift_metrics)
+                                portfolio=portfolio, drift_metrics=drift_metrics,
+                                recent_orders=recent_orders)
     blob_key = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
     payload = json.dumps(snapshot, default=_serialize_value, indent=2)
 
@@ -76,7 +78,7 @@ def _log_local(state_manager, order_book=None, portfolio=None,
 
 
 def _log_remote(state_manager, order_book=None, portfolio=None,
-                drift_metrics=None):
+                drift_metrics=None, recent_orders=None):
     """Upload state snapshot to Netlify Blobs."""
     config = _get_config()
     if not config:
@@ -85,7 +87,8 @@ def _log_remote(state_manager, order_book=None, portfolio=None,
         return None
 
     snapshot = _serialize_state(state_manager, order_book=order_book,
-                                portfolio=portfolio, drift_metrics=drift_metrics)
+                                portfolio=portfolio, drift_metrics=drift_metrics,
+                                recent_orders=recent_orders)
     blob_key = datetime.now().strftime("%Y-%m-%dT%H-%M-%S")
     payload = json.dumps(snapshot, default=_serialize_value)
 
@@ -106,13 +109,15 @@ def _log_remote(state_manager, order_book=None, portfolio=None,
 
 
 def log_state_to_blob(state_manager, live=False, order_book=None,
-                      portfolio=None, drift_metrics=None):
+                      portfolio=None, drift_metrics=None, recent_orders=None):
     """Log StateManager state. Writes locally in dry-run, uploads to Netlify Blobs when live."""
     if live:
         return _log_remote(state_manager, order_book=order_book,
-                           portfolio=portfolio, drift_metrics=drift_metrics)
+                           portfolio=portfolio, drift_metrics=drift_metrics,
+                           recent_orders=recent_orders)
     return _log_local(state_manager, order_book=order_book,
-                      portfolio=portfolio, drift_metrics=drift_metrics)
+                      portfolio=portfolio, drift_metrics=drift_metrics,
+                      recent_orders=recent_orders)
 
 
 def upload_blob(store_name, blob_key, data):
