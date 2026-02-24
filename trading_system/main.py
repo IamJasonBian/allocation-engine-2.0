@@ -662,7 +662,23 @@ class TradingSystem:
                 extra = {}
                 if portfolio_data and isinstance(portfolio_data, dict):
                     extra['options'] = portfolio_data.get('options', [])
-                    extra['order_book'] = portfolio_data.get('open_orders', [])
+                    # Tag orders with source: engine vs external
+                    signal_ids = set()
+                    for ticker in self.state_manager.tickers.values():
+                        for o in ticker.get_signal_orders():
+                            if o.order_id:
+                                signal_ids.add(o.order_id)
+                    ob = portfolio_data.get('open_orders', [])
+                    idx = 1
+                    for o in ob:
+                        if o.get('order_id') in signal_ids:
+                            o['source'] = 'engine'
+                            o['machine_index'] = idx
+                            idx += 1
+                        else:
+                            o['source'] = 'external'
+                            o['machine_index'] = None
+                    extra['order_book'] = ob
                 fetch_and_write_indicators(self.symbols, extra_data=extra)
             except Exception as e:
                 print(f"  [indicators] Error refreshing dashboard: {e}")

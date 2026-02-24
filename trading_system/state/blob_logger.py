@@ -36,12 +36,26 @@ def _serialize_state(state_manager, order_book=None, portfolio=None,
         "state": state_manager.state,
         "tickers": {},
     }
+    signal_ids = set()
     for symbol, ticker in state_manager.tickers.items():
+        signal = ticker.get_signal_orders()
         snapshot["tickers"][symbol] = {
             "orders": [order.get_state() for order in ticker.orders],
-            "signal_orders": [order.get_state() for order in ticker.get_signal_orders()],
+            "signal_orders": [order.get_state() for order in signal],
         }
+        for o in signal:
+            if o.order_id:
+                signal_ids.add(o.order_id)
     if order_book is not None:
+        idx = 1
+        for o in order_book:
+            if o.get('order_id') in signal_ids:
+                o['source'] = 'engine'
+                o['machine_index'] = idx
+                idx += 1
+            else:
+                o['source'] = 'external'
+                o['machine_index'] = None
         snapshot["order_book"] = order_book
     if portfolio is not None:
         snapshot["portfolio"] = portfolio

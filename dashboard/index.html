@@ -89,6 +89,7 @@
     .ob-row .ob-price { color: #ccc; font-variant-numeric: tabular-nums; }
     .ob-row.buy .ob-side { color: #4a4; }
     .ob-row.sell .ob-side { color: #a44; }
+    .ob-row .ob-idx { font-size: 8px; color: #000; background: #5a5; border-radius: 2px; padding: 0 4px; font-weight: 600; min-width: 14px; text-align: center; }
     .ob-empty { color: #333; font-size: 10px; padding: 12px 0; text-align: center; }
 
     /* Options cards */
@@ -447,17 +448,20 @@ function renderBook() {
   let html = '';
 
   // ── Stock Orders ──
-  html += '<div class="book-section-title">Stock Orders (' + orders.length + ')</div>';
+  const machineCount = orders.filter(o => o.source === 'engine').length;
+  html += '<div class="book-section-title">Stock Orders (' + orders.length + (machineCount ? ' · ' + machineCount + ' engine' : '') + ')</div>';
   if (orders.length) {
     const buys = orders.filter(o => o.side === 'BUY');
     const sells = orders.filter(o => o.side === 'SELL');
     for (const o of buys) {
       const price = o.limit_price ? '$'+o.limit_price.toFixed(2) : (o.stop_price ? 'stop $'+o.stop_price.toFixed(2) : 'MKT');
-      html += `<div class="ob-row buy"><span class="ob-sym">${o.symbol}</span><span class="ob-side">BUY</span><span class="ob-qty">${o.quantity.toFixed(0)}</span><span class="ob-type">${o.order_type}</span><span class="ob-price">${price}</span></div>`;
+      const idx = o.machine_index ? `<span class="ob-idx">#${o.machine_index}</span>` : '';
+      html += `<div class="ob-row buy">${idx}<span class="ob-sym">${o.symbol}</span><span class="ob-side">BUY</span><span class="ob-qty">${o.quantity.toFixed(0)}</span><span class="ob-type">${o.order_type}</span><span class="ob-price">${price}</span></div>`;
     }
     for (const o of sells) {
       const price = o.limit_price ? '$'+o.limit_price.toFixed(2) : (o.stop_price ? 'stop $'+o.stop_price.toFixed(2) : 'MKT');
-      html += `<div class="ob-row sell"><span class="ob-sym">${o.symbol}</span><span class="ob-side">SELL</span><span class="ob-qty">${o.quantity.toFixed(0)}</span><span class="ob-type">${o.order_type}</span><span class="ob-price">${price}</span></div>`;
+      const idx = o.machine_index ? `<span class="ob-idx">#${o.machine_index}</span>` : '';
+      html += `<div class="ob-row sell">${idx}<span class="ob-sym">${o.symbol}</span><span class="ob-side">SELL</span><span class="ob-qty">${o.quantity.toFixed(0)}</span><span class="ob-type">${o.order_type}</span><span class="ob-price">${price}</span></div>`;
     }
   } else {
     html += '<div class="ob-empty">No open stock orders</div>';
