@@ -118,6 +118,12 @@ def main():
     sub.add_parser("audit", help="Run order coverage audit")
     sub.add_parser("replace", help="Atomic cancel-all + resubmit")
 
+    hedge_parser = sub.add_parser("hedge", help="BTC protective put analysis")
+    hedge_parser.add_argument("--shares", type=int, default=None,
+                              help="Override share count (default: read from position)")
+    hedge_parser.add_argument("--lookback", type=int, default=90,
+                              help="Days of history to fetch (default: 90)")
+
     args = parser.parse_args()
     engine = AllocationEngine(dry_run=DRY_RUN)
 
@@ -131,6 +137,12 @@ def main():
         audit(engine)
     elif args.command == "replace":
         replace(engine)
+    elif args.command == "hedge":
+        from hedging import fetch_btc_bars, print_hedge_report
+        log.info("Fetching BTC bars (lookback=%dd)", args.lookback)
+        bars = fetch_btc_bars(lookback_days=args.lookback)
+        positions = engine.trader.positions()
+        print_hedge_report(bars, positions, shares_override=args.shares)
     else:
         parser.print_help()
         sys.exit(1)
