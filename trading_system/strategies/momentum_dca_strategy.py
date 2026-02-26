@@ -63,6 +63,20 @@ class MomentumDcaLongStrategy(BaseStrategy):
         if not current_price:
             return {'signal': 'NO_DATA', 'reason': 'No current price available', 'order': None}
 
+        # Dynamic offset based on spread if available
+        bid = metrics.get('bid', None)
+        ask = metrics.get('ask', None)
+        effective_stop_offset = self.stop_offset_pct
+        effective_buy_offset = self.buy_offset
+
+        if bid and ask and bid > 0 and ask > 0:
+            spread = ask - bid
+            spread_pct = spread / current_price
+            # Stop offset must be at least 2x the current spread
+            effective_stop_offset = max(self.stop_offset_pct, spread_pct * 2)
+            # Buy offset must be at least 3x the current spread
+            effective_buy_offset = max(self.buy_offset, spread * 3)
+
         if not current_position or float(current_position.get('quantity', 0)) <= 0:
             return {'signal': 'NO_POSITION', 'reason': f'No position in {symbol}', 'order': None}
 
@@ -125,8 +139,8 @@ class MomentumDcaLongStrategy(BaseStrategy):
                 }
 
         # Price moved too far — new stop-limit
-        stop_price = round(current_price * (1 - self.stop_offset_pct), 2)
-        buy_price = round(stop_price - self.buy_offset, 2)
+        stop_price = round(current_price * (1 - effective_stop_offset), 2)
+        buy_price = round(stop_price - effective_buy_offset, 2)
 
         target_qty = self._round_quantity(symbol, self.coverage_threshold * position_qty)
 

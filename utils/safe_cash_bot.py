@@ -45,6 +45,13 @@ class SafeCashBot:
         self.auth = RobinhoodAuth()
         self.auth.login()
 
+        # Execution quality components (initialized lazily via init_execution_layer)
+        self._fill_auditor = None
+        self._spread_checker = None
+        self._price_optimizer = None
+        self._pdt_gate = None
+        self._fill_logger = None
+
         # Verify account access
         self._verify_account()
 
@@ -69,6 +76,15 @@ class SafeCashBot:
             print(f"[ERR] ERROR: Cannot access account {self.account_number}")
             print(f"   {e}")
             sys.exit(1)
+
+    def init_execution_layer(self, fill_auditor=None, spread_checker=None,
+                             price_optimizer=None, pdt_gate=None, fill_logger=None):
+        """Initialize execution quality components. All optional — if None, that check is skipped."""
+        self._fill_auditor = fill_auditor
+        self._spread_checker = spread_checker
+        self._price_optimizer = price_optimizer
+        self._pdt_gate = pdt_gate
+        self._fill_logger = fill_logger
 
     def get_cash_balance(self):
         """Get available cash balance (not margin)"""
@@ -1083,6 +1099,43 @@ class SafeCashBot:
             print(f"{'='*70}\n")
             return None
 
+        # --- Execution quality pre-flight checks ---
+        submission_id = None
+        bid_at_submit = None
+        ask_at_submit = None
+        try:
+            if self._pdt_gate:
+                allowed, pdt_reason = self._pdt_gate.can_place_order(symbol, 'buy')
+                print(f"   PDT Gate: {pdt_reason}")
+                if not allowed:
+                    print(f"{'='*70}\n")
+                    return None
+
+            if self._spread_checker:
+                spread_info = self._spread_checker.check_spread(symbol)
+                if spread_info and not spread_info.get('is_acceptable', True):
+                    print(f"   Spread Check: BLOCKED — {spread_info.get('reason', '')}")
+                    print(f"{'='*70}\n")
+                    return None
+                if spread_info and spread_info.get('should_wait'):
+                    print(f"   Spread Check: WARNING — {spread_info.get('reason', '')}")
+
+            if self._fill_auditor:
+                nbbo = self._fill_auditor.get_nbbo_now(symbol)
+                if nbbo:
+                    bid_at_submit = nbbo.get('bid')
+                    ask_at_submit = nbbo.get('ask')
+                    mid = nbbo.get('mid')
+                    if mid and mid > 0:
+                        price = min(price, round(mid, 2))
+                        print(f"   NBBO: bid=${bid_at_submit:.2f} ask=${ask_at_submit:.2f} mid=${mid:.2f}")
+
+            if self._fill_logger:
+                submission_id = self._fill_logger.log_submission(
+                    symbol, 'buy', price, bid_at_submit, ask_at_submit)
+        except Exception as e:
+            print(f"   [exec-layer] Pre-flight error (proceeding): {e}")
+
         if dry_run:
             print("\n[WARN]  DRY RUN MODE - Order not executed")
             print("   To execute real orders, call with dry_run=False")
@@ -1105,6 +1158,17 @@ class SafeCashBot:
                 print("[OK] Order placed successfully!")
                 print(f"   Order ID: {order_id}")
                 print(f"   State: {order_state or 'N/A'}")
+                # Post-fill audit
+                try:
+                    if self._fill_auditor:
+                        audit = self._fill_auditor.audit_fill(symbol, 'buy', price, quantity, order_id)
+                        if audit:
+                            print(f"   Fill Grade: {audit.get('grade', 'N/A')} "
+                                  f"(slippage: {audit.get('slippage_vs_mid_bps', 0):.1f} bps)")
+                    if self._fill_logger and submission_id:
+                        self._fill_logger.log_fill(submission_id, price)
+                except Exception as e:
+                    print(f"   [exec-layer] Post-fill audit error: {e}")
                 print(f"{'='*70}\n")
                 return order
 
@@ -1141,11 +1205,16 @@ class SafeCashBot:
                 else:
                     print(f"   No existing buy orders found for {symbol}")
 
+            if self._fill_logger and submission_id:
+                self._fill_logger.log_cancel(submission_id, reason=str(detail or 'order failed'))
+
             print(f"{'='*70}\n")
             return order
 
         except Exception as e:
             print(f"[ERR] Order failed: {e}")
+            if self._fill_logger and submission_id:
+                self._fill_logger.log_cancel(submission_id, reason=str(e))
             print(f"{'='*70}\n")
             return None
 
@@ -1187,6 +1256,42 @@ class SafeCashBot:
 
         print("   Validation: [OK] Valid sell order")
 
+        # --- Execution quality pre-flight checks ---
+        submission_id = None
+        bid_at_submit = None
+        ask_at_submit = None
+        try:
+            if self._pdt_gate:
+                allowed, pdt_reason = self._pdt_gate.can_place_order(symbol, 'sell')
+                print(f"   PDT Gate: {pdt_reason}")
+                if not allowed:
+                    print(f"{'='*70}\n")
+                    return None
+
+            if self._spread_checker:
+                spread_info = self._spread_checker.check_spread(symbol)
+                if spread_info and not spread_info.get('is_acceptable', True):
+                    print(f"   Spread Check: BLOCKED — {spread_info.get('reason', '')}")
+                    print(f"{'='*70}\n")
+                    return None
+                if spread_info and spread_info.get('should_wait'):
+                    print(f"   Spread Check: WARNING — {spread_info.get('reason', '')}")
+
+            if self._fill_auditor:
+                nbbo = self._fill_auditor.get_nbbo_now(symbol)
+                if nbbo:
+                    bid_at_submit = nbbo.get('bid')
+                    ask_at_submit = nbbo.get('ask')
+                    mid = nbbo.get('mid')
+                    if mid and mid > 0:
+                        print(f"   NBBO: bid=${bid_at_submit:.2f} ask=${ask_at_submit:.2f} mid=${mid:.2f}")
+
+            if self._fill_logger:
+                submission_id = self._fill_logger.log_submission(
+                    symbol, 'sell', price, bid_at_submit, ask_at_submit)
+        except Exception as e:
+            print(f"   [exec-layer] Pre-flight error (proceeding): {e}")
+
         if dry_run:
             print("\n[WARN]  DRY RUN MODE - Order not executed")
             print("   To execute real orders, call with dry_run=False")
@@ -1203,15 +1308,31 @@ class SafeCashBot:
                 account_number=self.account_number
             )
 
+            order_id = order.get('id', 'N/A') if isinstance(order, dict) else 'N/A'
             print("[OK] Order placed successfully!")
-            print(f"   Order ID: {order.get('id', 'N/A')}")
-            print(f"   State: {order.get('state', 'N/A')}")
-            print(f"{'='*70}\n")
+            print(f"   Order ID: {order_id}")
+            print(f"   State: {order.get('state', 'N/A') if isinstance(order, dict) else 'N/A'}")
 
+            # Post-fill audit
+            try:
+                if order_id != 'N/A':
+                    if self._fill_auditor:
+                        audit = self._fill_auditor.audit_fill(symbol, 'sell', price, quantity, order_id)
+                        if audit:
+                            print(f"   Fill Grade: {audit.get('grade', 'N/A')} "
+                                  f"(slippage: {audit.get('slippage_vs_mid_bps', 0):.1f} bps)")
+                    if self._fill_logger and submission_id:
+                        self._fill_logger.log_fill(submission_id, price)
+            except Exception as e:
+                print(f"   [exec-layer] Post-fill audit error: {e}")
+
+            print(f"{'='*70}\n")
             return order
 
         except Exception as e:
             print(f"[ERR] Order failed: {e}")
+            if self._fill_logger and submission_id:
+                self._fill_logger.log_cancel(submission_id, reason=str(e))
             print(f"{'='*70}\n")
             return None
 
@@ -1254,6 +1375,47 @@ class SafeCashBot:
 
         print("   Validation: Valid stop-limit sell order")
 
+        # --- Execution quality pre-flight checks ---
+        submission_id = None
+        bid_at_submit = None
+        ask_at_submit = None
+        try:
+            if self._pdt_gate:
+                allowed, pdt_reason = self._pdt_gate.can_place_order(symbol, 'sell')
+                print(f"   PDT Gate: {pdt_reason}")
+                if not allowed:
+                    print(f"{'='*70}\n")
+                    return None
+
+            if self._spread_checker:
+                spread_info = self._spread_checker.check_spread(symbol)
+                if spread_info and not spread_info.get('is_acceptable', True):
+                    print(f"   Spread Check: BLOCKED — {spread_info.get('reason', '')}")
+                    print(f"{'='*70}\n")
+                    return None
+                if spread_info and spread_info.get('should_wait'):
+                    print(f"   Spread Check: WARNING — {spread_info.get('reason', '')}")
+
+            if self._fill_auditor:
+                nbbo = self._fill_auditor.get_nbbo_now(symbol)
+                if nbbo:
+                    bid_at_submit = nbbo.get('bid')
+                    ask_at_submit = nbbo.get('ask')
+                    mid = nbbo.get('mid')
+                    if mid and mid > 0:
+                        print(f"   NBBO: bid=${bid_at_submit:.2f} ask=${ask_at_submit:.2f} mid=${mid:.2f}")
+
+            # Stop != limit buffer: prevent zero-fills on gap-through scenarios
+            if abs(stop_price - limit_price) < 0.01:
+                limit_price = round(stop_price * 0.995, 2)  # 0.5% below stop
+                print(f"   Stop=Limit buffer applied: limit adjusted to ${limit_price:.2f}")
+
+            if self._fill_logger:
+                submission_id = self._fill_logger.log_submission(
+                    symbol, 'sell', limit_price, bid_at_submit, ask_at_submit)
+        except Exception as e:
+            print(f"   [exec-layer] Pre-flight error (proceeding): {e}")
+
         if dry_run:
             print("\n   DRY RUN MODE - Order not executed")
             print(f"{'='*70}\n")
@@ -1277,6 +1439,17 @@ class SafeCashBot:
                 print("   Order placed successfully!")
                 print(f"   Order ID: {order_id}")
                 print(f"   State: {order_state or 'N/A'}")
+                # Post-fill audit
+                try:
+                    if self._fill_auditor:
+                        audit = self._fill_auditor.audit_fill(symbol, 'sell', limit_price, quantity, order_id)
+                        if audit:
+                            print(f"   Fill Grade: {audit.get('grade', 'N/A')} "
+                                  f"(slippage: {audit.get('slippage_vs_mid_bps', 0):.1f} bps)")
+                    if self._fill_logger and submission_id:
+                        self._fill_logger.log_fill(submission_id, limit_price)
+                except Exception as e:
+                    print(f"   [exec-layer] Post-fill audit error: {e}")
                 print(f"{'='*70}\n")
                 return order
 
@@ -1315,11 +1488,16 @@ class SafeCashBot:
                 else:
                     print(f"   No existing sell orders found for {symbol}")
 
+            if self._fill_logger and submission_id:
+                self._fill_logger.log_cancel(submission_id, reason=str(detail or 'order failed'))
+
             print(f"{'='*70}\n")
             return order
 
         except Exception as e:
             print(f"   Order failed: {e}")
+            if self._fill_logger and submission_id:
+                self._fill_logger.log_cancel(submission_id, reason=str(e))
             print(f"{'='*70}\n")
             return None
 

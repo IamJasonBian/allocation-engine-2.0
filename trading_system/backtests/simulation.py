@@ -122,20 +122,37 @@ def run_simulation(
             # Check sell trigger on PENDING orders
             if pair.state == PairState.PENDING:
                 if bar_low <= pair.sell_stop_price:
+                    # Realistic fill modeling
+                    if bar_open < pair.sell_stop_price:
+                        # Gap-through: price opened below stop
+                        if bar_open >= pair.buy_limit_price:
+                            # Fill at open (slipped)
+                            pair.sell_fill_price = bar_open
+                        else:
+                            # Gapped through both stop AND limit — no fill
+                            continue
+                    else:
+                        # Normal trigger: small slippage based on bar range
+                        bar_range = bar_high - bar_low
+                        slippage = bar_range * 0.01  # 1% of daily range
+                        pair.sell_fill_price = max(
+                            pair.sell_stop_price - slippage,
+                            pair.sell_stop_price * 0.995
+                        )
                     pair.state = PairState.SELL_TRIGGERED
                     pair.sell_fill_date = date
-                    pair.sell_fill_price = pair.sell_stop_price
                     portfolio.shares -= pair.quantity
-                    portfolio.cash += pair.quantity * pair.sell_stop_price
+                    portfolio.cash += pair.quantity * pair.sell_fill_price
 
             # Check buy fill on SELL_TRIGGERED orders (can happen same bar)
             if pair.state == PairState.SELL_TRIGGERED:
                 if bar_low <= pair.buy_limit_price:
                     pair.state = PairState.COMPLETED
                     pair.buy_fill_date = date
+                    # Buy fills at limit (this is realistic for limit buys)
                     pair.buy_fill_price = pair.buy_limit_price
                     portfolio.shares += pair.quantity
-                    portfolio.cash -= pair.quantity * pair.buy_limit_price
+                    portfolio.cash -= pair.quantity * pair.buy_fill_price
                     portfolio.pairs_completed += 1
                     # Update cost basis: weighted average
                     _update_cost_basis(portfolio, pair)

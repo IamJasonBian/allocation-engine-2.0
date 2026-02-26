@@ -62,6 +62,37 @@ class TradingSystem:
         self.state_manager = StateManager()
         self.trading_bot = SafeCashBot()
 
+        # Initialize execution quality layer
+        self.fill_logger = None
+        try:
+            from trading_system.execution.fill_auditor import FillAuditor
+            from trading_system.execution.spread_checker import SpreadChecker
+            from trading_system.execution.price_optimizer import PriceOptimizer
+            from trading_system.execution.pdt_gate import PDTGate
+            from trading_system.execution.fill_logger import FillLogger
+
+            fill_auditor = FillAuditor(
+                alpaca_key=os.getenv('ALPACA_API_KEY', ''),
+                alpaca_secret=os.getenv('ALPACA_SECRET_KEY', ''),
+                twelve_data_provider=self.data_provider,
+            )
+            spread_checker = SpreadChecker(fill_auditor=fill_auditor)
+            price_optimizer = PriceOptimizer()
+            pdt_gate = PDTGate(trading_bot=self.trading_bot)
+            fill_logger = FillLogger()
+
+            self.trading_bot.init_execution_layer(
+                fill_auditor=fill_auditor,
+                spread_checker=spread_checker,
+                price_optimizer=price_optimizer,
+                pdt_gate=pdt_gate,
+                fill_logger=fill_logger,
+            )
+
+            self.fill_logger = fill_logger
+        except Exception as e:
+            print(f"  [exec-layer] Execution quality layer init failed (proceeding without): {e}")
+
         if strategy_name == 'momentum_dca_long':
             self.strategy = MomentumDcaLongStrategy(symbols)
         else:
@@ -256,20 +287,7 @@ class TradingSystem:
         """
         lot_size = getattr(self.strategy, 'lot_size', None)
 
-        # PDT safety check
-        pdt_info = self.trading_bot.get_pdt_status()
-        if pdt_info is not None:
-            if pdt_info.get('flagged'):
-                msg = f":rotating_light: PDT FLAGGED on account — skipping order replacement for {symbol}"
-                print(f"   {msg}")
-                send_slack_alert(msg, emoji=":rotating_light:")
-                return
-            if pdt_info.get('day_trade_count', 0) >= 2:
-                count = pdt_info['day_trade_count']
-                msg = f":warning: PDT day trade count at {count}/3 — skipping order replacement for {symbol}"
-                print(f"   {msg}")
-                send_slack_alert(msg)
-                return
+        # PDT check now handled centrally by PDTGate in SafeCashBot.init_execution_layer()
 
         # Cancel ALL existing orders for the symbol
         sells_cancelled, _ = self._cancel_orders_by_side(symbol, 'SELL', symbol_orders)
@@ -675,6 +693,17 @@ class TradingSystem:
             print("\nFinal Portfolio Allocation:")
             self.print_portfolio_allocation()
 
+        # Print fill quality stats
+        if hasattr(self, 'fill_logger') and self.fill_logger:
+            try:
+                stats = self.fill_logger.get_stats()
+                if stats and stats.get('total_submissions', 0) > 0:
+                    print(f"\nFill Quality: {stats.get('total_fills', 0)} fills, "
+                          f"avg slippage {stats.get('avg_slippage_bps', 0):.1f} bps, "
+                          f"cost impact ${stats.get('total_cost_impact', 0):.2f}")
+            except Exception:
+                pass
+
         # Send oncall Slack summary every cycle
         self._send_oncall_summary(open_orders, portfolio_data)
 
@@ -833,6 +862,19 @@ class TradingSystem:
                         f"  {pos['symbol']:<6} x{pos['quantity']:<7}  "
                         f"${pos['equity']:>10,.2f}  {pl_sign} {pos.get('profit_loss_pct', 0):+.2f}%"
                     )
+
+            # Fill quality summary
+            if hasattr(self, 'fill_logger') and self.fill_logger:
+                try:
+                    stats = self.fill_logger.get_stats()
+                    if stats and stats.get('total_submissions', 0) > 0:
+                        lines.append("")
+                        lines.append("Fill Quality:")
+                        lines.append(f"  Fills today: {stats.get('total_fills', 0)}")
+                        lines.append(f"  Avg slippage: {stats.get('avg_slippage_bps', 0):.1f} bps")
+                        lines.append(f"  Total cost: ${stats.get('total_cost_impact', 0):.2f}")
+                except Exception:
+                    pass
 
             message = "```\n" + "\n".join(lines) + "\n```"
             send_slack_alert(message, emoji=":chart_with_upwards_trend:")
