@@ -435,12 +435,18 @@ class SafeCashBot:
 
                         positions.append({
                             'symbol': symbol,
+                            'name': data.get('name', ''),
+                            'type': data.get('type', ''),
                             'quantity': quantity,
                             'avg_buy_price': avg_price,
                             'current_price': current_price,
                             'equity': equity,
                             'profit_loss': profit_loss,
-                            'profit_loss_pct': profit_loss_pct
+                            'profit_loss_pct': profit_loss_pct,
+                            'percent_change': self._safe_float(data.get('percent_change')),
+                            'equity_change': self._safe_float(data.get('equity_change')),
+                            'pe_ratio': self._safe_float(data.get('pe_ratio')),
+                            'percentage': self._safe_float(data.get('percentage')),
                         })
 
             return positions
