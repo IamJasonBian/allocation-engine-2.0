@@ -81,7 +81,7 @@ class TestSellFillLogic:
         for p in result.pairs:
             assert p.sell_fill_price is None
 
-    def test_sell_fills_at_stop_price(self):
+    def test_sell_fills_near_stop_price_with_slippage(self):
         bars = _make_bars_ohlc([
             (100, 101, 99.50, 100),    # pair placed, stop=99.0
             (100, 101, 98.00, 99.00),  # triggers
@@ -90,8 +90,10 @@ class TestSellFillLogic:
                                 stop_offset_pct=0.01, buy_offset=0.20, lot_size=DEFAULT_LOT_SIZE)
         filled = [p for p in result.pairs if p.sell_fill_price is not None]
         assert len(filled) >= 1
-        # Fill price should be the stop price
-        assert filled[0].sell_fill_price == filled[0].sell_stop_price
+        # Fill price should be near stop price (with realistic slippage)
+        assert filled[0].sell_fill_price <= filled[0].sell_stop_price
+        # Slippage bounded by 0.5% (stop * 0.995)
+        assert filled[0].sell_fill_price >= filled[0].sell_stop_price * 0.995
 
 
 class TestBuyFillLogic:

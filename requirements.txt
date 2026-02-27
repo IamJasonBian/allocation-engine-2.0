@@ -5,3 +5,7 @@ requests>=2.31.0
 pandas>=2.0.0
 matplotlib>=3.7.0
 fpdf2>=2.7.0
+
+# Optional: Execution quality cross-referencing
+# alpaca-py>=0.30.0
+# Note: uncomment above if you want Alpaca NBBO fill auditing
