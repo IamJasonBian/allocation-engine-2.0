@@ -98,13 +98,26 @@ def _log_remote(state_manager, order_book=None, portfolio=None,
         "Content-Type": "application/json",
     }
 
+    # Debug: print what we're sending
+    print(f"\n  [blob] PUT {STORE_NAME}/{blob_key}")
+    print(f"  [blob] Payload keys: {list(snapshot.keys())}")
+    print(f"  [blob] Payload size: {len(payload)} bytes")
+    print(f"  [blob] Tickers: {list(snapshot.get('tickers', {}).keys())}")
+    print(f"  [blob] Order book entries: {len(snapshot.get('order_book', []))}")
+    print(f"  [blob] Recent orders: {len(snapshot.get('recent_orders', []))}")
+    if snapshot.get('drift_metrics'):
+        print(f"  [blob] Drift metrics symbols: {list(snapshot['drift_metrics'].keys())}")
+
     try:
         resp = requests.put(url, headers=headers, data=payload, timeout=10)
+        print(f"  [blob] Response: {resp.status_code} {resp.reason}")
+        if resp.text:
+            print(f"  [blob] Response body: {resp.text[:500]}")
         resp.raise_for_status()
-        print(f"State logged to Netlify Blobs: {STORE_NAME}/{blob_key}")
+        print(f"  [blob] State logged to Netlify Blobs: {STORE_NAME}/{blob_key}")
         return blob_key
     except requests.RequestException as e:
-        print(f"Failed to log state to Netlify Blobs: {e}")
+        print(f"  [blob] FAILED: {e}")
         return None
 
 
@@ -136,11 +149,18 @@ def upload_blob(store_name, blob_key, data):
         "Content-Type": "application/json",
     }
 
+    # Debug: print what we're sending
+    print(f"\n  [blob] PUT {store_name}/{blob_key}")
+    print(f"  [blob] Payload size: {len(payload)} bytes")
+
     try:
         resp = requests.put(url, headers=headers, data=payload, timeout=15)
+        print(f"  [blob] Response: {resp.status_code} {resp.reason}")
+        if resp.text:
+            print(f"  [blob] Response body: {resp.text[:500]}")
         resp.raise_for_status()
-        print(f"  Blob uploaded: {store_name}/{blob_key}")
+        print(f"  [blob] Uploaded: {store_name}/{blob_key}")
         return blob_key
     except requests.RequestException as e:
-        print(f"  Failed to upload blob {store_name}/{blob_key}: {e}")
+        print(f"  [blob] FAILED {store_name}/{blob_key}: {e}")
         return None
