@@ -1061,6 +1061,110 @@ class SafeCashBot:
             print(f"❌ Error getting recent orders: {e}")
             return []
 
+
+    def get_recent_option_orders(self, days=7):
+        """
+        Get recently filled and cancelled option orders for this account.
+
+        Args:
+            days: Number of days of history to fetch (default 7)
+
+        Returns:
+            List of historical option orders with leg details.
+        """
+        try:
+            from datetime import timedelta
+            cutoff = datetime.utcnow() - timedelta(days=days)
+            cutoff_str = cutoff.strftime('%Y-%m-%dT00:00:00Z')
+
+            all_orders = r.orders.get_all_option_orders(info=None)
+
+            orders = []
+            if not all_orders:
+                return orders
+
+            for order in all_orders:
+                state = order.get('state', '')
+                if state not in ('filled', 'cancelled', 'failed', 'rejected'):
+                    continue
+
+                updated_at_raw = order.get('updated_at', '')
+                if updated_at_raw and updated_at_raw < cutoff_str:
+                    continue
+
+                order_id = order.get('id', 'N/A')
+                quantity = float(order.get('quantity', 0))
+                price = float(order.get('price', 0) or 0)
+                premium = float(order.get('premium', 0) or 0)
+                processed_premium = float(order.get('processed_premium', 0) or 0)
+                direction = order.get('direction', 'N/A')
+                order_type = order.get('type', 'N/A')
+                trigger = order.get('trigger', 'immediate')
+                opening_strategy = order.get('opening_strategy') or order.get('closing_strategy') or 'N/A'
+                created_at = order.get('created_at', 'N/A')
+                updated_at = order.get('updated_at', 'N/A')
+
+                try:
+                    if created_at != 'N/A':
+                        created_dt = datetime.fromisoformat(created_at.replace('Z', '+00:00'))
+                        created_at = created_dt.strftime('%Y-%m-%d %H:%M:%S')
+                except Exception:
+                    pass
+
+                # Extract leg details
+                legs = []
+                for leg in order.get('legs', []):
+                    option_url = leg.get('option', '')
+                    option_id = option_url.rstrip('/').split('/')[-1] if option_url else None
+                    side = leg.get('side', 'N/A')
+                    position_effect = leg.get('position_effect', 'N/A')
+
+                    instrument = {}
+                    if option_id:
+                        try:
+                            instrument = r.options.get_option_instrument_data_by_id(option_id) or {}
+                        except Exception:
+                            pass
+
+                    legs.append({
+                        'side': side.upper() if side != 'N/A' else 'N/A',
+                        'position_effect': position_effect,
+                        'strike': float(instrument.get('strike_price', 0)),
+                        'expiration': instrument.get('expiration_date', 'N/A'),
+                        'option_type': instrument.get('type', 'N/A'),
+                        'chain_symbol': instrument.get('chain_symbol', 'N/A'),
+                    })
+
+                if trigger == 'stop' and order_type == 'limit':
+                    order_desc = 'Stop Limit'
+                elif trigger == 'stop':
+                    order_desc = 'Stop Loss'
+                elif order_type == 'limit':
+                    order_desc = 'Limit'
+                else:
+                    order_desc = 'Market'
+
+                orders.append({
+                    'order_id': order_id,
+                    'state': state,
+                    'quantity': quantity,
+                    'price': price,
+                    'premium': premium,
+                    'processed_premium': processed_premium,
+                    'direction': direction,
+                    'order_type': order_desc,
+                    'opening_strategy': opening_strategy,
+                    'created_at': created_at,
+                    'updated_at': updated_at,
+                    'legs': legs,
+                })
+
+            return orders
+
+        except Exception as e:
+            print(f"[ERR] Error getting recent option orders: {e}")
+            return []
+
     def validate_buy_order(self, symbol, quantity, price):
         """
         Validate a buy order before execution
