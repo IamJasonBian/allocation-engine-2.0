@@ -14,9 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from dotenv import load_dotenv
 load_dotenv()
 
-# Set Redis env vars from Netlify
-os.environ.setdefault("REDIS_HOST", "redis-14697.c52.us-east-1-4.ec2.cloud.redislabs.com:14697")
-os.environ.setdefault("REDIS_PASSWORD", "64n39uHOB0KEYZsfNbOdaGboWPZ0tOy4")
+# Redis env vars loaded from .env (REDIS_HOST, REDIS_PASSWORD)
 
 from utils.safe_cash_bot import SafeCashBot
 from trading_system.state.redis_store import sync_to_redis
