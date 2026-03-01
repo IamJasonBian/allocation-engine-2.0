@@ -9,3 +9,4 @@ fpdf2>=2.7.0
 # Optional: Execution quality cross-referencing
 # alpaca-py>=0.30.0
 # Note: uncomment above if you want Alpaca NBBO fill auditing
+redis>=5.0.0

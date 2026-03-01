@@ -21,6 +21,7 @@ from trading_system.strategies.breakout_strategy import BreakoutStrategy  # noqa
 from trading_system.strategies.momentum_dca_strategy import MomentumDcaLongStrategy  # noqa: E402
 from trading_system.state.state_manager import StateManager  # noqa: E402
 from trading_system.state.blob_logger import log_state_to_blob  # noqa: E402
+from trading_system.state.redis_store import sync_to_redis  # noqa: E402
 from trading_system.market_indicators import fetch_and_write_indicators  # noqa: E402
 from trading_system.utils.slack import send_slack_alert  # noqa: E402
 from trading_system.entities.OrderType import OrderSide  # noqa: E402
@@ -593,6 +594,7 @@ class TradingSystem:
             open_orders = self.trading_bot.get_open_orders()
 
         recent_orders = self.trading_bot.get_recent_orders(days=7)
+        recent_option_orders = self.trading_bot.get_recent_option_orders(days=7)
 
         # Print order book before processing through state manager
         if open_orders:
@@ -672,7 +674,11 @@ class TradingSystem:
             portfolio=portfolio_data,
             drift_metrics=drift_metrics,
             recent_orders=recent_orders,
+            recent_option_orders=recent_option_orders,
         )
+
+        # Sync portfolio data to Redis
+        sync_to_redis(portfolio_data, recent_orders=recent_orders, recent_option_orders=recent_option_orders, live=not self.dry_run)
 
         # Refresh dashboard market indicators
         if self.dashboard:
