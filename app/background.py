@@ -30,6 +30,7 @@ def start_engine_thread(app):
             from app.brokers import get_broker
             from app.engine import AllocationEngine
             from app.runtime_client import RuntimeClient
+            from app.redis_store import sync_to_redis
 
             config = app.config
             broker = get_broker(config["ENGINE_BROKER"])
@@ -43,6 +44,7 @@ def start_engine_thread(app):
             _engine_status["running"] = True
             _engine_status["dry_run"] = config["DRY_RUN"]
             interval = config["POLL_INTERVAL_SECONDS"]
+            is_live = not config["DRY_RUN"]
 
             log.info("Background engine started (interval=%ds, dry_run=%s, broker=%s)",
                      interval, config["DRY_RUN"], config["ENGINE_BROKER"])
@@ -53,6 +55,16 @@ def start_engine_thread(app):
                     _engine_status["last_tick"] = datetime.now(timezone.utc).isoformat()
                     _engine_status["tick_count"] += 1
                     _engine_status["last_error"] = None
+
+                    # Sync positions + orders to Redis after each tick
+                    try:
+                        positions = broker.positions()
+                        open_orders = broker.open_orders()
+                        account = broker.account()
+                        sync_to_redis(positions, open_orders, account, live=is_live)
+                    except Exception:
+                        log.exception("Redis sync error")
+
                 except Exception as e:
                     log.exception("Engine tick error")
                     _engine_status["last_error"] = str(e)

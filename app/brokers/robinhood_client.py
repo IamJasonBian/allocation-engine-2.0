@@ -31,12 +31,14 @@ class RobinhoodTrader:
         totp_secret: str = "",
         device_token: str = "",
         pickle_name: str = "taipei_session",
+        account_number: str = "",
     ):
         self.email = email
         self.password = password
         self.totp_secret = totp_secret
         self.device_token = device_token
         self.pickle_name = pickle_name
+        self.account_number = account_number
         self._authenticated = False
         self._login()
 
@@ -73,7 +75,10 @@ class RobinhoodTrader:
             self._login()
             return
         try:
-            rh.profiles.load_account_profile()
+            kwargs = {}
+            if self.account_number:
+                kwargs["account_number"] = self.account_number
+            rh.profiles.load_account_profile(**kwargs)
         except Exception:
             log.warning("Robinhood session expired, re-authenticating...")
             self._authenticated = False

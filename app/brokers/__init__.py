@@ -22,12 +22,15 @@ def get_broker(name: str) -> BrokerClient:
         )
     elif name == "robinhood":
         from app.brokers.robinhood_client import RobinhoodTrader
+        from app.config import Config
+        email, password = Config.rh_credentials()
         client = RobinhoodTrader(
-            email=config["RH_USER"],
-            password=config["RH_PASS"],
+            email=email,
+            password=password,
             totp_secret=config.get("RH_TOTP_SECRET", ""),
             device_token=config.get("RH_DEVICE_TOKEN", ""),
             pickle_name=config.get("RH_PICKLE_NAME", "taipei_session"),
+            account_number=config.get("RH_AUTOMATED_ACCOUNT_NUMBER", ""),
         )
     else:
         raise ValueError(f"Unknown broker: {name}")
