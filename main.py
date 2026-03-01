@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-"""Allocation Engine 2.0 — Alpaca-backed trade execution.
+"""Allocation Engine 2.0 — CLI entry point for local development.
 
-Reads desired orders from the allocation-runtime-service, reconciles
-against live Alpaca state, and submits the delta.
+For production, use: gunicorn app.wsgi:application
 """
 
 import argparse
@@ -10,8 +9,11 @@ import logging
 import sys
 import time
 
-from config import POLL_INTERVAL_SECONDS, DRY_RUN
-from engine import AllocationEngine
+from app import create_app
+from app.config import Config
+from app.engine import AllocationEngine
+from app.brokers import get_broker
+from app.runtime_client import RuntimeClient
 
 logging.basicConfig(
     level=logging.INFO,
@@ -35,25 +37,26 @@ def run_loop(engine: AllocationEngine, interval: int):
         time.sleep(interval)
 
 
-def status(engine: AllocationEngine):
-    """Print current Alpaca account + runtime service state."""
+def status(engine: AllocationEngine, broker_name: str):
+    """Print broker account + runtime service state."""
     acct = engine.trader.account()
     positions = engine.trader.positions()
-    alpaca_orders = engine.trader.open_orders()
+    broker_orders = engine.trader.open_orders()
     runtime_orders = engine.runtime.orders()
 
-    print("\n=== Alpaca Account ===")
+    print(f"\n=== {broker_name.title()} Account ===")
     for k, v in acct.items():
         print(f"  {k}: {v}")
 
-    print(f"\n=== Alpaca Positions ({len(positions)}) ===")
+    print(f"\n=== {broker_name.title()} Positions ({len(positions)}) ===")
     for p in positions:
         print(f"  {p['symbol']}: {p['qty']} shares, MV=${p['market_value']:.2f}, "
               f"PnL=${p['unrealized_pl']:.2f} ({p['unrealized_pl_pct']:.2%})")
 
-    print(f"\n=== Alpaca Open Orders ({len(alpaca_orders)}) ===")
-    for o in alpaca_orders:
-        print(f"  {o['id'][:8]}  {o['side']} {o['qty']} {o['symbol']} "
+    print(f"\n=== {broker_name.title()} Open Orders ({len(broker_orders)}) ===")
+    for o in broker_orders:
+        oid = o['id'][:8] if o.get('id') else '?'
+        print(f"  {oid}  {o['side']} {o['qty']} {o['symbol']} "
               f"{o['type']} @ {o['limit_price'] or 'MKT'}")
 
     rt_stock = runtime_orders.get("stock_orders", [])
@@ -63,26 +66,48 @@ def status(engine: AllocationEngine):
               f"{o.get('order_type', 'market')} @ {o.get('limit_price', 'MKT')}")
 
 
+def serve():
+    """Run the Flask development server (use gunicorn for production)."""
+    import os
+    app = create_app()
+    port = int(os.getenv("PORT", "10000"))
+    app.run(host="0.0.0.0", port=port, debug=Config.DEBUG)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Allocation Engine 2.0")
+    parser.add_argument("--broker", default=Config.ENGINE_BROKER,
+                        choices=["alpaca", "robinhood"],
+                        help="Broker to use (default: ENGINE_BROKER env var)")
     sub = parser.add_subparsers(dest="command")
 
     sub.add_parser("run", help="Run continuous reconciliation loop")
     sub.add_parser("once", help="Run a single reconciliation tick")
-    sub.add_parser("status", help="Print Alpaca + runtime service status")
+    sub.add_parser("status", help="Print broker + runtime service status")
+    sub.add_parser("serve", help="Run Flask dev server (use gunicorn for prod)")
 
     args = parser.parse_args()
-    engine = AllocationEngine(dry_run=DRY_RUN)
 
-    if args.command == "run":
-        run_loop(engine, POLL_INTERVAL_SECONDS)
-    elif args.command == "once":
-        run_once(engine)
-    elif args.command == "status":
-        status(engine)
-    else:
-        parser.print_help()
-        sys.exit(1)
+    if args.command == "serve":
+        serve()
+        return
+
+    # For CLI commands, create app context to initialize brokers
+    app = create_app()
+    with app.app_context():
+        broker = get_broker(args.broker)
+        runtime = RuntimeClient(Config.RUNTIME_SERVICE_URL)
+        engine = AllocationEngine(trader=broker, runtime=runtime, dry_run=Config.DRY_RUN)
+
+        if args.command == "run":
+            run_loop(engine, Config.POLL_INTERVAL_SECONDS)
+        elif args.command == "once":
+            run_once(engine)
+        elif args.command == "status":
+            status(engine, args.broker)
+        else:
+            parser.print_help()
+            sys.exit(1)
 
 
 if __name__ == "__main__":

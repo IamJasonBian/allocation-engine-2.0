@@ -1,0 +1,38 @@
+services:
+  - type: web
+    name: allocation-engine
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app.wsgi:application
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12"
+      - key: ENABLED_BROKERS
+        sync: false
+      - key: DEFAULT_BROKER
+        sync: false
+      - key: RH_USER
+        sync: false
+      - key: RH_PASS
+        sync: false
+      - key: RH_TOTP_SECRET
+        sync: false
+      - key: RH_DEVICE_TOKEN
+        sync: false
+      - key: ALPACA_API_KEY
+        sync: false
+      - key: ALPACA_SECRET_KEY
+        sync: false
+      - key: ALPACA_PAPER
+        sync: false
+      - key: RUNTIME_SERVICE_URL
+        sync: false
+      - key: DRY_RUN
+        value: "true"
+      - key: ENGINE_ENABLED
+        value: "true"
+      - key: ENGINE_BROKER
+        value: "alpaca"
+      - key: POLL_INTERVAL_SECONDS
+        value: "60"
+    healthCheckPath: /api/health
