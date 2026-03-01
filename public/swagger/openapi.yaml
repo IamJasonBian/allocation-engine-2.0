@@ -175,6 +175,10 @@ components:
     StockOrder:
       type: object
       properties:
+        order_id:
+          type: string
+          description: Robinhood order UUID
+          example: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
         symbol:
           type: string
           example: BTC
@@ -194,6 +198,20 @@ components:
         stop_price:
           type: number
           nullable: true
+        source:
+          type: string
+          enum: [engine, external]
+          description: Whether this order was placed by the trading engine or externally (e.g. via Robinhood UI)
+          example: engine
+        machine_index:
+          type: integer
+          nullable: true
+          description: Sequential index for engine-generated orders (null for external orders)
+          example: 1
+        created_at:
+          type: string
+          description: Order creation timestamp
+          example: "2025-02-23 14:30:00"
 
     OptionPosition:
       type: object
@@ -360,6 +378,9 @@ components:
             $ref: "#/components/schemas/StockOrder"
         stock_order_count:
           type: integer
+        machine_order_count:
+          type: integer
+          description: Number of orders placed by the trading engine
         options:
           type: array
           items:
