@@ -24,4 +24,4 @@ jobs:
           NETLIFY_API_TOKEN: ${{ secrets.NETLIFY_API_TOKEN }}
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
           RETENTION_DAYS: '7'
-        run: python tunis/scripts/archive_old_blobs.py
+        run: python scripts/archive_old_blobs.py
