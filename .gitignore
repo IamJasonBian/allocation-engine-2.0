@@ -86,3 +86,8 @@ docs/charts/
 # Node.js (Netlify Functions)
 node_modules/
 .netlify/
+
+# Scala/Gradle (market-data-service)
+market-data-service/.gradle/
+market-data-service/build/
+*.class

@@ -1,8 +1,7 @@
 """
 Fill Auditor — cross-references Robinhood fills against independent NBBO data.
 
-Uses Alpaca market data API for NBBO quotes when available, falls back to
-TwelveData last-price for rough cross-referencing in degraded mode.
+Fallback chain: Redis (Scala market-data-service) → Alpaca API → TwelveData last-price.
 """
 
 import json
@@ -37,13 +36,44 @@ class FillAuditor:
                 print(f"  [fill_auditor] Alpaca client init failed: {e}")
                 self._alpaca_client = None
 
+    def _get_nbbo_from_redis(self, symbol: str) -> dict:
+        """Read the latest quote from Redis (populated by the Scala market-data-service)."""
+        try:
+            from trading_system.state.redis_store import _get_client
+            client = _get_client()
+            if not client:
+                return None
+            raw = client.hget("market-quotes", symbol)
+            client.close()
+            if raw:
+                data = json.loads(raw)
+                return {
+                    'bid': data['bid'],
+                    'ask': data['ask'],
+                    'mid': data['mid'],
+                    'spread': data['spread'],
+                    'spread_bps': data['spread_bps'],
+                    'bid_exchange': data.get('bid_exchange'),
+                    'ask_exchange': data.get('ask_exchange'),
+                    'timestamp': data.get('timestamp', datetime.utcnow().isoformat()),
+                    'source': 'redis_alpaca',
+                }
+        except Exception as e:
+            print(f"  [fill_auditor] Redis quote read failed for {symbol}: {e}")
+        return None
+
     def get_nbbo_now(self, symbol: str) -> dict:
-        """Get current NBBO quote from Alpaca, falling back to TwelveData.
+        """Get current NBBO quote. Fallback chain: Redis → Alpaca API → TwelveData.
 
         Returns:
             Dict with bid, ask, mid, spread, spread_bps, etc. or None on failure.
         """
-        # Try Alpaca first
+        # Try Redis first (fastest — no API call, populated by Scala service)
+        redis_quote = self._get_nbbo_from_redis(symbol)
+        if redis_quote:
+            return redis_quote
+
+        # Try Alpaca API directly
         if self._alpaca_client:
             try:
                 request = StockLatestQuoteRequest(symbol_or_symbols=symbol)
