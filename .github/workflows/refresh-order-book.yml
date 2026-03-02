@@ -24,6 +24,7 @@ jobs:
         run: pip install requests robin-stocks pyotp
 
       - name: Refresh order book to Netlify Blobs
+        id: refresh
         env:
           RH_USER: ${{ secrets.RH_USER }}
           RH_PASS: ${{ secrets.RH_PASS }}
@@ -32,3 +33,12 @@ jobs:
           NETLIFY_API_TOKEN: ${{ secrets.NETLIFY_API_TOKEN }}
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
         run: python scripts/refresh_order_book.py
+
+      - name: Notify Slack on failure
+        if: failure()
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          curl -X POST "$SLACK_WEBHOOK_URL" \
+            -H 'Content-Type: application/json' \
+            -d '{"text":"<!channel> :rotating_light: allocation-engine-2.0 order book refresh FAILED — Robinhood prod access issue.\nWorkflow: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"}'
