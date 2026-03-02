@@ -2,10 +2,7 @@
 
 from typing import Protocol, runtime_checkable
 
-from app.models import (
-    AccountSummary, FilledOrder, OpenOrder, OptionOrder,
-    OptionPositionData, Order, OrderResult, Position,
-)
+from app.models import AccountSummary, OpenOrder, Order, OrderResult, Position
 
 
 @runtime_checkable
@@ -22,18 +19,6 @@ class BrokerClient(Protocol):
 
     def open_orders(self) -> list[OpenOrder]:
         """Return list of open orders on the broker."""
-        ...
-
-    def recent_orders(self, limit: int = 50) -> list[FilledOrder]:
-        """Return recent filled/cancelled stock orders."""
-        ...
-
-    def option_positions(self) -> list[OptionPositionData]:
-        """Return current option positions with Greeks."""
-        ...
-
-    def recent_option_orders(self, limit: int = 20) -> list[OptionOrder]:
-        """Return recent option orders."""
         ...
 
     def submit_order(self, order: Order) -> OrderResult | None:

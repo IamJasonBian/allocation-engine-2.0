@@ -89,24 +89,7 @@ def start_engine_thread(app):
                     now_mono = time.monotonic()
                     if is_live and (now_mono - last_blob_sync) >= blob_interval:
                         try:
-                            # Fetch extended data for blob snapshot
-                            recent = broker.recent_orders(limit=50)
-                            option_pos = broker.option_positions()
-                            option_orders = broker.recent_option_orders(limit=20)
-
-                            log.info("[blob] Preparing snapshot: %d positions, %d open orders, "
-                                     "%d recent orders, %d option positions, %d option orders",
-                                     len(positions), len(open_orders), len(recent),
-                                     len(option_pos), len(option_orders))
-
-                            sync_to_blob(
-                                positions=positions,
-                                open_orders=open_orders,
-                                account=account,
-                                recent_orders=recent,
-                                option_positions=option_pos,
-                                option_orders=option_orders,
-                            )
+                            sync_to_blob(positions, open_orders, account)
                             last_blob_sync = now_mono
                         except Exception:
                             log.exception("Blob sync error")
