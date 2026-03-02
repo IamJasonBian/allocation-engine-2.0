@@ -7,8 +7,3 @@ venv/
 dist/
 build/
 .pytest_cache/
-
-# Scala/Gradle (market-data-service)
-market-data-service/.gradle/
-market-data-service/build/
-*.class

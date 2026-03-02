@@ -30,7 +30,6 @@ def start_engine_thread(app):
             from app.brokers import get_broker
             from app.engine import AllocationEngine
             from app.runtime_client import RuntimeClient
-            from app.redis_store import sync_to_redis
             from app.blob_store import sync_to_blob
 
             config = app.config
@@ -85,12 +84,6 @@ def start_engine_thread(app):
                                      o.qty, o.limit_price or "MKT", o.status)
                     else:
                         log.info("[order] No open orders")
-
-                    # Sync to Redis
-                    try:
-                        sync_to_redis(positions, open_orders, account, live=is_live)
-                    except Exception:
-                        log.exception("Redis sync error")
 
                     # Sync to Netlify Blobs every 15 minutes (live mode only)
                     now_mono = time.monotonic()
