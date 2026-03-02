@@ -1,8 +1,6 @@
 """Robinhood trading client — wraps robin-stocks with server-side TOTP auth."""
 
 import logging
-import os
-import time
 import robin_stocks.robinhood as rh
 import pyotp
 
@@ -10,84 +8,8 @@ from app.slack import notify as slack_notify
 
 log = logging.getLogger(__name__)
 
-# Throttle Slack alerts — only send once per 10 minutes for repeated failures
-_SLACK_THROTTLE_SECS = 600
-_last_slack_alert = 0.0
-
 # Cache instrument URL -> symbol to avoid repeated API calls
 _instrument_cache: dict[str, str] = {}
-
-# Redis key for persisting the Robinhood session pickle across deploys
-_REDIS_SESSION_KEY = "rh:session:pickle"
-
-
-def _get_pickle_path(pickle_name: str) -> str:
-    """Return the file path robin-stocks uses for its session pickle."""
-    home = os.path.expanduser("~")
-    return os.path.join(home, ".tokens", f"robinhood{pickle_name}.pickle")
-
-
-def _get_redis_bytes_client():
-    """Get a Redis client with raw bytes (no decode) for binary pickle data."""
-    try:
-        import redis as _redis
-    except ImportError:
-        return None
-    host = os.getenv("REDIS_HOST")
-    password = os.getenv("REDIS_PASSWORD")
-    if not host:
-        return None
-    port = 6379
-    if ":" in host:
-        host, port_str = host.rsplit(":", 1)
-        try:
-            port = int(port_str)
-        except ValueError:
-            pass
-    try:
-        return _redis.Redis(host=host, port=port, password=password,
-                            decode_responses=False)
-    except Exception:
-        return None
-
-
-def _restore_session_from_redis(pickle_name: str):
-    """Restore robin-stocks pickle file from Redis if available."""
-    try:
-        client = _get_redis_bytes_client()
-        if not client:
-            return
-        data = client.get(_REDIS_SESSION_KEY)
-        client.close()
-        if not data:
-            log.info("[session] No stored session in Redis")
-            return
-        path = _get_pickle_path(pickle_name)
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "wb") as f:
-            f.write(data)
-        log.info("[session] Restored session pickle from Redis -> %s", path)
-    except Exception:
-        log.exception("[session] Failed to restore session from Redis")
-
-
-def _save_session_to_redis(pickle_name: str):
-    """Save robin-stocks pickle file to Redis for persistence across deploys."""
-    try:
-        path = _get_pickle_path(pickle_name)
-        if not os.path.isfile(path):
-            return
-        with open(path, "rb") as f:
-            data = f.read()
-        client = _get_redis_bytes_client()
-        if not client:
-            return
-        # Store with 24h TTL (matches robin-stocks token expiry)
-        client.set(_REDIS_SESSION_KEY, data, ex=86400)
-        client.close()
-        log.info("[session] Saved session pickle to Redis (%d bytes)", len(data))
-    except Exception:
-        log.exception("[session] Failed to save session to Redis")
 
 
 def _symbol_from_instrument(instrument_url: str) -> str:
@@ -118,8 +40,6 @@ class RobinhoodTrader:
         self.device_token = device_token
         self.pickle_name = pickle_name
         self._authenticated = False
-        self._last_auth_check = 0.0
-        _restore_session_from_redis(self.pickle_name)
         try:
             self._login()
         except Exception:
@@ -138,26 +58,14 @@ class RobinhoodTrader:
         }
         if mfa_code:
             kwargs["mfa_code"] = mfa_code
-
-        # Patch generate_device_token to return a fixed token so Robinhood
-        # sees the same device across logins. Without this, robin-stocks
-        # generates a random UUID each call → new device → needs approval.
-        _orig_gen = None
         if self.device_token:
-            import robin_stocks.robinhood.authentication as _rh_auth
-            _orig_gen = _rh_auth.generate_device_token
-            _rh_auth.generate_device_token = lambda: self.device_token
-            log.info("Using fixed device token for login")
+            kwargs["device_token"] = self.device_token
 
-        global _last_slack_alert
         try:
             result = rh.login(self.email, self.password, **kwargs)
             if result:
                 self._authenticated = True
-                self._last_auth_check = time.monotonic()
                 log.info("Robinhood login successful for %s", self.email)
-                _save_session_to_redis(self.pickle_name)
-                _last_slack_alert = 0.0  # reset throttle on success
                 slack_notify(
                     f"<!channel> :white_check_mark: FlipActivate: allocation-engine-2.0 — "
                     f"Robinhood login successful for {self.email}"
@@ -166,14 +74,11 @@ class RobinhoodTrader:
                 self._authenticated = False
                 log.error("Robinhood login returned empty result — "
                           "check Robinhood app for device approval")
-                now = time.monotonic()
-                if (now - _last_slack_alert) >= _SLACK_THROTTLE_SECS:
-                    _last_slack_alert = now
-                    slack_notify(
-                        f"<!channel> :warning: FlipActivate: allocation-engine-2.0 — "
-                        f"Robinhood login returned empty result for {self.email} "
-                        f"— check Robinhood app for device approval"
-                    )
+                slack_notify(
+                    f"<!channel> :warning: FlipActivate: allocation-engine-2.0 — "
+                    f"Robinhood login returned empty result for {self.email} "
+                    f"— check Robinhood app for device approval"
+                )
                 raise RuntimeError(
                     "Robinhood login empty — device approval may be required"
                 )
@@ -182,47 +87,26 @@ class RobinhoodTrader:
         except Exception as e:
             self._authenticated = False
             log.error("Robinhood login failed: %s", e)
-            now = time.monotonic()
-            if (now - _last_slack_alert) >= _SLACK_THROTTLE_SECS:
-                _last_slack_alert = now
-                slack_notify(
-                    f"<!channel> :rotating_light: FlipActivate: allocation-engine-2.0 — "
-                    f"Robinhood login FAILED for {self.email}: {e}"
-                )
+            slack_notify(
+                f"<!channel> :rotating_light: FlipActivate: allocation-engine-2.0 — "
+                f"Robinhood login FAILED for {self.email}: {e}"
+            )
             raise
-        finally:
-            if _orig_gen is not None:
-                import robin_stocks.robinhood.authentication as _rh_auth
-                _rh_auth.generate_device_token = _orig_gen
 
     def _ensure_auth(self):
-        """Re-authenticate if session has expired.
-
-        Skips the health-check probe if the last successful check was
-        within 5 minutes — avoids unnecessary API calls to Robinhood.
-        """
+        """Re-authenticate if session has expired."""
         if not self._authenticated:
             self._login()
             return
-        # Only probe session health every 5 minutes
-        now = time.monotonic()
-        if (now - self._last_auth_check) < 300:
-            return
         try:
             rh.profiles.load_account_profile()
-            self._last_auth_check = now
         except Exception:
-            global _last_slack_alert
             log.warning("Robinhood session expired, re-authenticating...")
-            alert_now = time.monotonic()
-            if (alert_now - _last_slack_alert) >= _SLACK_THROTTLE_SECS:
-                _last_slack_alert = alert_now
-                slack_notify(
-                    "<!channel> :warning: FlipActivate: allocation-engine-2.0 — "
-                    "Robinhood session expired, re-authenticating..."
-                )
+            slack_notify(
+                "<!channel> :warning: FlipActivate: allocation-engine-2.0 — "
+                "Robinhood session expired, re-authenticating..."
+            )
             self._authenticated = False
-            self._last_auth_check = 0.0
             self._login()
 
     # -- account / positions ------------------------------------------------
