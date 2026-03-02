@@ -67,7 +67,7 @@ class RobinhoodTrader:
                 self._authenticated = True
                 log.info("Robinhood login successful for %s", self.email)
                 slack_notify(
-                    f"<!channel> :white_check_mark: allocation-engine-2.0 "
+                    f"<!channel> :white_check_mark: FlipActivate: allocation-engine-2.0 — "
                     f"Robinhood login successful for {self.email}"
                 )
             else:
@@ -75,7 +75,7 @@ class RobinhoodTrader:
                 log.error("Robinhood login returned empty result — "
                           "check Robinhood app for device approval")
                 slack_notify(
-                    f"<!channel> :warning: allocation-engine-2.0 "
+                    f"<!channel> :warning: FlipActivate: allocation-engine-2.0 — "
                     f"Robinhood login returned empty result for {self.email} "
                     f"— check Robinhood app for device approval"
                 )
@@ -88,7 +88,7 @@ class RobinhoodTrader:
             self._authenticated = False
             log.error("Robinhood login failed: %s", e)
             slack_notify(
-                f"<!channel> :rotating_light: allocation-engine-2.0 "
+                f"<!channel> :rotating_light: FlipActivate: allocation-engine-2.0 — "
                 f"Robinhood login FAILED for {self.email}: {e}"
             )
             raise
@@ -103,8 +103,8 @@ class RobinhoodTrader:
         except Exception:
             log.warning("Robinhood session expired, re-authenticating...")
             slack_notify(
-                "<!channel> :warning: allocation-engine-2.0 "
-                "Robinhood session expired — re-authenticating..."
+                "<!channel> :warning: FlipActivate: allocation-engine-2.0 — "
+                "Robinhood session expired, re-authenticating..."
             )
             self._authenticated = False
             self._login()
