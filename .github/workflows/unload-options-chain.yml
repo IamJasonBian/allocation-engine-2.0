@@ -1,0 +1,31 @@
+name: Unload Options Chain
+
+on:
+  schedule:
+    # Every 15 min during US market hours (weekdays 14:30-21:00 UTC = 9:30-16:00 ET)
+    - cron: '*/15 14-21 * * 1-5'
+    # Hourly outside market hours
+    - cron: '0 0-14,22-23 * * 1-5'
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  unload:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install requests redis
+
+      - name: Unload options chain to blobs
+        env:
+          REDIS_HOST: ${{ secrets.REDIS_HOST }}
+          REDIS_PASSWORD: ${{ secrets.REDIS_PASSWORD }}
+          NETLIFY_API_TOKEN: ${{ secrets.NETLIFY_API_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+          OPTIONS_SYMBOLS: "IWN,CRWD"
+        run: python scripts/unload_options_chain.py
