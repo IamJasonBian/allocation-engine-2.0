@@ -1,9 +1,12 @@
-"""Netlify Blobs sync — uploads order book snapshots to the 'order-book' store."""
+"""Netlify Blobs sync — uploads order book snapshots to the 'order-book' store.
+
+Writes snapshots in the schema expected by the allocation-manager frontend
+(OrderBookSnapshot type in robinhoodService.ts).
+"""
 
 import json
 import logging
 import os
-from dataclasses import asdict
 from datetime import datetime, timezone
 
 import requests
@@ -28,13 +31,57 @@ def sync_to_blob(positions, open_orders, account):
         return
 
     now = datetime.now(timezone.utc)
+    ts = now.isoformat()
+
+    # Map positions to the frontend SnapshotPosition schema
+    snap_positions = [
+        {
+            "symbol": p.symbol,
+            "quantity": p.qty,
+            "avg_buy_price": p.avg_entry,
+            "current_price": round(p.market_value / p.qty, 4) if p.qty else 0,
+            "equity": p.market_value,
+            "profit_loss": p.unrealized_pl,
+            "profit_loss_pct": p.unrealized_pl_pct,
+        }
+        for p in positions
+    ]
+
+    # Map orders to the frontend SnapshotOrder schema
+    snap_orders = [
+        {
+            "order_id": o.id,
+            "symbol": o.symbol,
+            "side": o.side.upper(),
+            "order_type": o.order_type,
+            "trigger": "immediate",
+            "state": o.status,
+            "quantity": o.qty,
+            "limit_price": o.limit_price or 0,
+            "stop_price": o.stop_price,
+            "created_at": ts,
+            "updated_at": ts,
+        }
+        for o in open_orders
+    ]
+
     snapshot = {
-        "timestamp": now.isoformat(),
-        "account": asdict(account),
-        "positions": [asdict(p) for p in positions],
-        "open_orders": [asdict(o) for o in open_orders],
-        "num_positions": len(positions),
-        "num_open_orders": len(open_orders),
+        "timestamp": ts,
+        "portfolio": {
+            "cash": {
+                "cash": account.cash,
+                "buying_power": account.buying_power,
+                "cash_available_for_withdrawal": account.cash,
+                "tradeable_cash": account.cash,
+            },
+            "equity": account.equity,
+            "market_value": account.portfolio_value,
+            "positions": snap_positions,
+            "open_orders": snap_orders,
+        },
+        "order_book": snap_orders,
+        "recent_orders": [],
+        "recent_option_orders": [],
     }
 
     headers = {
