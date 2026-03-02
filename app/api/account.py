@@ -1,3 +1,5 @@
+from dataclasses import asdict
+
 from flask import Blueprint, jsonify, current_app
 from app.brokers import get_broker
 
@@ -11,6 +13,6 @@ def account(broker_name=None):
     try:
         broker = get_broker(broker_name)
         data = broker.account()
-        return jsonify({"broker": broker_name, **data})
+        return jsonify({"broker": broker_name, **asdict(data)})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
