@@ -96,12 +96,10 @@ class AllocationEngine:
         return to_submit, stale_ids
 
     def _execute(self, orders: list[dict], cancel_ids: list[str]):
-        """Cancel stale orders and submit new ones."""
-        for oid in cancel_ids:
-            if self.dry_run:
-                log.info("[DRY RUN] Would cancel order %s", oid)
-            else:
-                self.trader.cancel_order(oid)
+        """Log stale orders and submit new ones. Cancellation is disabled."""
+        if cancel_ids:
+            log.info("Found %d stale order(s) — cancellation disabled, skipping: %s",
+                     len(cancel_ids), cancel_ids)
 
         results = []
         for order in orders:
