@@ -138,8 +138,16 @@ class RobinhoodTrader:
         }
         if mfa_code:
             kwargs["mfa_code"] = mfa_code
+
+        # Patch generate_device_token to return a fixed token so Robinhood
+        # sees the same device across logins. Without this, robin-stocks
+        # generates a random UUID each call → new device → needs approval.
+        _orig_gen = None
         if self.device_token:
-            kwargs["device_token"] = self.device_token
+            import robin_stocks.robinhood.authentication as _rh_auth
+            _orig_gen = _rh_auth.generate_device_token
+            _rh_auth.generate_device_token = lambda: self.device_token
+            log.info("Using fixed device token for login")
 
         global _last_slack_alert
         try:
@@ -182,6 +190,10 @@ class RobinhoodTrader:
                     f"Robinhood login FAILED for {self.email}: {e}"
                 )
             raise
+        finally:
+            if _orig_gen is not None:
+                import robin_stocks.robinhood.authentication as _rh_auth
+                _rh_auth.generate_device_token = _orig_gen
 
     def _ensure_auth(self):
         """Re-authenticate if session has expired.
