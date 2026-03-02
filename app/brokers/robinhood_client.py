@@ -4,6 +4,8 @@ import logging
 import robin_stocks.robinhood as rh
 import pyotp
 
+from app.slack import notify as slack_notify
+
 log = logging.getLogger(__name__)
 
 # Cache instrument URL -> symbol to avoid repeated API calls
@@ -61,10 +63,23 @@ class RobinhoodTrader:
             if result:
                 self._authenticated = True
                 log.info("Robinhood login successful for %s", self.email)
+                slack_notify(
+                    f"<!channel> :white_check_mark: allocation-engine-2.0 "
+                    f"Robinhood login successful for {self.email}"
+                )
             else:
                 log.error("Robinhood login returned empty result")
+                slack_notify(
+                    f"<!channel> :warning: allocation-engine-2.0 "
+                    f"Robinhood login returned empty result for {self.email} "
+                    f"— may need device approval in Robinhood app"
+                )
         except Exception as e:
             log.error("Robinhood login failed: %s", e)
+            slack_notify(
+                f"<!channel> :rotating_light: allocation-engine-2.0 "
+                f"Robinhood login FAILED for {self.email}: {e}"
+            )
             raise
 
     def _ensure_auth(self):
@@ -76,6 +91,10 @@ class RobinhoodTrader:
             rh.profiles.load_account_profile()
         except Exception:
             log.warning("Robinhood session expired, re-authenticating...")
+            slack_notify(
+                "<!channel> :warning: allocation-engine-2.0 "
+                "Robinhood session expired — re-authenticating..."
+            )
             self._authenticated = False
             self._login()
 
