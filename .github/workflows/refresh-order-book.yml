@@ -1,0 +1,44 @@
+name: Refresh Order Book
+
+on:
+  schedule:
+    # Every 5 minutes during US market hours (weekdays 14:30-21:00 UTC = 9:30-16:00 ET)
+    - cron: '*/5 14-20 * * 1-5'
+    # Every 15 minutes outside market hours (weekdays)
+    - cron: '*/15 0-13,21-23 * * 1-5'
+    # Every 15 minutes on weekends
+    - cron: '*/15 * * * 0,6'
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install requests robin-stocks pyotp
+
+      - name: Refresh order book to Netlify Blobs
+        id: refresh
+        env:
+          RH_USER: ${{ secrets.RH_USER }}
+          RH_PASS: ${{ secrets.RH_PASS }}
+          RH_TOTP_SECRET: ${{ secrets.RH_TOTP_SECRET }}
+          RH_DEVICE_TOKEN: ${{ secrets.RH_DEVICE_TOKEN }}
+          NETLIFY_API_TOKEN: ${{ secrets.NETLIFY_API_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+        run: python scripts/refresh_order_book.py
+
+      - name: Notify Slack on failure
+        if: failure()
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          curl -X POST "$SLACK_WEBHOOK_URL" \
+            -H 'Content-Type: application/json' \
+            -d '{"text":"<!channel> :rotating_light: allocation-engine-2.0 order book refresh FAILED — Robinhood prod access issue.\nWorkflow: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"}'
