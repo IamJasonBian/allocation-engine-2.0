@@ -1,12 +1,17 @@
 """Robinhood trading client — wraps robin-stocks with server-side TOTP auth."""
 
 import logging
+import time
 import robin_stocks.robinhood as rh
 import pyotp
 
 from app.slack import notify as slack_notify
 
 log = logging.getLogger(__name__)
+
+# Throttle Slack alerts — only send once per 10 minutes for repeated failures
+_SLACK_THROTTLE_SECS = 600
+_last_slack_alert = 0.0
 
 # Cache instrument URL -> symbol to avoid repeated API calls
 _instrument_cache: dict[str, str] = {}
@@ -61,11 +66,13 @@ class RobinhoodTrader:
         if self.device_token:
             kwargs["device_token"] = self.device_token
 
+        global _last_slack_alert
         try:
             result = rh.login(self.email, self.password, **kwargs)
             if result:
                 self._authenticated = True
                 log.info("Robinhood login successful for %s", self.email)
+                _last_slack_alert = 0.0  # reset throttle on success
                 slack_notify(
                     f"<!channel> :white_check_mark: FlipActivate: allocation-engine-2.0 — "
                     f"Robinhood login successful for {self.email}"
@@ -74,11 +81,14 @@ class RobinhoodTrader:
                 self._authenticated = False
                 log.error("Robinhood login returned empty result — "
                           "check Robinhood app for device approval")
-                slack_notify(
-                    f"<!channel> :warning: FlipActivate: allocation-engine-2.0 — "
-                    f"Robinhood login returned empty result for {self.email} "
-                    f"— check Robinhood app for device approval"
-                )
+                now = time.monotonic()
+                if (now - _last_slack_alert) >= _SLACK_THROTTLE_SECS:
+                    _last_slack_alert = now
+                    slack_notify(
+                        f"<!channel> :warning: FlipActivate: allocation-engine-2.0 — "
+                        f"Robinhood login returned empty result for {self.email} "
+                        f"— check Robinhood app for device approval"
+                    )
                 raise RuntimeError(
                     "Robinhood login empty — device approval may be required"
                 )
@@ -87,10 +97,13 @@ class RobinhoodTrader:
         except Exception as e:
             self._authenticated = False
             log.error("Robinhood login failed: %s", e)
-            slack_notify(
-                f"<!channel> :rotating_light: FlipActivate: allocation-engine-2.0 — "
-                f"Robinhood login FAILED for {self.email}: {e}"
-            )
+            now = time.monotonic()
+            if (now - _last_slack_alert) >= _SLACK_THROTTLE_SECS:
+                _last_slack_alert = now
+                slack_notify(
+                    f"<!channel> :rotating_light: FlipActivate: allocation-engine-2.0 — "
+                    f"Robinhood login FAILED for {self.email}: {e}"
+                )
             raise
 
     def _ensure_auth(self):
@@ -101,11 +114,15 @@ class RobinhoodTrader:
         try:
             rh.profiles.load_account_profile()
         except Exception:
+            global _last_slack_alert
             log.warning("Robinhood session expired, re-authenticating...")
-            slack_notify(
-                "<!channel> :warning: FlipActivate: allocation-engine-2.0 — "
-                "Robinhood session expired, re-authenticating..."
-            )
+            now = time.monotonic()
+            if (now - _last_slack_alert) >= _SLACK_THROTTLE_SECS:
+                _last_slack_alert = now
+                slack_notify(
+                    "<!channel> :warning: FlipActivate: allocation-engine-2.0 — "
+                    "Robinhood session expired, re-authenticating..."
+                )
             self._authenticated = False
             self._login()
 
