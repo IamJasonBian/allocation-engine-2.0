@@ -58,8 +58,6 @@ class RobinhoodTrader:
         }
         if mfa_code:
             kwargs["mfa_code"] = mfa_code
-        if self.device_token:
-            kwargs["device_token"] = self.device_token
 
         try:
             result = rh.login(self.email, self.password, **kwargs)
