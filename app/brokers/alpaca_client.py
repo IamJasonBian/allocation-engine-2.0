@@ -3,15 +3,19 @@
 import logging
 from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import (
+    GetOrdersRequest,
     LimitOrderRequest,
     MarketOrderRequest,
     StopLimitOrderRequest,
     StopOrderRequest,
 )
-from alpaca.trading.enums import OrderSide, TimeInForce
+from alpaca.trading.enums import OrderSide, QueryOrderStatus, TimeInForce
 from alpaca.common.exceptions import APIError
 
-from app.models import AccountSummary, OpenOrder, Order, OrderResult, Position
+from app.models import (
+    AccountSummary, FilledOrder, OpenOrder, OptionOrder,
+    OptionPositionData, Order, OrderResult, Position,
+)
 
 log = logging.getLogger(__name__)
 
@@ -68,6 +72,43 @@ class AlpacaTrader:
             )
             for o in self.client.get_orders()
         ]
+
+    def recent_orders(self, limit: int = 50) -> list[FilledOrder]:
+        """Return recent filled/cancelled stock orders."""
+        try:
+            req = GetOrdersRequest(
+                status=QueryOrderStatus.CLOSED,
+                limit=limit,
+            )
+            raw = self.client.get_orders(filter=req)
+            return [
+                FilledOrder(
+                    id=str(o.id),
+                    symbol=o.symbol,
+                    side=o.side.value,
+                    qty=float(o.qty) if o.qty else 0.0,
+                    order_type=o.type.value,
+                    limit_price=float(o.limit_price) if o.limit_price else None,
+                    stop_price=float(o.stop_price) if o.stop_price else None,
+                    average_price=float(o.filled_avg_price) if o.filled_avg_price else None,
+                    filled_qty=float(o.filled_qty) if o.filled_qty else 0.0,
+                    status=o.status.value,
+                    created_at=o.created_at.isoformat() if o.created_at else "",
+                    updated_at=o.updated_at.isoformat() if o.updated_at else "",
+                )
+                for o in raw
+            ]
+        except Exception:
+            log.exception("Failed to fetch recent orders from Alpaca")
+            return []
+
+    def option_positions(self) -> list[OptionPositionData]:
+        """Alpaca does not support options — return empty list."""
+        return []
+
+    def recent_option_orders(self, limit: int = 20) -> list[OptionOrder]:
+        """Alpaca does not support options — return empty list."""
+        return []
 
     # -- order submission ---------------------------------------------------
 
