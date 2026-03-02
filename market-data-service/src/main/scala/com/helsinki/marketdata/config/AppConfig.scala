@@ -9,7 +9,9 @@ case class AppConfig(
   pollIntervalMs: Long,
   symbols: Seq[String],
   cryptoSymbols: Seq[String],
-  historyMaxSize: Int
+  historyMaxSize: Int,
+  optionsSymbols: Seq[String],
+  optionsPollIntervalMs: Long
 )
 
 object AppConfig:
@@ -32,5 +34,7 @@ object AppConfig:
       pollIntervalMs = sys.env.getOrElse("POLL_INTERVAL_MS", "3000").toLong,
       symbols = sys.env.getOrElse("SYMBOLS", "BTC").split(",").map(_.trim).toSeq,
       cryptoSymbols = sys.env.getOrElse("CRYPTO_SYMBOLS", "BTC/USD").split(",").map(_.trim).toSeq,
-      historyMaxSize = sys.env.getOrElse("HISTORY_MAX_SIZE", "10000").toInt
+      historyMaxSize = sys.env.getOrElse("HISTORY_MAX_SIZE", "10000").toInt,
+      optionsSymbols = sys.env.getOrElse("OPTIONS_SYMBOLS", "IWN,CRWD").split(",").map(_.trim).toSeq,
+      optionsPollIntervalMs = sys.env.getOrElse("OPTIONS_POLL_INTERVAL_MS", "30000").toLong
     )

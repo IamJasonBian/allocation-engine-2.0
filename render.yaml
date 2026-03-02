@@ -61,3 +61,7 @@ services:
         value: BTC/USD
       - key: HISTORY_MAX_SIZE
         value: "10000"
+      - key: OPTIONS_SYMBOLS
+        value: "IWN,CRWD"
+      - key: OPTIONS_POLL_INTERVAL_MS
+        value: "30000"
