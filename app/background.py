@@ -71,6 +71,28 @@ def start_engine_thread(app):
                         open_orders = broker.open_orders()
                         account = broker.account()
                         sync_to_redis(positions, open_orders, account, live=is_live)
+
+                        # Log portfolio summary
+                        equity = account.get("equity", 0)
+                        cash = account.get("cash", 0)
+                        buying_power = account.get("buying_power", 0)
+                        market_val = account.get("portfolio_value", 0)
+                        log.info("[portfolio] Equity: $%,.2f | Cash: $%,.2f | "
+                                 "Buying Power: $%,.2f | Market Value: $%,.2f",
+                                 equity, cash, buying_power, market_val)
+
+                        # Log open orders
+                        if open_orders:
+                            for o in open_orders:
+                                log.info("[order] %s %s — %s qty=%g limit=$%s status=%s",
+                                         o.get("side", "?"), o.get("symbol", "?"),
+                                         o.get("type", "market"),
+                                         o.get("qty", 0),
+                                         o.get("limit_price") or "MKT",
+                                         o.get("status", "?"))
+                        else:
+                            log.info("[order] No open orders")
+
                     except Exception:
                         log.exception("Redis sync error")
 
