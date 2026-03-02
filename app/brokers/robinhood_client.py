@@ -40,7 +40,10 @@ class RobinhoodTrader:
         self.device_token = device_token
         self.pickle_name = pickle_name
         self._authenticated = False
-        self._login()
+        try:
+            self._login()
+        except Exception:
+            log.warning("Initial login failed — engine will retry each tick")
 
     def _login(self):
         """Authenticate with Robinhood using stored session or fresh TOTP login."""
@@ -68,13 +71,21 @@ class RobinhoodTrader:
                     f"Robinhood login successful for {self.email}"
                 )
             else:
-                log.error("Robinhood login returned empty result")
+                self._authenticated = False
+                log.error("Robinhood login returned empty result — "
+                          "check Robinhood app for device approval")
                 slack_notify(
                     f"<!channel> :warning: allocation-engine-2.0 "
                     f"Robinhood login returned empty result for {self.email} "
-                    f"— may need device approval in Robinhood app"
+                    f"— check Robinhood app for device approval"
                 )
+                raise RuntimeError(
+                    "Robinhood login empty — device approval may be required"
+                )
+        except RuntimeError:
+            raise
         except Exception as e:
+            self._authenticated = False
             log.error("Robinhood login failed: %s", e)
             slack_notify(
                 f"<!channel> :rotating_light: allocation-engine-2.0 "
