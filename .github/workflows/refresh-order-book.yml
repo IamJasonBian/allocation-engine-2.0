@@ -1,14 +1,9 @@
-name: Refresh Order Book
+name: Refresh Order Book (Backup)
 
 on:
-  schedule:
-    # Every 5 minutes during US market hours (weekdays 14:30-21:00 UTC = 9:30-16:00 ET)
-    - cron: '*/5 14-20 * * 1-5'
-    # Every 15 minutes outside market hours (weekdays)
-    - cron: '*/15 0-13,21-23 * * 1-5'
-    # Every 15 minutes on weekends
-    - cron: '*/15 * * * 0,6'
-  workflow_dispatch:  # Allow manual trigger
+  # Primary refresh runs on Render via background engine (every 15 min).
+  # This workflow is a manual fallback if Render is down.
+  workflow_dispatch:
 
 jobs:
   refresh:
