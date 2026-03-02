@@ -31,13 +31,11 @@ class RobinhoodTrader:
         email: str,
         password: str,
         totp_secret: str = "",
-        device_token: str = "",
         pickle_name: str = "taipei_session",
     ):
         self.email = email
         self.password = password
         self.totp_secret = totp_secret
-        self.device_token = device_token
         self.pickle_name = pickle_name
         self._authenticated = False
         try:
@@ -52,15 +50,14 @@ class RobinhoodTrader:
             totp = pyotp.TOTP(self.totp_secret)
             mfa_code = totp.now()
 
-        kwargs = {
-            "store_session": True,
-            "pickle_name": self.pickle_name,
-        }
-        if mfa_code:
-            kwargs["mfa_code"] = mfa_code
-
         try:
-            result = rh.login(self.email, self.password, **kwargs)
+            result = rh.login(
+                self.email,
+                self.password,
+                mfa_code=mfa_code,
+                store_session=True,
+                pickle_name=self.pickle_name,
+            )
             if result:
                 self._authenticated = True
                 log.info("Robinhood login successful for %s", self.email)

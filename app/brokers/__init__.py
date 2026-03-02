@@ -26,7 +26,6 @@ def get_broker(name: str) -> BrokerClient:
             email=config["RH_USER"],
             password=config["RH_PASS"],
             totp_secret=config.get("RH_TOTP_SECRET", ""),
-            device_token=config.get("RH_DEVICE_TOKEN", ""),
             pickle_name=config.get("RH_PICKLE_NAME", "taipei_session"),
         )
     else:
