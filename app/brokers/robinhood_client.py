@@ -118,6 +118,7 @@ class RobinhoodTrader:
         self.device_token = device_token
         self.pickle_name = pickle_name
         self._authenticated = False
+        self._last_auth_check = 0.0
         _restore_session_from_redis(self.pickle_name)
         try:
             self._login()
@@ -145,6 +146,7 @@ class RobinhoodTrader:
             result = rh.login(self.email, self.password, **kwargs)
             if result:
                 self._authenticated = True
+                self._last_auth_check = time.monotonic()
                 log.info("Robinhood login successful for %s", self.email)
                 _save_session_to_redis(self.pickle_name)
                 _last_slack_alert = 0.0  # reset throttle on success
@@ -182,23 +184,33 @@ class RobinhoodTrader:
             raise
 
     def _ensure_auth(self):
-        """Re-authenticate if session has expired."""
+        """Re-authenticate if session has expired.
+
+        Skips the health-check probe if the last successful check was
+        within 5 minutes — avoids unnecessary API calls to Robinhood.
+        """
         if not self._authenticated:
             self._login()
             return
+        # Only probe session health every 5 minutes
+        now = time.monotonic()
+        if (now - self._last_auth_check) < 300:
+            return
         try:
             rh.profiles.load_account_profile()
+            self._last_auth_check = now
         except Exception:
             global _last_slack_alert
             log.warning("Robinhood session expired, re-authenticating...")
-            now = time.monotonic()
-            if (now - _last_slack_alert) >= _SLACK_THROTTLE_SECS:
-                _last_slack_alert = now
+            alert_now = time.monotonic()
+            if (alert_now - _last_slack_alert) >= _SLACK_THROTTLE_SECS:
+                _last_slack_alert = alert_now
                 slack_notify(
                     "<!channel> :warning: FlipActivate: allocation-engine-2.0 — "
                     "Robinhood session expired, re-authenticating..."
                 )
             self._authenticated = False
+            self._last_auth_check = 0.0
             self._login()
 
     # -- account / positions ------------------------------------------------
