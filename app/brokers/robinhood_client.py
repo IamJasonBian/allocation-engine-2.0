@@ -4,7 +4,10 @@ import logging
 import robin_stocks.robinhood as rh
 import pyotp
 
-from app.models import AccountSummary, OpenOrder, Order, OrderResult, Position
+from app.models import (
+    AccountSummary, FilledOrder, OpenOrder, OptionOrder,
+    OptionPositionData, Order, OrderResult, Position,
+)
 from app.slack import notify as slack_notify
 
 log = logging.getLogger(__name__)
@@ -169,6 +172,202 @@ class RobinhoodTrader:
                 status=o.get("state", "unknown"),
             ))
         return result
+
+    def recent_orders(self, limit: int = 50) -> list[FilledOrder]:
+        """Return recent filled/cancelled stock orders from Robinhood."""
+        self._ensure_auth()
+        try:
+            raw = rh.orders.get_all_stock_orders()
+            result: list[FilledOrder] = []
+            for o in raw[:limit]:
+                state = o.get("state", "")
+                if state not in ("filled", "cancelled", "partially_filled"):
+                    continue
+                symbol = _symbol_from_instrument(o.get("instrument", ""))
+                result.append(FilledOrder(
+                    id=o.get("id", ""),
+                    symbol=symbol,
+                    side=o.get("side", "").upper(),
+                    qty=float(o.get("quantity", 0)),
+                    order_type=o.get("type", "market"),
+                    limit_price=float(o["price"]) if o.get("price") else None,
+                    stop_price=float(o["stop_price"]) if o.get("stop_price") else None,
+                    average_price=float(o["average_price"]) if o.get("average_price") else None,
+                    filled_qty=float(o.get("cumulative_quantity", 0)),
+                    status=state,
+                    created_at=o.get("created_at", ""),
+                    updated_at=o.get("updated_at", ""),
+                ))
+            return result
+        except Exception:
+            log.exception("Failed to fetch recent orders from Robinhood")
+            return []
+
+    def option_positions(self) -> list[OptionPositionData]:
+        """Return current option positions with Greeks from Robinhood."""
+        self._ensure_auth()
+        try:
+            raw = rh.options.get_open_option_positions()
+            if not raw:
+                return []
+
+            result: list[OptionPositionData] = []
+            for pos in raw:
+                qty = float(pos.get("quantity", 0))
+                if qty == 0:
+                    continue
+
+                # Fetch the option instrument details for Greeks
+                option_id = pos.get("option_id") or pos.get("option", "").split("/")[-2] if pos.get("option") else ""
+                chain_symbol = pos.get("chain_symbol", "")
+                avg_price = float(pos.get("average_price", 0)) / 100  # RH stores in cents
+                trade_value_multiplier = float(pos.get("trade_value_multiplier", 100))
+
+                # Get market data for this option
+                option_data = {}
+                if option_id:
+                    try:
+                        md = rh.options.get_option_market_data_by_id(option_id)
+                        if md and isinstance(md, list) and len(md) > 0:
+                            option_data = md[0]
+                        elif md and isinstance(md, dict):
+                            option_data = md
+                    except Exception:
+                        log.debug("Could not fetch option market data for %s", option_id)
+
+                # Get option instrument details
+                instrument = {}
+                if option_id:
+                    try:
+                        inst = rh.options.get_option_instrument_data_by_id(option_id)
+                        if inst:
+                            instrument = inst
+                    except Exception:
+                        log.debug("Could not fetch option instrument for %s", option_id)
+
+                mark_price = float(option_data.get("mark_price", 0) or 0)
+                iv = float(option_data.get("implied_volatility", 0) or 0)
+                delta = float(option_data.get("delta", 0) or 0)
+                gamma = float(option_data.get("gamma", 0) or 0)
+                theta = float(option_data.get("theta", 0) or 0)
+                vega = float(option_data.get("vega", 0) or 0)
+                rho_val = float(option_data.get("rho", 0) or 0)
+                chance = float(option_data.get("chance_of_profit_short" if qty < 0 else "chance_of_profit_long", 0) or 0)
+
+                strike = float(instrument.get("strike_price", 0) or 0)
+                expiration = instrument.get("expiration_date", "")
+                option_type = instrument.get("type", "call")
+
+                # Get underlying price
+                underlying_price = 0.0
+                if chain_symbol:
+                    try:
+                        px = rh.stocks.get_latest_price(chain_symbol)
+                        underlying_price = float(px[0]) if px and px[0] else 0.0
+                    except Exception:
+                        pass
+
+                position_type = "long" if qty > 0 else "short"
+                cost_basis = abs(qty) * avg_price * trade_value_multiplier
+                current_value = abs(qty) * mark_price * trade_value_multiplier
+                unrealized_pl = current_value - cost_basis if position_type == "long" else cost_basis - current_value
+                unrealized_pl_pct = unrealized_pl / cost_basis if cost_basis > 0 else 0.0
+
+                # Break-even calculation
+                if option_type == "call":
+                    break_even = strike + avg_price
+                else:
+                    break_even = strike - avg_price
+
+                result.append(OptionPositionData(
+                    chain_symbol=chain_symbol,
+                    option_type=option_type,
+                    strike=strike,
+                    expiration=expiration,
+                    quantity=abs(qty),
+                    position_type=position_type,
+                    avg_price=avg_price,
+                    mark_price=mark_price,
+                    multiplier=trade_value_multiplier,
+                    cost_basis=round(cost_basis, 2),
+                    current_value=round(current_value, 2),
+                    unrealized_pl=round(unrealized_pl, 2),
+                    unrealized_pl_pct=round(unrealized_pl_pct, 4),
+                    underlying_price=underlying_price,
+                    break_even=round(break_even, 2),
+                    delta=delta,
+                    gamma=gamma,
+                    theta=theta,
+                    vega=vega,
+                    rho=rho_val,
+                    iv=iv,
+                    chance_of_profit=chance,
+                ))
+            return result
+        except Exception:
+            log.exception("Failed to fetch option positions from Robinhood")
+            return []
+
+    def recent_option_orders(self, limit: int = 20) -> list[OptionOrder]:
+        """Return recent option orders from Robinhood."""
+        self._ensure_auth()
+        try:
+            raw = rh.orders.get_all_option_orders()
+            if not raw:
+                return []
+
+            result: list[OptionOrder] = []
+            for o in raw[:limit]:
+                state = o.get("state", "")
+                if state not in ("filled", "cancelled", "partially_filled"):
+                    continue
+
+                legs = []
+                for leg in o.get("legs", []):
+                    option_url = leg.get("option", "")
+                    # Extract option details from the leg
+                    leg_data = {
+                        "side": leg.get("side", ""),
+                        "position_effect": leg.get("position_effect", ""),
+                        "quantity": float(leg.get("quantity", 0) or 0),
+                    }
+                    # Try to get strike/expiration from option instrument
+                    if option_url:
+                        try:
+                            opt_id = option_url.rstrip("/").split("/")[-1]
+                            inst = rh.options.get_option_instrument_data_by_id(opt_id)
+                            if inst:
+                                leg_data["strike"] = float(inst.get("strike_price", 0) or 0)
+                                leg_data["expiration"] = inst.get("expiration_date", "")
+                                leg_data["option_type"] = inst.get("type", "call")
+                                leg_data["chain_symbol"] = inst.get("chain_symbol", "")
+                        except Exception:
+                            pass
+                    legs.append(leg_data)
+
+                premium = float(o.get("premium", 0) or 0)
+                processed_premium = float(o.get("processed_premium", 0) or 0)
+                price = float(o.get("price", 0) or 0)
+
+                result.append(OptionOrder(
+                    id=o.get("id", ""),
+                    state=state,
+                    quantity=float(o.get("quantity", 0)),
+                    price=price,
+                    premium=premium,
+                    direction=o.get("direction", ""),
+                    order_type=o.get("type", "limit"),
+                    trigger=o.get("trigger", "immediate"),
+                    time_in_force=o.get("time_in_force", "gfd"),
+                    opening_strategy=o.get("opening_strategy") or "",
+                    created_at=o.get("created_at", ""),
+                    updated_at=o.get("updated_at", ""),
+                    legs=legs,
+                ))
+            return result
+        except Exception:
+            log.exception("Failed to fetch recent option orders from Robinhood")
+            return []
 
     # -- order submission ---------------------------------------------------
 
