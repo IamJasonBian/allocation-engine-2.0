@@ -17,7 +17,7 @@ Env vars required:
 import json
 import os
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 
 import redis
 import requests
@@ -105,7 +105,7 @@ def upload_to_blob(token, site_id, blob_key, data):
 
 
 def main():
-    print(f"[unloader] Market quotes blob unloader starting at {datetime.utcnow().isoformat()}")
+    print(f"[unloader] Market quotes blob unloader starting at {datetime.now(timezone.utc).isoformat()}")
 
     client = get_redis_client()
     token, site_id = get_netlify_config()
@@ -125,9 +125,9 @@ def main():
         return
 
     # 3. Build blob payload
-    blob_key = datetime.utcnow().strftime("%Y-%m-%dT%H-%M-%S")
+    blob_key = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H-%M-%S")
     payload = {
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(timezone.utc).isoformat(),
         "blob_key": blob_key,
         "latest_quotes": latest,
         "history_count": len(entries),
