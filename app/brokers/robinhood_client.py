@@ -1,6 +1,7 @@
 """Robinhood trading client — wraps robin-stocks with server-side TOTP auth."""
 
 import logging
+import os
 import time
 import robin_stocks.robinhood as rh
 import pyotp
@@ -15,6 +16,78 @@ _last_slack_alert = 0.0
 
 # Cache instrument URL -> symbol to avoid repeated API calls
 _instrument_cache: dict[str, str] = {}
+
+# Redis key for persisting the Robinhood session pickle across deploys
+_REDIS_SESSION_KEY = "rh:session:pickle"
+
+
+def _get_pickle_path(pickle_name: str) -> str:
+    """Return the file path robin-stocks uses for its session pickle."""
+    home = os.path.expanduser("~")
+    return os.path.join(home, ".tokens", f"robinhood{pickle_name}.pickle")
+
+
+def _get_redis_bytes_client():
+    """Get a Redis client with raw bytes (no decode) for binary pickle data."""
+    try:
+        import redis as _redis
+    except ImportError:
+        return None
+    host = os.getenv("REDIS_HOST")
+    password = os.getenv("REDIS_PASSWORD")
+    if not host:
+        return None
+    port = 6379
+    if ":" in host:
+        host, port_str = host.rsplit(":", 1)
+        try:
+            port = int(port_str)
+        except ValueError:
+            pass
+    try:
+        return _redis.Redis(host=host, port=port, password=password,
+                            decode_responses=False)
+    except Exception:
+        return None
+
+
+def _restore_session_from_redis(pickle_name: str):
+    """Restore robin-stocks pickle file from Redis if available."""
+    try:
+        client = _get_redis_bytes_client()
+        if not client:
+            return
+        data = client.get(_REDIS_SESSION_KEY)
+        client.close()
+        if not data:
+            log.info("[session] No stored session in Redis")
+            return
+        path = _get_pickle_path(pickle_name)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "wb") as f:
+            f.write(data)
+        log.info("[session] Restored session pickle from Redis -> %s", path)
+    except Exception:
+        log.exception("[session] Failed to restore session from Redis")
+
+
+def _save_session_to_redis(pickle_name: str):
+    """Save robin-stocks pickle file to Redis for persistence across deploys."""
+    try:
+        path = _get_pickle_path(pickle_name)
+        if not os.path.isfile(path):
+            return
+        with open(path, "rb") as f:
+            data = f.read()
+        client = _get_redis_bytes_client()
+        if not client:
+            return
+        # Store with 24h TTL (matches robin-stocks token expiry)
+        client.set(_REDIS_SESSION_KEY, data, ex=86400)
+        client.close()
+        log.info("[session] Saved session pickle to Redis (%d bytes)", len(data))
+    except Exception:
+        log.exception("[session] Failed to save session to Redis")
 
 
 def _symbol_from_instrument(instrument_url: str) -> str:
@@ -45,6 +118,7 @@ class RobinhoodTrader:
         self.device_token = device_token
         self.pickle_name = pickle_name
         self._authenticated = False
+        _restore_session_from_redis(self.pickle_name)
         try:
             self._login()
         except Exception:
@@ -72,6 +146,7 @@ class RobinhoodTrader:
             if result:
                 self._authenticated = True
                 log.info("Robinhood login successful for %s", self.email)
+                _save_session_to_redis(self.pickle_name)
                 _last_slack_alert = 0.0  # reset throttle on success
                 slack_notify(
                     f"<!channel> :white_check_mark: FlipActivate: allocation-engine-2.0 — "
