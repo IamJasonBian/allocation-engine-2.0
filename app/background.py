@@ -31,6 +31,7 @@ def start_engine_thread(app):
             from app.engine import AllocationEngine
             from app.runtime_client import RuntimeClient
             from app.redis_store import sync_to_redis
+            from app.blob_store import sync_to_blob
 
             config = app.config
             broker = get_broker(config["ENGINE_BROKER"])
@@ -45,6 +46,8 @@ def start_engine_thread(app):
             _engine_status["dry_run"] = config["DRY_RUN"]
             interval = config["POLL_INTERVAL_SECONDS"]
             is_live = not config["DRY_RUN"]
+            blob_interval = 15 * 60  # 15 minutes
+            last_blob_sync = 0.0
 
             log.info("Background engine started (interval=%ds, dry_run=%s, broker=%s)",
                      interval, config["DRY_RUN"], config["ENGINE_BROKER"])
@@ -70,6 +73,15 @@ def start_engine_thread(app):
                         sync_to_redis(positions, open_orders, account, live=is_live)
                     except Exception:
                         log.exception("Redis sync error")
+
+                    # Sync to Netlify Blobs every 15 minutes (live mode only)
+                    now_mono = time.monotonic()
+                    if is_live and (now_mono - last_blob_sync) >= blob_interval:
+                        try:
+                            sync_to_blob(positions, open_orders, account)
+                            last_blob_sync = now_mono
+                        except Exception:
+                            log.exception("Blob sync error")
 
                 except Exception as e:
                     log.exception("Engine tick error")
