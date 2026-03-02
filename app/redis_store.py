@@ -54,13 +54,18 @@ def _get_client():
     return None
 
 
-def sync_to_redis(positions, open_orders, account, live=False):
+def sync_to_redis(
+    positions: list,
+    open_orders: list,
+    account,
+    live: bool = False,
+):
     """Write portfolio positions and orders to Redis.
 
     Args:
-        positions: List of position dicts from BrokerClient.positions()
-        open_orders: List of order dicts from BrokerClient.open_orders()
-        account: Account summary dict from BrokerClient.account()
+        positions: List of Position from BrokerClient.positions()
+        open_orders: List of OpenOrder from BrokerClient.open_orders()
+        account: AccountSummary from BrokerClient.account()
         live: Only write when True (skips in dry-run mode)
     """
     if not live:
@@ -78,24 +83,20 @@ def sync_to_redis(positions, open_orders, account, live=False):
         # --- stocks hash: positions keyed by symbol ---
         pipe.delete("stocks")
         for pos in positions:
-            symbol = pos.get("symbol")
-            if not symbol:
-                continue
-            qty = pos["qty"]
             entry = {
-                "symbol": symbol,
-                "name": symbol,
+                "symbol": pos.symbol,
+                "name": pos.symbol,
                 "type": "stock",
-                "quantity": qty,
-                "avg_buy_price": pos.get("avg_entry", 0),
-                "current_price": round(pos["market_value"] / qty, 4) if qty else 0,
-                "equity": pos["market_value"],
-                "profit_loss": pos.get("unrealized_pl", 0),
-                "profit_loss_pct": pos.get("unrealized_pl_pct", 0) * 100,
-                "percent_change": round(pos.get("unrealized_pl_pct", 0) * 100, 2),
-                "equity_change": pos.get("unrealized_pl", 0),
+                "quantity": pos.qty,
+                "avg_buy_price": pos.avg_entry,
+                "current_price": round(pos.market_value / pos.qty, 4) if pos.qty else 0,
+                "equity": pos.market_value,
+                "profit_loss": pos.unrealized_pl,
+                "profit_loss_pct": pos.unrealized_pl_pct * 100,
+                "percent_change": round(pos.unrealized_pl_pct * 100, 2),
+                "equity_change": pos.unrealized_pl,
             }
-            pipe.hset("stocks", symbol, json.dumps(entry))
+            pipe.hset("stocks", pos.symbol, json.dumps(entry))
 
         pipe.hset("stocks", "_meta", json.dumps({
             "updated_at": ts,
@@ -106,23 +107,22 @@ def sync_to_redis(positions, open_orders, account, live=False):
         # --- orders hash: open orders keyed by order_id ---
         pipe.delete("orders")
         for order in open_orders:
-            oid = order.get("id", "unknown")
             entry = {
-                "order_id": oid,
-                "symbol": order.get("symbol", ""),
-                "side": order.get("side", "").upper(),
-                "order_type": order.get("type", "market"),
-                "trigger": "stop" if order.get("type") in ("stop", "stop_limit") else "immediate",
-                "state": order.get("status", "unknown"),
-                "quantity": order.get("qty", 0),
-                "limit_price": order.get("limit_price"),
-                "stop_price": order.get("stop_price"),
+                "order_id": order.id,
+                "symbol": order.symbol,
+                "side": order.side.upper(),
+                "order_type": order.order_type,
+                "trigger": "stop" if order.order_type in ("stop", "stop_limit") else "immediate",
+                "state": order.status,
+                "quantity": order.qty,
+                "limit_price": order.limit_price,
+                "stop_price": order.stop_price,
                 "created_at": ts,
                 "updated_at": ts,
                 "_status": "open",
                 "_type": "stock",
             }
-            pipe.hset("orders", oid, json.dumps(entry))
+            pipe.hset("orders", order.id, json.dumps(entry))
 
         pipe.hset("orders", "_meta", json.dumps({
             "updated_at": ts,

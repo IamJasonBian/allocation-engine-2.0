@@ -4,6 +4,7 @@ reconciles against broker positions/orders, and submits the delta."""
 import logging
 
 from app.brokers.base import BrokerClient
+from app.models import OpenOrder, Order, Position
 from app.runtime_client import RuntimeClient
 
 log = logging.getLogger(__name__)
@@ -42,49 +43,58 @@ class AllocationEngine:
 
     # -- internals ----------------------------------------------------------
 
-    def _desired_orders(self) -> list[dict]:
+    def _desired_orders(self) -> list[Order]:
         """Fetch the target order set from the runtime service."""
         data = self.runtime.orders()
-        return data.get("stock_orders", [])
+        return [
+            Order(
+                symbol=o["symbol"],
+                side=o["side"],
+                qty=float(o.get("quantity") or o.get("qty", 0)),
+                order_type=o.get("order_type", "market"),
+                limit_price=float(o["limit_price"]) if o.get("limit_price") else None,
+                stop_price=float(o["stop_price"]) if o.get("stop_price") else None,
+            )
+            for o in data.get("stock_orders", [])
+        ]
+
+    @staticmethod
+    def _order_key(symbol: str, side: str, qty: float, limit_price: float | None) -> tuple:
+        return (symbol, side, qty, limit_price)
 
     def _reconcile(
         self,
-        desired: list[dict],
-        current_orders: list[dict],
-        current_positions: list[dict],
-    ) -> tuple[list[dict], list[str]]:
+        desired: list[Order],
+        current_orders: list[OpenOrder],
+        current_positions: list[Position],
+    ) -> tuple[list[Order], list[str]]:
         """Compare desired orders against broker state.
 
         Returns (orders_to_submit, order_ids_to_cancel).
         """
-        def _order_key(o: dict) -> tuple:
-            return (
-                o.get("symbol"),
-                o.get("side"),
-                o.get("quantity") or o.get("qty"),
-                o.get("limit_price"),
-            )
+        desired_keys = {
+            self._order_key(o.symbol, o.side, o.qty, o.limit_price)
+            for o in desired
+        }
 
-        desired_keys = {_order_key(o) for o in desired}
-
-        current_map: dict[tuple, dict] = {}
+        current_map: dict[tuple, OpenOrder] = {}
         for o in current_orders:
-            key = (o["symbol"], o["side"], o["qty"], o["limit_price"])
+            key = self._order_key(o.symbol, o.side, o.qty, o.limit_price)
             current_map[key] = o
 
         stale_ids = [
-            o["id"] for key, o in current_map.items() if key not in desired_keys
+            o.id for key, o in current_map.items() if key not in desired_keys
         ]
 
-        position_symbols = {p["symbol"] for p in current_positions}
+        position_symbols = {p.symbol for p in current_positions}
 
-        to_submit = []
+        to_submit: list[Order] = []
         for o in desired:
-            key = _order_key(o)
+            key = self._order_key(o.symbol, o.side, o.qty, o.limit_price)
             if key in current_map:
                 continue
-            if o["symbol"] in position_symbols and o["side"] == "BUY":
-                log.info("Skipping %s BUY — already holding position", o["symbol"])
+            if o.symbol in position_symbols and o.side == "BUY":
+                log.info("Skipping %s BUY — already holding position", o.symbol)
                 continue
             to_submit.append(o)
 
@@ -95,7 +105,7 @@ class AllocationEngine:
         )
         return to_submit, stale_ids
 
-    def _execute(self, orders: list[dict], cancel_ids: list[str]):
+    def _execute(self, orders: list[Order], cancel_ids: list[str]):
         """Log stale orders and submit new ones. Cancellation is disabled."""
         if cancel_ids:
             log.info("Found %d stale order(s) — cancellation disabled, skipping: %s",
@@ -105,8 +115,8 @@ class AllocationEngine:
         for order in orders:
             if self.dry_run:
                 log.info("[DRY RUN] Would submit: %s %s %s @ %s",
-                         order["side"], order["quantity"],
-                         order["symbol"], order.get("limit_price", "MKT"))
+                         order.side, order.qty,
+                         order.symbol, order.limit_price or "MKT")
             else:
                 result = self.trader.submit_order(order)
                 results.append(result)

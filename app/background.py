@@ -52,10 +52,6 @@ def start_engine_thread(app):
             log.info("Background engine started (interval=%ds, dry_run=%s, broker=%s)",
                      interval, config["DRY_RUN"], config["ENGINE_BROKER"])
 
-            positions = []
-            open_orders = []
-            account = {}
-
             while True:
                 try:
                     if is_live:
@@ -74,23 +70,17 @@ def start_engine_thread(app):
                     account = broker.account()
 
                     # Log portfolio summary
-                    equity = account.get("equity", 0)
-                    cash = account.get("cash", 0)
-                    buying_power = account.get("buying_power", 0)
-                    market_val = account.get("portfolio_value", 0)
                     log.info("[portfolio] Equity: $%,.2f | Cash: $%,.2f | "
                              "Buying Power: $%,.2f | Market Value: $%,.2f",
-                             equity, cash, buying_power, market_val)
+                             account.equity, account.cash,
+                             account.buying_power, account.portfolio_value)
 
                     # Log open orders
                     if open_orders:
                         for o in open_orders:
                             log.info("[order] %s %s — %s qty=%g limit=$%s status=%s",
-                                     o.get("side", "?"), o.get("symbol", "?"),
-                                     o.get("type", "market"),
-                                     o.get("qty", 0),
-                                     o.get("limit_price") or "MKT",
-                                     o.get("status", "?"))
+                                     o.side, o.symbol, o.order_type,
+                                     o.qty, o.limit_price or "MKT", o.status)
                     else:
                         log.info("[order] No open orders")
 

@@ -4,6 +4,7 @@ import logging
 import robin_stocks.robinhood as rh
 import pyotp
 
+from app.models import AccountSummary, OpenOrder, Order, OrderResult, Position
 from app.slack import notify as slack_notify
 
 log = logging.getLogger(__name__)
@@ -106,21 +107,21 @@ class RobinhoodTrader:
 
     # -- account / positions ------------------------------------------------
 
-    def account(self) -> dict:
+    def account(self) -> AccountSummary:
         self._ensure_auth()
         profile = rh.profiles.load_account_profile()
         portfolio = rh.profiles.load_portfolio_profile()
-        return {
-            "equity": float(portfolio.get("equity", 0)),
-            "cash": float(profile.get("cash", 0)),
-            "buying_power": float(profile.get("buying_power", 0)),
-            "portfolio_value": float(portfolio.get("market_value", 0)),
-        }
+        return AccountSummary(
+            equity=float(portfolio.get("equity", 0)),
+            cash=float(profile.get("cash", 0)),
+            buying_power=float(profile.get("buying_power", 0)),
+            portfolio_value=float(portfolio.get("market_value", 0)),
+        )
 
-    def positions(self) -> list[dict]:
+    def positions(self) -> list[Position]:
         self._ensure_auth()
         raw = rh.account.get_all_positions()
-        result = []
+        result: list[Position] = []
         for pos in raw:
             qty = float(pos.get("quantity", 0))
             if qty == 0:
@@ -140,44 +141,44 @@ class RobinhoodTrader:
             unrealized_pl = market_value - cost_basis
             unrealized_pl_pct = unrealized_pl / cost_basis if cost_basis > 0 else 0.0
 
-            result.append({
-                "symbol": symbol,
-                "qty": qty,
-                "side": "long",
-                "market_value": round(market_value, 2),
-                "avg_entry": avg_buy,
-                "unrealized_pl": round(unrealized_pl, 2),
-                "unrealized_pl_pct": round(unrealized_pl_pct, 4),
-            })
+            result.append(Position(
+                symbol=symbol,
+                qty=qty,
+                side="long",
+                market_value=round(market_value, 2),
+                avg_entry=avg_buy,
+                unrealized_pl=round(unrealized_pl, 2),
+                unrealized_pl_pct=round(unrealized_pl_pct, 4),
+            ))
         return result
 
-    def open_orders(self) -> list[dict]:
+    def open_orders(self) -> list[OpenOrder]:
         self._ensure_auth()
         raw = rh.orders.get_all_open_stock_orders()
-        result = []
+        result: list[OpenOrder] = []
         for o in raw:
             symbol = _symbol_from_instrument(o.get("instrument", ""))
-            result.append({
-                "id": o.get("id"),
-                "symbol": symbol,
-                "side": o.get("side", "").upper(),
-                "qty": float(o.get("quantity", 0)),
-                "type": o.get("type", "market"),
-                "limit_price": float(o["price"]) if o.get("price") else None,
-                "stop_price": float(o["stop_price"]) if o.get("stop_price") else None,
-                "status": o.get("state", "unknown"),
-            })
+            result.append(OpenOrder(
+                id=o.get("id", ""),
+                symbol=symbol,
+                side=o.get("side", "").upper(),
+                qty=float(o.get("quantity", 0)),
+                order_type=o.get("type", "market"),
+                limit_price=float(o["price"]) if o.get("price") else None,
+                stop_price=float(o["stop_price"]) if o.get("stop_price") else None,
+                status=o.get("state", "unknown"),
+            ))
         return result
 
     # -- order submission ---------------------------------------------------
 
-    def submit_order(self, order: dict) -> dict | None:
+    def submit_order(self, order: Order) -> OrderResult | None:
         self._ensure_auth()
-        symbol = order["symbol"]
-        side = order["side"].lower()
-        qty = float(order["quantity"])
-        otype = order.get("order_type", "market").lower()
-        limit_px = order.get("limit_price")
+        symbol = order.symbol
+        side = order.side.lower()
+        qty = order.qty
+        otype = order.order_type.lower()
+        limit_px = order.limit_price
 
         try:
             if otype == "limit" and limit_px:
@@ -195,11 +196,11 @@ class RobinhoodTrader:
             if result and result.get("id"):
                 log.info("RH order submitted: %s %s %s @ %s -> %s",
                          side, qty, symbol, limit_px or "MKT", result["id"])
-                return {
-                    "id": result["id"],
-                    "symbol": symbol,
-                    "status": result.get("state"),
-                }
+                return OrderResult(
+                    id=result["id"],
+                    symbol=symbol,
+                    status=result.get("state"),
+                )
             return None
 
         except Exception as e:
