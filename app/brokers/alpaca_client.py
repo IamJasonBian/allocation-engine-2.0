@@ -11,8 +11,6 @@ from alpaca.trading.requests import (
 from alpaca.trading.enums import OrderSide, TimeInForce
 from alpaca.common.exceptions import APIError
 
-from app.models import AccountSummary, OpenOrder, Order, OrderResult, Position
-
 log = logging.getLogger(__name__)
 
 SYMBOL_MAP = {
@@ -31,53 +29,53 @@ class AlpacaTrader:
 
     # -- account / positions ------------------------------------------------
 
-    def account(self) -> AccountSummary:
+    def account(self) -> dict:
         acct = self.client.get_account()
-        return AccountSummary(
-            equity=float(acct.equity),
-            cash=float(acct.cash),
-            buying_power=float(acct.buying_power),
-            portfolio_value=float(acct.portfolio_value),
-        )
+        return {
+            "equity": float(acct.equity),
+            "cash": float(acct.cash),
+            "buying_power": float(acct.buying_power),
+            "portfolio_value": float(acct.portfolio_value),
+        }
 
-    def positions(self) -> list[Position]:
+    def positions(self) -> list[dict]:
         return [
-            Position(
-                symbol=p.symbol,
-                qty=float(p.qty),
-                side=p.side,
-                market_value=float(p.market_value),
-                avg_entry=float(p.avg_entry_price),
-                unrealized_pl=float(p.unrealized_pl),
-                unrealized_pl_pct=float(p.unrealized_plpc),
-            )
+            {
+                "symbol": p.symbol,
+                "qty": float(p.qty),
+                "side": p.side,
+                "market_value": float(p.market_value),
+                "avg_entry": float(p.avg_entry_price),
+                "unrealized_pl": float(p.unrealized_pl),
+                "unrealized_pl_pct": float(p.unrealized_plpc),
+            }
             for p in self.client.get_all_positions()
         ]
 
-    def open_orders(self) -> list[OpenOrder]:
+    def open_orders(self) -> list[dict]:
         return [
-            OpenOrder(
-                id=str(o.id),
-                symbol=o.symbol,
-                side=o.side.value,
-                qty=float(o.qty) if o.qty else 0.0,
-                order_type=o.type.value,
-                limit_price=float(o.limit_price) if o.limit_price else None,
-                stop_price=float(o.stop_price) if o.stop_price else None,
-                status=o.status.value,
-            )
+            {
+                "id": str(o.id),
+                "symbol": o.symbol,
+                "side": o.side.value,
+                "qty": float(o.qty) if o.qty else None,
+                "type": o.type.value,
+                "limit_price": float(o.limit_price) if o.limit_price else None,
+                "stop_price": float(o.stop_price) if o.stop_price else None,
+                "status": o.status.value,
+            }
             for o in self.client.get_orders()
         ]
 
     # -- order submission ---------------------------------------------------
 
-    def submit_order(self, order: Order) -> OrderResult | None:
-        symbol = _map_symbol(order.symbol)
-        side = OrderSide.BUY if order.side == "BUY" else OrderSide.SELL
-        qty = order.qty
-        otype = order.order_type.lower()
-        limit_px = order.limit_price
-        stop_px = order.stop_price
+    def submit_order(self, order: dict) -> dict | None:
+        symbol = _map_symbol(order["symbol"])
+        side = OrderSide.BUY if order["side"] == "BUY" else OrderSide.SELL
+        qty = float(order["quantity"])
+        otype = order.get("order_type", "market").lower()
+        limit_px = order.get("limit_price")
+        stop_px = order.get("stop_price")
 
         try:
             if otype == "limit" and limit_px is not None:
@@ -105,11 +103,11 @@ class AlpacaTrader:
             result = self.client.submit_order(req)
             log.info("Order submitted: %s %s %s @ %s -> %s",
                      side.value, qty, symbol, limit_px or "MKT", result.id)
-            return OrderResult(
-                id=str(result.id),
-                symbol=result.symbol,
-                status=result.status.value,
-            )
+            return {
+                "id": str(result.id),
+                "symbol": result.symbol,
+                "status": result.status.value,
+            }
 
         except APIError as e:
             log.error("Alpaca API error submitting %s %s %s: %s",

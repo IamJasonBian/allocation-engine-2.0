@@ -2,27 +2,29 @@
 
 from typing import Protocol, runtime_checkable
 
-from app.models import AccountSummary, OpenOrder, Order, OrderResult, Position
-
 
 @runtime_checkable
 class BrokerClient(Protocol):
     """Interface that all broker implementations must satisfy."""
 
-    def account(self) -> AccountSummary:
+    def account(self) -> dict:
         """Return account summary: equity, cash, buying_power, portfolio_value."""
         ...
 
-    def positions(self) -> list[Position]:
-        """Return list of current positions."""
+    def positions(self) -> list[dict]:
+        """Return list of position dicts with standardized keys:
+        symbol, qty, side, market_value, avg_entry, unrealized_pl, unrealized_pl_pct
+        """
         ...
 
-    def open_orders(self) -> list[OpenOrder]:
-        """Return list of open orders on the broker."""
+    def open_orders(self) -> list[dict]:
+        """Return list of open order dicts with standardized keys:
+        id, symbol, side, qty, type, limit_price, stop_price, status
+        """
         ...
 
-    def submit_order(self, order: Order) -> OrderResult | None:
-        """Submit an order. Returns order confirmation or None on failure."""
+    def submit_order(self, order: dict) -> dict | None:
+        """Submit an order. Returns order confirmation dict or None on failure."""
         ...
 
     def cancel_order(self, order_id: str) -> None:

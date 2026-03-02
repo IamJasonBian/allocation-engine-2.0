@@ -30,6 +30,7 @@ def start_engine_thread(app):
             from app.brokers import get_broker
             from app.engine import AllocationEngine
             from app.runtime_client import RuntimeClient
+            from app.redis_store import sync_to_redis
             from app.blob_store import sync_to_blob
 
             config = app.config
@@ -51,6 +52,10 @@ def start_engine_thread(app):
             log.info("Background engine started (interval=%ds, dry_run=%s, broker=%s)",
                      interval, config["DRY_RUN"], config["ENGINE_BROKER"])
 
+            positions = []
+            open_orders = []
+            account = {}
+
             while True:
                 try:
                     if is_live:
@@ -69,21 +74,31 @@ def start_engine_thread(app):
                     account = broker.account()
 
                     # Log portfolio summary
-                    log.info(
-                        f"[portfolio] Equity: ${account.equity:,.2f} | "
-                        f"Cash: ${account.cash:,.2f} | "
-                        f"Buying Power: ${account.buying_power:,.2f} | "
-                        f"Market Value: ${account.portfolio_value:,.2f}"
-                    )
+                    equity = account.get("equity", 0)
+                    cash = account.get("cash", 0)
+                    buying_power = account.get("buying_power", 0)
+                    market_val = account.get("portfolio_value", 0)
+                    log.info("[portfolio] Equity: $%,.2f | Cash: $%,.2f | "
+                             "Buying Power: $%,.2f | Market Value: $%,.2f",
+                             equity, cash, buying_power, market_val)
 
                     # Log open orders
                     if open_orders:
                         for o in open_orders:
                             log.info("[order] %s %s — %s qty=%g limit=$%s status=%s",
-                                     o.side, o.symbol, o.order_type,
-                                     o.qty, o.limit_price or "MKT", o.status)
+                                     o.get("side", "?"), o.get("symbol", "?"),
+                                     o.get("type", "market"),
+                                     o.get("qty", 0),
+                                     o.get("limit_price") or "MKT",
+                                     o.get("status", "?"))
                     else:
                         log.info("[order] No open orders")
+
+                    # Sync to Redis
+                    try:
+                        sync_to_redis(positions, open_orders, account, live=is_live)
+                    except Exception:
+                        log.exception("Redis sync error")
 
                     # Sync to Netlify Blobs every 15 minutes (live mode only)
                     now_mono = time.monotonic()
