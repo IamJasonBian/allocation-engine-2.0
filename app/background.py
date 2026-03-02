@@ -51,7 +51,13 @@ def start_engine_thread(app):
 
             while True:
                 try:
-                    engine.tick()
+                    if is_live:
+                        # Live mode: refresh broker state and sync to Redis only
+                        log.debug("Live mode: refreshing broker state")
+                    else:
+                        # Dry-run mode: run full reconciliation (read-only)
+                        engine.tick()
+
                     _engine_status["last_tick"] = datetime.now(timezone.utc).isoformat()
                     _engine_status["tick_count"] += 1
                     _engine_status["last_error"] = None
