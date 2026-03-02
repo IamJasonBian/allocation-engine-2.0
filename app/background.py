@@ -70,10 +70,12 @@ def start_engine_thread(app):
                     account = broker.account()
 
                     # Log portfolio summary
-                    log.info("[portfolio] Equity: $%,.2f | Cash: $%,.2f | "
-                             "Buying Power: $%,.2f | Market Value: $%,.2f",
-                             account.equity, account.cash,
-                             account.buying_power, account.portfolio_value)
+                    log.info(
+                        f"[portfolio] Equity: ${account.equity:,.2f} | "
+                        f"Cash: ${account.cash:,.2f} | "
+                        f"Buying Power: ${account.buying_power:,.2f} | "
+                        f"Market Value: ${account.portfolio_value:,.2f}"
+                    )
 
                     # Log open orders
                     if open_orders:
