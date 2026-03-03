@@ -33,3 +33,8 @@ def get_broker(name: str) -> BrokerClient:
 
     _broker_cache[name] = client
     return client
+
+
+def clear_broker(name: str):
+    """Remove a broker from the cache, forcing re-creation on next get_broker() call."""
+    _broker_cache.pop(name, None)

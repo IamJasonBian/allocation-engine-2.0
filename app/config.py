@@ -27,6 +27,9 @@ class Config:
     RH_DEVICE_TOKEN = os.getenv("RH_DEVICE_TOKEN", "")
     RH_PICKLE_NAME = os.getenv("RH_PICKLE_NAME", "taipei_session")
 
+    # -- Robinhood session persistence --
+    RH_RETRY_HOUR_ET = int(os.getenv("RH_RETRY_HOUR_ET", "11"))
+
     # -- Runtime service --
     RUNTIME_SERVICE_URL = os.getenv(
         "RUNTIME_SERVICE_URL",
