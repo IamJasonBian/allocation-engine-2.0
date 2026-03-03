@@ -197,11 +197,21 @@ class RobinhoodTrader:
     def _ensure_auth(self):
         """Re-authenticate if session has expired."""
         if not self._authenticated:
+            if self._device_challenge_mode:
+                raise RuntimeError("Cannot authenticate — device challenge pending")
             self._login()
             return
+        # Session is authenticated — do a lightweight check.
+        # Tolerate transient errors (429, network blips) so we don't
+        # trigger a full re-login that could hit the device challenge loop.
         try:
             rh.profiles.load_account_profile()
-        except Exception:
+        except Exception as e:
+            err_str = str(e)
+            if "429" in err_str or "Too Many Requests" in err_str:
+                log.warning("Robinhood 429 during session check — "
+                            "skipping re-auth (session likely still valid)")
+                return
             log.warning("Robinhood session expired, re-authenticating...")
             slack_notify(
                 "<!channel> :warning: FlipActivate: allocation-engine-2.0 — "
