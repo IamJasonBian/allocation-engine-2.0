@@ -1,5 +1,3 @@
-from dataclasses import asdict
-
 from flask import Blueprint, jsonify, current_app
 from app.brokers import get_broker
 
@@ -16,11 +14,11 @@ def portfolio(broker_name=None):
         pos = broker.positions()
         return jsonify({
             "broker": broker_name,
-            "equity": acct.equity,
-            "cash": acct.cash,
-            "buying_power": acct.buying_power,
-            "portfolio_value": acct.portfolio_value,
-            "positions": [asdict(p) for p in pos],
+            "equity": acct.get("equity"),
+            "cash": acct.get("cash"),
+            "buying_power": acct.get("buying_power"),
+            "portfolio_value": acct.get("portfolio_value"),
+            "positions": pos,
         })
     except Exception as e:
         return jsonify({"error": str(e)}), 500

@@ -3,7 +3,6 @@
 import json
 import logging
 import os
-from dataclasses import asdict
 from datetime import datetime, timezone
 
 import requests
@@ -30,9 +29,9 @@ def sync_to_blob(positions, open_orders, account):
     now = datetime.now(timezone.utc)
     snapshot = {
         "timestamp": now.isoformat(),
-        "account": asdict(account),
-        "positions": [asdict(p) for p in positions],
-        "open_orders": [asdict(o) for o in open_orders],
+        "account": account,
+        "positions": positions,
+        "open_orders": open_orders,
         "num_positions": len(positions),
         "num_open_orders": len(open_orders),
     }

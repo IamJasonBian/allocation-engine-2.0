@@ -17,6 +17,8 @@ services:
         sync: false
       - key: RH_TOTP_SECRET
         sync: false
+      - key: RH_DEVICE_TOKEN
+        sync: false
       - key: ALPACA_API_KEY
         sync: false
       - key: ALPACA_SECRET_KEY
@@ -40,3 +42,32 @@ services:
       - key: POLL_INTERVAL_SECONDS
         value: "60"
     healthCheckPath: /api/health
+
+  - type: worker
+    name: market-data-service
+    runtime: docker
+    dockerfilePath: ./market-data-service/Dockerfile
+    dockerContext: ./market-data-service
+    region: ohio
+    plan: starter
+    envVars:
+      - key: ALPACA_API_KEY
+        sync: false
+      - key: ALPACA_SECRET_KEY
+        sync: false
+      - key: REDIS_HOST
+        value: redis-17054.c99.us-east-1-4.ec2.cloud.redislabs.com:17054
+      - key: REDIS_PASSWORD
+        sync: false
+      - key: POLL_INTERVAL_MS
+        value: "3000"
+      - key: SYMBOLS
+        value: BTC
+      - key: CRYPTO_SYMBOLS
+        value: BTC/USD
+      - key: HISTORY_MAX_SIZE
+        value: "10000"
+      - key: OPTIONS_SYMBOLS
+        value: "IWN,CRWD"
+      - key: OPTIONS_POLL_INTERVAL_MS
+        value: "30000"
