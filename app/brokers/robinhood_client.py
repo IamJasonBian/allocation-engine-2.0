@@ -2,6 +2,7 @@
 
 import logging
 import os
+import pickle
 import threading
 from datetime import datetime, timedelta, timezone
 
@@ -85,21 +86,48 @@ class RobinhoodTrader:
     # -- session pickle persistence -----------------------------------------
 
     def _restore_pickle_from_blob(self):
-        """Download the pickle from Netlify Blobs if not already on disk."""
+        """Ensure a pickle with the trusted device_token exists before login.
+
+        Priority:
+          1. Local pickle already on disk → use it
+          2. Download full pickle from Netlify Blobs → use it
+          3. Seed a stub pickle with RH_DEVICE_TOKEN env var so robin_stocks
+             uses our known device_token instead of generating a random one
+        """
         if os.path.isfile(self._pickle_path):
-            log.info("[pickle] Local pickle exists at %s, skipping blob download",
-                     self._pickle_path)
+            log.info("[pickle] Local pickle exists at %s", self._pickle_path)
             return
+
         log.info("[pickle] No local pickle. Attempting blob store restore...")
-        restored = download_pickle(self._pickle_path)
-        if restored:
+        if download_pickle(self._pickle_path):
             log.info("[pickle] Restored session pickle from blob store")
             slack_notify(
                 ":floppy_disk: FlipActivate: allocation-engine-2.0 — "
                 "Restored Robinhood session pickle from blob store"
             )
-        else:
-            log.warning("[pickle] No pickle in blob store — fresh login required")
+            return
+
+        # No blob either — seed a stub pickle with the known device_token
+        # so robin_stocks reuses our approved device instead of generating
+        # a random one that triggers Robinhood's device verification.
+        device_token = os.getenv("RH_DEVICE_TOKEN", "")
+        if not device_token:
+            log.warning("[pickle] No blob pickle and RH_DEVICE_TOKEN not set — "
+                        "fresh login will generate a random device_token "
+                        "(may trigger device challenge)")
+            return
+
+        os.makedirs(os.path.dirname(self._pickle_path), exist_ok=True)
+        stub = {
+            "device_token": device_token,
+            "access_token": "",
+            "token_type": "Bearer",
+            "refresh_token": "",
+        }
+        with open(self._pickle_path, "wb") as f:
+            pickle.dump(stub, f)
+        log.info("[pickle] Seeded stub pickle with RH_DEVICE_TOKEN=%s...%s",
+                 device_token[:8], device_token[-4:])
 
     def _upload_pickle_to_blob(self):
         """Upload the current pickle to Netlify Blobs after successful login."""
@@ -197,11 +225,20 @@ class RobinhoodTrader:
     def _ensure_auth(self):
         """Re-authenticate if session has expired."""
         if not self._authenticated:
+            if self._device_challenge_mode:
+                raise RuntimeError("Cannot authenticate — device challenge pending")
             self._login()
             return
+        # Tolerate transient errors (429, network blips) so we don't
+        # trigger a full re-login that could hit the device challenge loop.
         try:
             rh.profiles.load_account_profile()
-        except Exception:
+        except Exception as e:
+            err_str = str(e)
+            if "429" in err_str or "Too Many Requests" in err_str:
+                log.warning("Robinhood 429 during session check — "
+                            "skipping re-auth (session likely still valid)")
+                return
             log.warning("Robinhood session expired, re-authenticating...")
             slack_notify(
                 "<!channel> :warning: FlipActivate: allocation-engine-2.0 — "
