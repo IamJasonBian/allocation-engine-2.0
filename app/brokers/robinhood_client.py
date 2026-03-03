@@ -107,13 +107,14 @@ class RobinhoodTrader:
             )
             return
 
-        # No blob either — seed a stub pickle with the known device_token
+        # No blob either — seed a stub pickle with the static device_token
         # so robin_stocks reuses our approved device instead of generating
         # a random one that triggers Robinhood's device verification.
-        device_token = os.getenv("RH_DEVICE_TOKEN", "")
+        from app.config import Config
+        device_token = Config.RH_DEVICE_TOKEN
         if not device_token:
-            log.warning("[pickle] No blob pickle and RH_DEVICE_TOKEN not set — "
-                        "fresh login will generate a random device_token "
+            log.warning("[pickle] RH_DEVICE_TOKEN not set — "
+                        "robin_stocks will generate a random device_token "
                         "(may trigger device challenge)")
             return
 
@@ -126,7 +127,7 @@ class RobinhoodTrader:
         }
         with open(self._pickle_path, "wb") as f:
             pickle.dump(stub, f)
-        log.info("[pickle] Seeded stub pickle with RH_DEVICE_TOKEN=%s...%s",
+        log.info("[pickle] Seeded stub pickle with static device_token=%s...%s",
                  device_token[:8], device_token[-4:])
 
     def _upload_pickle_to_blob(self):

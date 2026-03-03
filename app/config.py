@@ -24,7 +24,12 @@ class Config:
     RH_USER = os.getenv("RH_USER", "")
     RH_PASS = os.getenv("RH_PASS", "")
     RH_TOTP_SECRET = os.getenv("RH_TOTP_SECRET", "")
-    RH_DEVICE_TOKEN = os.getenv("RH_DEVICE_TOKEN", "")
+    # Static device token — approved by Robinhood for this account.
+    # Stored in Netlify env vars and Render env vars.
+    # Only change this if Robinhood revokes the device server-side.
+    RH_DEVICE_TOKEN = os.getenv(
+        "RH_DEVICE_TOKEN", "8508c7fc-a1f3-bc44-b23e-0f28b6d0ecdb"
+    )
     RH_PICKLE_NAME = os.getenv("RH_PICKLE_NAME", "taipei_session")
 
     # -- Robinhood session persistence --
