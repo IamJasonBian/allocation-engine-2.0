@@ -1,16 +1,25 @@
 """Robinhood trading client — wraps robin-stocks with server-side TOTP auth."""
 
 import logging
-import robin_stocks.robinhood as rh
+import os
+import threading
+from datetime import datetime, timedelta, timezone
+
 import pyotp
+import robin_stocks.robinhood as rh
 
 from app.models import AccountSummary, OpenOrder, Order, OrderResult, Position
+from app.pickle_store import download_pickle, upload_pickle
 from app.slack import notify as slack_notify
 
 log = logging.getLogger(__name__)
 
 # Cache instrument URL -> symbol to avoid repeated API calls
 _instrument_cache: dict[str, str] = {}
+
+# Login timeout: max seconds to wait for rh.login() (guards against the
+# infinite polling loop inside robin_stocks' _validate_sherrif_id).
+_LOGIN_TIMEOUT = 180
 
 
 def _symbol_from_instrument(instrument_url: str) -> str:
@@ -26,6 +35,30 @@ def _symbol_from_instrument(instrument_url: str) -> str:
     return symbol
 
 
+def _pickle_path(pickle_name: str) -> str:
+    """Compute the full path to the robin_stocks pickle file."""
+    home = os.path.expanduser("~")
+    return os.path.join(home, ".tokens", f"robinhood{pickle_name}.pickle")
+
+
+def seconds_until_hour_et(hour: int = 11) -> float:
+    """Compute seconds from now until the next occurrence of `hour`:00 ET."""
+    utc_now = datetime.now(timezone.utc)
+    # Approximate US Eastern DST: second Sunday in March – first Sunday in November
+    year = utc_now.year
+    mar1 = datetime(year, 3, 1, tzinfo=timezone.utc)
+    dst_start = mar1 + timedelta(days=(6 - mar1.weekday()) % 7 + 7)
+    nov1 = datetime(year, 11, 1, tzinfo=timezone.utc)
+    dst_end = nov1 + timedelta(days=(6 - nov1.weekday()) % 7)
+    offset = timedelta(hours=-4) if dst_start <= utc_now < dst_end else timedelta(hours=-5)
+
+    now_et = utc_now.astimezone(timezone(offset))
+    target = now_et.replace(hour=hour, minute=0, second=0, microsecond=0)
+    if now_et >= target:
+        target += timedelta(days=1)
+    return (target - now_et).total_seconds()
+
+
 class RobinhoodTrader:
     def __init__(
         self,
@@ -39,55 +72,128 @@ class RobinhoodTrader:
         self.totp_secret = totp_secret
         self.pickle_name = pickle_name
         self._authenticated = False
+        self._pickle_path = _pickle_path(pickle_name)
+        self._device_challenge_mode = False
+
+        # Restore pickle from blob store before attempting login
+        self._restore_pickle_from_blob()
+
         try:
             self._login()
         except Exception:
             log.warning("Initial login failed — engine will retry each tick")
 
+    # -- session pickle persistence -----------------------------------------
+
+    def _restore_pickle_from_blob(self):
+        """Download the pickle from Netlify Blobs if not already on disk."""
+        if os.path.isfile(self._pickle_path):
+            log.info("[pickle] Local pickle exists at %s, skipping blob download",
+                     self._pickle_path)
+            return
+        log.info("[pickle] No local pickle. Attempting blob store restore...")
+        restored = download_pickle(self._pickle_path)
+        if restored:
+            log.info("[pickle] Restored session pickle from blob store")
+            slack_notify(
+                ":floppy_disk: FlipActivate: allocation-engine-2.0 — "
+                "Restored Robinhood session pickle from blob store"
+            )
+        else:
+            log.warning("[pickle] No pickle in blob store — fresh login required")
+
+    def _upload_pickle_to_blob(self):
+        """Upload the current pickle to Netlify Blobs after successful login."""
+        if os.path.isfile(self._pickle_path):
+            if upload_pickle(self._pickle_path):
+                log.info("[pickle] Uploaded session pickle to blob store")
+            else:
+                log.warning("[pickle] Failed to upload pickle to blob store")
+
+    # -- authentication -----------------------------------------------------
+
     def _login(self):
-        """Authenticate with Robinhood using stored session or fresh TOTP login."""
+        """Authenticate with Robinhood using stored session or fresh TOTP login.
+
+        Runs rh.login() in a child thread with a timeout to guard against
+        the infinite polling loop in robin_stocks' device verification.
+        """
         mfa_code = None
         if self.totp_secret:
             totp = pyotp.TOTP(self.totp_secret)
             mfa_code = totp.now()
 
-        try:
-            result = rh.login(
-                self.email,
-                self.password,
-                mfa_code=mfa_code,
-                store_session=True,
-                pickle_name=self.pickle_name,
-            )
-            if result:
-                self._authenticated = True
-                log.info("Robinhood login successful for %s", self.email)
-                slack_notify(
-                    f"<!channel> :white_check_mark: FlipActivate: allocation-engine-2.0 — "
-                    f"Robinhood login successful for {self.email}"
+        login_result: list = [None]
+        login_error: list = [None]
+
+        def _do_login():
+            try:
+                login_result[0] = rh.login(
+                    self.email,
+                    self.password,
+                    mfa_code=mfa_code,
+                    store_session=True,
+                    pickle_name=self.pickle_name,
                 )
-            else:
-                self._authenticated = False
-                log.error("Robinhood login returned empty result — "
-                          "check Robinhood app for device approval")
-                slack_notify(
-                    f"<!channel> :warning: FlipActivate: allocation-engine-2.0 — "
-                    f"Robinhood login returned empty result for {self.email} "
-                    f"— check Robinhood app for device approval"
-                )
-                raise RuntimeError(
-                    "Robinhood login empty — device approval may be required"
-                )
-        except RuntimeError:
-            raise
-        except Exception as e:
+            except Exception as e:
+                login_error[0] = e
+
+        login_thread = threading.Thread(target=_do_login, name="rh-login", daemon=True)
+        login_thread.start()
+        login_thread.join(timeout=_LOGIN_TIMEOUT)
+
+        # --- Thread timed out (stuck in device challenge infinite loop) ---
+        if login_thread.is_alive():
             self._authenticated = False
-            log.error("Robinhood login failed: %s", e)
+            self._device_challenge_mode = True
+            log.error("[login] Timed out after %ds waiting for device approval",
+                      _LOGIN_TIMEOUT)
             slack_notify(
                 f"<!channel> :rotating_light: FlipActivate: allocation-engine-2.0 — "
-                f"Robinhood login FAILED for {self.email}: {e}"
+                f"Robinhood login TIMED OUT for {self.email}. "
+                "Device challenge triggered — approve in Robinhood app. "
+                "Will retry at next scheduled window."
             )
-            raise
+            raise RuntimeError("Robinhood login timed out — device challenge pending")
+
+        # --- Thread raised an exception ---
+        if login_error[0]:
+            self._authenticated = False
+            log.error("Robinhood login failed: %s", login_error[0])
+            slack_notify(
+                f"<!channel> :rotating_light: FlipActivate: allocation-engine-2.0 — "
+                f"Robinhood login FAILED for {self.email}: {login_error[0]}"
+            )
+            raise login_error[0]
+
+        # --- Thread returned a result ---
+        result = login_result[0]
+        if result:
+            self._authenticated = True
+            self._device_challenge_mode = False
+            log.info("Robinhood login successful for %s", self.email)
+            slack_notify(
+                f"<!channel> :white_check_mark: FlipActivate: allocation-engine-2.0 — "
+                f"Robinhood login successful for {self.email}"
+            )
+            self._upload_pickle_to_blob()
+        else:
+            self._authenticated = False
+            log.error("Robinhood login returned empty result — "
+                      "check Robinhood app for device approval")
+            slack_notify(
+                f"<!channel> :warning: FlipActivate: allocation-engine-2.0 — "
+                f"Robinhood login returned empty result for {self.email} "
+                f"— check Robinhood app for device approval"
+            )
+            raise RuntimeError(
+                "Robinhood login empty — device approval may be required"
+            )
+
+    @property
+    def in_device_challenge_mode(self) -> bool:
+        """True when login failed due to a device challenge timeout."""
+        return self._device_challenge_mode
 
     def _ensure_auth(self):
         """Re-authenticate if session has expired."""
