@@ -76,7 +76,9 @@ class OptionsClient(config: AppConfig):
       for batch <- batches do
         val symbolsParam = batch.mkString(",")
         val startParam = start.getOrElse(LocalDate.now().atStartOfDay().format(DateTimeFormatter.ISO_LOCAL_DATE_TIME) + "Z")
-        val endParam = end.getOrElse(Instant.now().toString)
+        // Cap end to 16 minutes ago so we stay within the free delayed-data window
+        // (real-time OPRA data requires a paid Algo Trader Plus subscription)
+        val endParam = end.getOrElse(Instant.now().minusSeconds(960).toString)
 
         val response = basicRequest
           .get(uri"$optionsBaseUrl/bars?symbols=$symbolsParam&timeframe=$timeframe&start=$startParam&end=$endParam&limit=$limit&sort=desc")
