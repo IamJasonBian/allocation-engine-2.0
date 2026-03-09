@@ -70,4 +70,80 @@ services:
       - key: OPTIONS_SYMBOLS
         value: "IWN,CRWD"
       - key: OPTIONS_POLL_INTERVAL_MS
-        value: "30000"
+        value: "900000"
+
+  # ── Alpha / Staging Environment ──────────────────────────────────
+  - type: web
+    name: allocation-engine-alpha
+    runtime: python
+    branch: IamJasonBian/alpaca-enable-options
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn app.wsgi:application
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12"
+      - key: ENABLED_BROKERS
+        sync: false
+      - key: DEFAULT_BROKER
+        sync: false
+      - key: RH_USER
+        sync: false
+      - key: RH_PASS
+        sync: false
+      - key: RH_TOTP_SECRET
+        sync: false
+      - key: RH_DEVICE_TOKEN
+        sync: false
+      - key: ALPACA_API_KEY
+        sync: false
+      - key: ALPACA_SECRET_KEY
+        sync: false
+      - key: ALPACA_PAPER
+        sync: false
+      - key: RUNTIME_SERVICE_URL
+        sync: false
+      - key: NETLIFY_API_TOKEN
+        sync: false
+      - key: NETLIFY_SITE_ID
+        sync: false
+      - key: SLACK_WEBHOOK_URL
+        sync: false
+      - key: DRY_RUN
+        value: "true"
+      - key: ENGINE_ENABLED
+        value: "true"
+      - key: ENGINE_BROKER
+        value: "alpaca"
+      - key: POLL_INTERVAL_SECONDS
+        value: "60"
+    healthCheckPath: /api/health
+
+  - type: worker
+    name: market-data-service-alpha
+    runtime: docker
+    branch: IamJasonBian/alpaca-enable-options
+    dockerfilePath: ./market-data-service/Dockerfile
+    dockerContext: ./market-data-service
+    region: ohio
+    plan: starter
+    envVars:
+      - key: ALPACA_API_KEY
+        sync: false
+      - key: ALPACA_SECRET_KEY
+        sync: false
+      - key: REDIS_HOST
+        value: redis-17054.c99.us-east-1-4.ec2.cloud.redislabs.com:17054
+      - key: REDIS_PASSWORD
+        sync: false
+      - key: POLL_INTERVAL_MS
+        value: "3000"
+      - key: SYMBOLS
+        value: BTC
+      - key: CRYPTO_SYMBOLS
+        value: BTC/USD
+      - key: HISTORY_MAX_SIZE
+        value: "10000"
+      - key: OPTIONS_SYMBOLS
+        value: "IWN,CRWD"
+      - key: OPTIONS_POLL_INTERVAL_MS
+        value: "900000"
