@@ -12,3 +12,6 @@ build/
 market-data-service/.gradle/
 market-data-service/build/
 *.class
+
+# Local Netlify folder
+.netlify
