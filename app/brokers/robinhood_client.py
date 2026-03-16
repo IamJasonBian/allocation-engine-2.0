@@ -297,7 +297,13 @@ class RobinhoodTrader:
 
     def open_orders(self) -> list[dict]:
         self._ensure_auth()
-        raw = rh.orders.get_all_open_stock_orders()
+        # Avoid rh.orders.get_all_open_stock_orders() — it crashes on orders
+        # missing a 'cancel' key (robin_stocks bug).  Fetch all orders and
+        # filter to open states ourselves.
+        all_orders = rh.orders.get_all_stock_orders()
+        _open_states = {"queued", "unconfirmed", "confirmed", "partially_filled"}
+        raw = [o for o in (all_orders or [])
+               if isinstance(o, dict) and o.get("state") in _open_states]
         result = []
         for o in raw:
             symbol = _symbol_from_instrument(o.get("instrument", ""))
