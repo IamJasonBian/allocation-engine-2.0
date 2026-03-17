@@ -365,3 +365,249 @@ class RobinhoodTrader:
         self._ensure_auth()
         rh.orders.cancel_all_stock_orders()
         log.info("All RH stock orders cancelled")
+
+    # -- order history & P&L ------------------------------------------------
+
+    def order_history(self, limit: int = 50) -> list[dict]:
+        """Return recent filled/completed orders."""
+        self._ensure_auth()
+        all_orders = rh.orders.get_all_stock_orders()
+        result = []
+        for o in (all_orders or []):
+            if not isinstance(o, dict):
+                continue
+            symbol = _symbol_from_instrument(o.get("instrument", ""))
+            avg_price = o.get("average_price")
+            result.append({
+                "id": o.get("id"),
+                "symbol": symbol,
+                "side": o.get("side", "").upper(),
+                "quantity": float(o.get("quantity", 0)),
+                "filled_quantity": float(o.get("cumulative_quantity", 0)),
+                "price": float(avg_price) if avg_price else None,
+                "limit_price": float(o["price"]) if o.get("price") else None,
+                "stop_price": float(o["stop_price"]) if o.get("stop_price") else None,
+                "type": o.get("type", "market"),
+                "state": o.get("state", "unknown"),
+                "created_at": o.get("created_at", ""),
+                "updated_at": o.get("updated_at", ""),
+            })
+            if len(result) >= limit:
+                break
+        return result
+
+    def realized_pnl(self, days: int = 30) -> dict:
+        """Compute realized P&L from filled orders within the last N days."""
+        self._ensure_auth()
+        all_orders = rh.orders.get_all_stock_orders()
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+
+        buys: dict[str, list] = {}
+        sells: dict[str, list] = {}
+        total_buy_volume = 0.0
+        total_sell_volume = 0.0
+
+        for o in (all_orders or []):
+            if not isinstance(o, dict):
+                continue
+            if o.get("state") != "filled":
+                continue
+            created = o.get("created_at", "")
+            if not created:
+                continue
+            try:
+                order_time = datetime.fromisoformat(created.replace("Z", "+00:00"))
+            except (ValueError, TypeError):
+                continue
+            if order_time < cutoff:
+                continue
+
+            symbol = _symbol_from_instrument(o.get("instrument", ""))
+            qty = float(o.get("cumulative_quantity", 0))
+            avg_price = o.get("average_price")
+            if not avg_price or qty == 0:
+                continue
+            price = float(avg_price)
+            side = o.get("side", "")
+            volume = qty * price
+
+            entry = {"qty": qty, "price": price, "time": created}
+            if side == "buy":
+                buys.setdefault(symbol, []).append(entry)
+                total_buy_volume += volume
+            elif side == "sell":
+                sells.setdefault(symbol, []).append(entry)
+                total_sell_volume += volume
+
+        # Compute per-symbol realized P&L using average cost basis
+        symbols_pnl = []
+        total_realized = 0.0
+        all_symbols = set(list(buys.keys()) + list(sells.keys()))
+        for sym in sorted(all_symbols):
+            sym_buys = buys.get(sym, [])
+            sym_sells = sells.get(sym, [])
+            total_bought_qty = sum(b["qty"] for b in sym_buys)
+            total_bought_vol = sum(b["qty"] * b["price"] for b in sym_buys)
+            total_sold_qty = sum(s["qty"] for s in sym_sells)
+            total_sold_vol = sum(s["qty"] * s["price"] for s in sym_sells)
+            avg_buy_price = total_bought_vol / total_bought_qty if total_bought_qty > 0 else 0
+            avg_sell_price = total_sold_vol / total_sold_qty if total_sold_qty > 0 else 0
+            matched_qty = min(total_bought_qty, total_sold_qty)
+            realized = matched_qty * (avg_sell_price - avg_buy_price) if matched_qty > 0 else 0
+
+            total_realized += realized
+            symbols_pnl.append({
+                "symbol": sym,
+                "realizedPnL": round(realized, 2),
+                "totalBought": round(total_bought_vol, 2),
+                "totalSold": round(total_sold_vol, 2),
+                "buyCount": len(sym_buys),
+                "sellCount": len(sym_sells),
+                "avgBuyPrice": round(avg_buy_price, 4),
+                "avgSellPrice": round(avg_sell_price, 4),
+                "remainingShares": round(total_bought_qty - total_sold_qty, 4),
+            })
+
+        return {
+            "totalRealizedPnL": round(total_realized, 2),
+            "totalBuyVolume": round(total_buy_volume, 2),
+            "totalSellVolume": round(total_sell_volume, 2),
+            "days": days,
+            "symbols": symbols_pnl,
+        }
+
+    # -- options ------------------------------------------------------------
+
+    def options_positions(self) -> list[dict]:
+        """Return current options positions."""
+        self._ensure_auth()
+        try:
+            raw = rh.options.get_open_option_positions()
+        except Exception:
+            log.exception("Failed to fetch options positions")
+            return []
+
+        result = []
+        for pos in (raw or []):
+            if not isinstance(pos, dict):
+                continue
+            qty = float(pos.get("quantity", 0))
+            if qty == 0:
+                continue
+
+            chain_symbol = pos.get("chain_symbol", "")
+            option_type = pos.get("type", "")
+            avg_price = float(pos.get("average_price", 0)) / 100  # RH stores in cents
+            trade_value_multiplier = float(pos.get("trade_value_multiplier", 100))
+
+            # Get option instrument details
+            option_data = {}
+            option_url = pos.get("option", "")
+            if option_url:
+                try:
+                    option_data = rh.options.get_option_instrument_data_by_id(
+                        pos.get("option_id", "")
+                    ) or {}
+                except Exception:
+                    pass
+
+            strike = float(option_data.get("strike_price", 0))
+            expiration = option_data.get("expiration_date", "")
+
+            # Calculate DTE
+            dte = 0
+            if expiration:
+                try:
+                    exp_date = datetime.strptime(expiration, "%Y-%m-%d").date()
+                    dte = (exp_date - datetime.now(timezone.utc).date()).days
+                except (ValueError, TypeError):
+                    pass
+
+            # Get market data for this option
+            mark_price = avg_price
+            try:
+                market_data = rh.options.get_option_market_data(
+                    chain_symbol, expiration, str(strike),
+                    option_type, info=None
+                )
+                if market_data and isinstance(market_data, list) and market_data[0]:
+                    md = market_data[0]
+                    mark_price = float(md.get("mark_price", avg_price))
+            except Exception:
+                pass
+
+            cost_basis = qty * avg_price * trade_value_multiplier
+            current_value = qty * mark_price * trade_value_multiplier
+            unrealized_pl = current_value - cost_basis
+
+            result.append({
+                "chain_symbol": chain_symbol,
+                "option_type": option_type,
+                "strike": strike,
+                "expiration": expiration,
+                "dte": dte,
+                "quantity": qty,
+                "avg_price": round(avg_price, 4),
+                "mark_price": round(mark_price, 4),
+                "multiplier": trade_value_multiplier,
+                "cost_basis": round(cost_basis, 2),
+                "current_value": round(current_value, 2),
+                "unrealized_pl": round(unrealized_pl, 2),
+                "unrealized_pl_pct": round(unrealized_pl / cost_basis, 4) if cost_basis else 0,
+            })
+        return result
+
+    def options_orders(self, limit: int = 50) -> list[dict]:
+        """Return recent options orders."""
+        self._ensure_auth()
+        try:
+            raw = rh.orders.get_all_option_orders()
+        except Exception:
+            log.exception("Failed to fetch options orders")
+            return []
+
+        result = []
+        for o in (raw or []):
+            if not isinstance(o, dict):
+                continue
+            legs = []
+            for leg in o.get("legs", []):
+                legs.append({
+                    "side": leg.get("side", ""),
+                    "position_effect": leg.get("position_effect", ""),
+                    "quantity": float(leg.get("quantity", 0)) if leg.get("quantity") else 0,
+                    "strike": float(leg.get("strike_price", 0)) if leg.get("strike_price") else 0,
+                    "expiration": leg.get("expiration_date", ""),
+                    "option_type": leg.get("option_type", ""),
+                    "chain_symbol": o.get("chain_symbol", ""),
+                })
+
+            result.append({
+                "order_id": o.get("id", ""),
+                "state": o.get("state", ""),
+                "quantity": float(o.get("quantity", 0)),
+                "price": float(o.get("price", 0)) if o.get("price") else 0,
+                "premium": float(o.get("premium", 0)) if o.get("premium") else 0,
+                "processed_premium": float(o.get("processed_premium", 0)) if o.get("processed_premium") else 0,
+                "direction": o.get("direction", ""),
+                "order_type": o.get("type", ""),
+                "trigger": o.get("trigger", ""),
+                "time_in_force": o.get("time_in_force", ""),
+                "opening_strategy": o.get("opening_strategy") or o.get("closing_strategy") or "",
+                "created_at": o.get("created_at", ""),
+                "updated_at": o.get("updated_at", ""),
+                "legs": legs,
+            })
+            if len(result) >= limit:
+                break
+        return result
+
+    # -- auth status --------------------------------------------------------
+
+    def auth_status(self) -> dict:
+        """Return current authentication state."""
+        return {
+            "authenticated": self._authenticated,
+            "device_challenge_pending": self._device_challenge_mode,
+            "email": self.email,
+        }

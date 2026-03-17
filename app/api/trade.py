@@ -1,4 +1,4 @@
-"""Direct trading API — submit and cancel orders without the reconciliation loop."""
+"""Trading API — submit and cancel orders."""
 
 from flask import Blueprint, jsonify, request, current_app
 from app.brokers import get_broker
@@ -58,7 +58,7 @@ def place_order(broker_name=None):
         return jsonify({"error": "stop_price required for stop/stop_limit orders"}), 400
 
     # --- check dry_run ---
-    dry_run = body.get("dry_run", current_app.config.get("DRY_RUN", True))
+    dry_run = body.get("dry_run", body.get("dryRun", current_app.config.get("DRY_RUN", True)))
 
     order_dict = {
         "symbol": symbol.upper(),
@@ -71,6 +71,7 @@ def place_order(broker_name=None):
 
     if dry_run:
         return jsonify({
+            "status": "simulated",
             "dry_run": True,
             "broker": broker_name,
             "order": order_dict,
@@ -83,7 +84,9 @@ def place_order(broker_name=None):
         if result is None:
             return jsonify({"error": "Broker rejected the order", "order": order_dict}), 502
         return jsonify({
+            "status": "submitted",
             "broker": broker_name,
+            "orderId": result.get("id"),
             "order": order_dict,
             "result": result,
         }), 201
@@ -91,27 +94,54 @@ def place_order(broker_name=None):
         return jsonify({"error": str(e), "order": order_dict}), 500
 
 
-@bp.route("/trade/cancel/<order_id>", methods=["DELETE"])
-@bp.route("/trade/cancel/<order_id>/<broker_name>", methods=["DELETE"])
-def cancel_order(order_id, broker_name=None):
+# Convenience aliases for the UI
+@bp.route("/trade/buy", methods=["POST"])
+@bp.route("/trade/buy/<broker_name>", methods=["POST"])
+def buy(broker_name=None):
+    """Convenience: place a BUY order."""
+    data = request.get_json(force=True)
+    data["side"] = "BUY"
+    request._cached_json = (data, data)
+    return place_order(broker_name)
+
+
+@bp.route("/trade/sell", methods=["POST"])
+@bp.route("/trade/sell/<broker_name>", methods=["POST"])
+def sell(broker_name=None):
+    """Convenience: place a SELL order."""
+    data = request.get_json(force=True)
+    data["side"] = "SELL"
+    request._cached_json = (data, data)
+    return place_order(broker_name)
+
+
+@bp.route("/trade/cancel", methods=["POST", "DELETE"])
+@bp.route("/trade/cancel/<order_id>", methods=["POST", "DELETE"])
+@bp.route("/trade/cancel/<order_id>/<broker_name>", methods=["POST", "DELETE"])
+def cancel_order(order_id=None, broker_name=None):
     """Cancel a specific order by ID."""
     broker_name = broker_name or current_app.config["DEFAULT_BROKER"]
+    if order_id is None:
+        body = request.get_json(silent=True) or {}
+        order_id = body.get("order_id")
+    if not order_id:
+        return jsonify({"error": "order_id required"}), 400
     try:
         broker = get_broker(broker_name)
         broker.cancel_order(order_id)
-        return jsonify({"broker": broker_name, "cancelled": order_id})
+        return jsonify({"status": "cancelled", "broker": broker_name, "order_id": order_id})
     except Exception as e:
         return jsonify({"error": str(e), "order_id": order_id}), 500
 
 
-@bp.route("/trade/cancel-all", methods=["DELETE"])
-@bp.route("/trade/cancel-all/<broker_name>", methods=["DELETE"])
+@bp.route("/trade/cancel-all", methods=["POST", "DELETE"])
+@bp.route("/trade/cancel-all/<broker_name>", methods=["POST", "DELETE"])
 def cancel_all(broker_name=None):
     """Cancel all open orders."""
     broker_name = broker_name or current_app.config["DEFAULT_BROKER"]
     try:
         broker = get_broker(broker_name)
         broker.cancel_all()
-        return jsonify({"broker": broker_name, "message": "All orders cancelled"})
+        return jsonify({"status": "all_cancelled", "broker": broker_name})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
