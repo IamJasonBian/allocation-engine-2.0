@@ -1,6 +1,8 @@
 """Alpaca trading client — wraps alpaca-py for order submission and account info."""
 
 import logging
+from alpaca.data.requests import StockLatestQuoteRequest
+from alpaca.data.historical import StockHistoricalDataClient
 from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import (
     LimitOrderRequest,
@@ -26,6 +28,7 @@ def _map_symbol(symbol: str) -> str:
 class AlpacaTrader:
     def __init__(self, api_key: str, secret_key: str, paper: bool = True):
         self.client = TradingClient(api_key, secret_key, paper=paper)
+        self.data_client = StockHistoricalDataClient(api_key, secret_key)
 
     # -- account / positions ------------------------------------------------
 
@@ -121,3 +124,25 @@ class AlpacaTrader:
     def cancel_order(self, order_id: str):
         self.client.cancel_order_by_id(order_id)
         log.info("Cancelled order %s", order_id)
+
+    # -- market data -----------------------------------------------------------
+
+    def get_latest_prices(self, symbols: list[str]) -> dict[str, float]:
+        """Fetch latest quote prices from Alpaca market data for the given symbols."""
+        if not symbols:
+            return {}
+        try:
+            mapped = [_map_symbol(s) for s in symbols]
+            req = StockLatestQuoteRequest(symbol_or_symbols=mapped)
+            quotes = self.data_client.get_stock_latest_quote(req)
+            prices = {}
+            for sym, quote in quotes.items():
+                # ask_price is more conservative; fall back to bid
+                price = float(quote.ask_price) if quote.ask_price else float(quote.bid_price)
+                prices[sym] = price
+            # Reverse-map symbols back to original names
+            reverse_map = {v: k for k, v in SYMBOL_MAP.items()}
+            return {reverse_map.get(k, k): v for k, v in prices.items()}
+        except Exception:
+            log.exception("Failed to fetch Alpaca prices for %s", symbols)
+            return {}

@@ -37,6 +37,7 @@ def start_engine_thread(app):
 
             config = app.config
             broker = None
+            data_broker = None
             engine = None
             runtime = RuntimeClient(config["RUNTIME_SERVICE_URL"])
 
@@ -48,8 +49,10 @@ def start_engine_thread(app):
             last_blob_sync = 0.0
             retry_hour = config.get("RH_RETRY_HOUR_ET", 11)
 
-            log.info("Background engine started (interval=%ds, dry_run=%s, broker=%s)",
-                     interval, config["DRY_RUN"], config["ENGINE_BROKER"])
+            data_broker_name = config.get("DATA_BROKER", "")
+            log.info("Background engine started (interval=%ds, dry_run=%s, broker=%s, data_broker=%s)",
+                     interval, config["DRY_RUN"], config["ENGINE_BROKER"],
+                     data_broker_name or "none")
 
             positions = []
             open_orders = []
@@ -60,10 +63,19 @@ def start_engine_thread(app):
                 if broker is None:
                     try:
                         broker = get_broker(config["ENGINE_BROKER"])
+                        if data_broker_name and data_broker_name != config["ENGINE_BROKER"]:
+                            try:
+                                data_broker = get_broker(data_broker_name)
+                                log.info("Data broker (%s) initialized", data_broker_name)
+                            except Exception:
+                                log.exception("Failed to init data broker (%s) — continuing without",
+                                              data_broker_name)
+                                data_broker = None
                         engine = AllocationEngine(
                             trader=broker,
                             runtime=runtime,
                             dry_run=config["DRY_RUN"],
+                            data_broker=data_broker,
                         )
                         log.info("Broker initialized successfully")
                     except Exception as e:
@@ -87,6 +99,28 @@ def start_engine_thread(app):
                     positions = broker.positions()
                     open_orders = broker.open_orders()
                     account = broker.account()
+
+                    # Enrich positions with Alpaca market data prices
+                    if data_broker and hasattr(data_broker, "get_latest_prices") and positions:
+                        try:
+                            syms = [p["symbol"] for p in positions]
+                            prices = data_broker.get_latest_prices(syms)
+                            for p in positions:
+                                sym = p["symbol"]
+                                if sym in prices:
+                                    price = prices[sym]
+                                    qty = p["qty"]
+                                    p["current_price"] = price
+                                    p["market_value"] = round(qty * price, 2)
+                                    cost_basis = qty * p["avg_entry"]
+                                    p["unrealized_pl"] = round(qty * price - cost_basis, 2)
+                                    p["unrealized_pl_pct"] = round(
+                                        (qty * price - cost_basis) / cost_basis, 4
+                                    ) if cost_basis > 0 else 0.0
+                            log.info("[data] Enriched %d/%d positions with Alpaca prices",
+                                     len(prices), len(positions))
+                        except Exception:
+                            log.exception("Failed to enrich positions with Alpaca prices")
 
                     log.info(
                         f"[portfolio] Equity: ${account.get('equity', 0):,.2f} | "

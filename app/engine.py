@@ -10,8 +10,15 @@ log = logging.getLogger(__name__)
 
 
 class AllocationEngine:
-    def __init__(self, trader: BrokerClient, runtime: RuntimeClient, dry_run: bool = True):
-        self.trader = trader
+    def __init__(
+        self,
+        trader: BrokerClient,
+        runtime: RuntimeClient,
+        dry_run: bool = True,
+        data_broker: BrokerClient | None = None,
+    ):
+        self.trader = trader          # execution broker (Robinhood)
+        self.data_broker = data_broker  # market data broker (Alpaca), optional
         self.runtime = runtime
         self.dry_run = dry_run
         self._last_snapshot_key: str | None = None
