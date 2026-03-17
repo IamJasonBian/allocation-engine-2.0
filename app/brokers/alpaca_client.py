@@ -146,3 +146,19 @@ class AlpacaTrader:
         except Exception:
             log.exception("Failed to fetch Alpaca prices for %s", symbols)
             return {}
+
+    def get_latest_quote(self, symbol: str) -> dict:
+        """Fetch detailed quote for a single symbol (bid, ask, last)."""
+        mapped = _map_symbol(symbol)
+        req = StockLatestQuoteRequest(symbol_or_symbols=[mapped])
+        quotes = self.data_client.get_stock_latest_quote(req)
+        quote = quotes.get(mapped)
+        if not quote:
+            raise ValueError(f"No quote found for {symbol}")
+        return {
+            "symbol": symbol,
+            "price": float(quote.ask_price) if quote.ask_price else float(quote.bid_price),
+            "bidPrice": float(quote.bid_price) if quote.bid_price else None,
+            "askPrice": float(quote.ask_price) if quote.ask_price else None,
+            "previousClose": None,
+        }
