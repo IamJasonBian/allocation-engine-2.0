@@ -76,6 +76,7 @@ def start_engine_thread(app):
                             runtime=runtime,
                             dry_run=config["DRY_RUN"],
                             data_broker=data_broker,
+                            max_order_dollars=config["MAX_ORDER_DOLLARS"],
                         )
                         log.info("Broker initialized successfully")
                     except Exception as e:

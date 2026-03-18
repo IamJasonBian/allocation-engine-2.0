@@ -2,6 +2,7 @@
 reconciles against broker positions/orders, and submits the delta."""
 
 import logging
+import math
 
 from app.brokers.base import BrokerClient
 from app.runtime_client import RuntimeClient
@@ -16,11 +17,13 @@ class AllocationEngine:
         runtime: RuntimeClient,
         dry_run: bool = True,
         data_broker: BrokerClient | None = None,
+        max_order_dollars: float = 50.0,
     ):
         self.trader = trader          # execution broker (Robinhood)
         self.data_broker = data_broker  # market data broker (Alpaca), optional
         self.runtime = runtime
         self.dry_run = dry_run
+        self.max_order_dollars = max_order_dollars
         self._last_snapshot_key: str | None = None
 
     # -- public -------------------------------------------------------------
@@ -110,6 +113,25 @@ class AllocationEngine:
 
         results = []
         for order in orders:
+            # Enforce max order dollar limit for limit orders
+            limit_price = order.get("limit_price")
+            if limit_price is not None:
+                dollar_value = order["quantity"] * limit_price
+                if dollar_value > self.max_order_dollars:
+                    capped_qty = math.floor(self.max_order_dollars / limit_price)
+                    if capped_qty == 0:
+                        log.warning(
+                            "Order skipped — single share of %s ($%.2f) exceeds $%.2f limit",
+                            order["symbol"], limit_price, self.max_order_dollars,
+                        )
+                        continue
+                    log.warning(
+                        "Order capped: %s %s qty %g -> %d (limit_price=$%.2f, max=$%.2f)",
+                        order["side"], order["symbol"], order["quantity"],
+                        capped_qty, limit_price, self.max_order_dollars,
+                    )
+                    order["quantity"] = capped_qty
+
             if self.dry_run:
                 log.info("[DRY RUN] Would submit: %s %s %s @ %s",
                          order["side"], order["quantity"],
