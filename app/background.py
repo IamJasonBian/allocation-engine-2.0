@@ -4,8 +4,93 @@ import threading
 import time
 import logging
 from datetime import datetime, timezone
+from typing import TypedDict, Literal
 
 log = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Unified OrderEvent — a single shape for both equity and option orders
+# ---------------------------------------------------------------------------
+
+class OrderEvent(TypedDict, total=False):
+    """Normalised order record used by Redis/Blob sync and the API layer."""
+    id: str
+    symbol: str
+    side: str                             # BUY / SELL
+    order_type: str                       # market / limit / stop / stop_limit
+    asset_type: Literal["equity", "option"]
+    trigger: str                          # immediate / stop
+    state: str                            # queued, confirmed, filled, cancelled …
+    quantity: float
+    filled_quantity: float
+    limit_price: float | None
+    stop_price: float | None
+    price: float | None                   # average fill price
+    created_at: str
+    updated_at: str
+    # option-specific fields (absent for equities)
+    legs: list[dict] | None
+    direction: str | None                 # debit / credit
+    opening_strategy: str | None
+    premium: float | None
+    processed_premium: float | None
+
+def _equity_order_to_event(o: dict, *, is_open: bool = False) -> OrderEvent:
+    """Convert a stock order dict (from broker) into an OrderEvent."""
+    return OrderEvent(
+        id=o.get("id", ""),
+        symbol=o.get("symbol", ""),
+        side=o.get("side", "").upper(),
+        order_type=o.get("type", "market"),
+        asset_type="equity",
+        trigger="stop" if o.get("type") in ("stop", "stop_limit") else "immediate",
+        state=o.get("status") or o.get("state", "unknown"),
+        quantity=float(o.get("qty", 0) or o.get("quantity", 0)),
+        filled_quantity=float(o.get("filled_quantity", 0)),
+        limit_price=o.get("limit_price"),
+        stop_price=o.get("stop_price"),
+        price=o.get("price"),
+        created_at=o.get("created_at", ""),
+        updated_at=o.get("updated_at", ""),
+        legs=None,
+        direction=None,
+        opening_strategy=None,
+        premium=None,
+        processed_premium=None,
+    )
+
+
+def _option_order_to_event(o: dict) -> OrderEvent:
+    """Convert an options order dict (from broker) into an OrderEvent."""
+    # Derive symbol from first leg's chain_symbol, or top-level
+    legs = o.get("legs", [])
+    symbol = o.get("chain_symbol", "")
+    if not symbol and legs:
+        symbol = legs[0].get("chain_symbol", "")
+
+    return OrderEvent(
+        id=o.get("order_id", o.get("id", "")),
+        symbol=symbol,
+        side=o.get("direction", "").upper(),  # debit=BUY, credit=SELL
+        order_type=o.get("order_type", o.get("type", "limit")),
+        asset_type="option",
+        trigger=o.get("trigger", "immediate"),
+        state=o.get("state", "unknown"),
+        quantity=float(o.get("quantity", 0)),
+        filled_quantity=float(o.get("processed_quantity", 0)),
+        limit_price=float(o["price"]) if o.get("price") else None,
+        stop_price=None,
+        price=float(o["premium"]) if o.get("premium") else None,
+        created_at=o.get("created_at", ""),
+        updated_at=o.get("updated_at", ""),
+        legs=legs if legs else None,
+        direction=o.get("direction", ""),
+        opening_strategy=o.get("opening_strategy") or o.get("closing_strategy") or None,
+        premium=float(o["premium"]) if o.get("premium") else None,
+        processed_premium=float(o["processed_premium"]) if o.get("processed_premium") else None,
+    )
+
 
 _engine_thread = None
 _engine_status = {
@@ -33,6 +118,7 @@ def start_engine_thread(app):
             from app.runtime_client import RuntimeClient
             from app.redis_store import sync_to_redis
             from app.blob_store import sync_to_blob
+            from app.s3_store import sync_order_events
             from app.slack import notify as slack_notify
 
             config = app.config
@@ -101,6 +187,30 @@ def start_engine_thread(app):
                     open_orders = broker.open_orders()
                     account = broker.account()
 
+                    # --- Fetch options positions & orders ---
+                    options_positions = []
+                    options_open_orders: list[OrderEvent] = []
+                    if hasattr(broker, "options_positions"):
+                        try:
+                            options_positions = broker.options_positions()
+                        except Exception:
+                            log.exception("Failed to fetch options positions")
+                    if hasattr(broker, "options_orders"):
+                        try:
+                            raw_opt_orders = broker.options_orders(limit=200)
+                            for oo in raw_opt_orders:
+                                options_open_orders.append(_option_order_to_event(oo))
+                        except Exception:
+                            log.exception("Failed to fetch options orders")
+
+                    # --- Build unified OrderEvent lists ---
+                    open_states = {"queued", "unconfirmed", "confirmed",
+                                   "partially_filled", "pending"}
+                    equity_events: list[OrderEvent] = [
+                        _equity_order_to_event(o, is_open=True) for o in open_orders
+                    ]
+                    all_order_events = equity_events + options_open_orders
+
                     # Enrich positions with Alpaca market data prices
                     if data_broker and hasattr(data_broker, "get_latest_prices") and positions:
                         try:
@@ -141,19 +251,43 @@ def start_engine_thread(app):
                     else:
                         log.info("[order] No open orders")
 
-                    # Sync to Redis
+                    if options_positions:
+                        log.info("[options] %d option positions, %d option orders",
+                                 len(options_positions), len(options_open_orders))
+
+                    # Sync to Redis (now with options)
                     try:
-                        sync_to_redis(positions, open_orders, account, live=is_live)
+                        sync_to_redis(
+                            positions, open_orders, account,
+                            live=is_live,
+                            options_positions=options_positions,
+                            order_events=all_order_events,
+                        )
                     except Exception:
                         log.exception("Redis sync error")
 
                     now_mono = time.monotonic()
                     if is_live and (now_mono - last_blob_sync) >= blob_interval:
                         try:
-                            sync_to_blob(positions, open_orders, account)
+                            sync_to_blob(
+                                positions, open_orders, account,
+                                options_positions=options_positions,
+                                option_orders=options_open_orders,
+                            )
                             last_blob_sync = now_mono
                         except Exception:
                             log.exception("Blob sync error")
+
+                        # Sync order events to S3
+                        try:
+                            sync_order_events(
+                                all_order_events,
+                                positions=positions,
+                                options_positions=options_positions,
+                                account=account,
+                            )
+                        except Exception:
+                            log.exception("S3 sync error")
 
                 except Exception as e:
                     log.exception("Engine tick error")

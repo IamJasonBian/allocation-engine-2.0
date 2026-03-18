@@ -13,7 +13,8 @@ BLOBS_URL = "https://api.netlify.com/api/v1/blobs"
 STORE_NAME = "order-book"
 
 
-def sync_to_blob(positions, open_orders, account):
+def sync_to_blob(positions, open_orders, account,
+                 options_positions=None, option_orders=None):
     """Upload current portfolio state to Netlify Blobs.
 
     Writes two keys:
@@ -26,14 +27,23 @@ def sync_to_blob(positions, open_orders, account):
         log.debug("[blob] NETLIFY_API_TOKEN or NETLIFY_SITE_ID not set, skipping")
         return
 
+    if options_positions is None:
+        options_positions = []
+    if option_orders is None:
+        option_orders = []
+
     now = datetime.now(timezone.utc)
     snapshot = {
         "timestamp": now.isoformat(),
         "account": account,
         "positions": positions,
         "open_orders": open_orders,
+        "options_positions": options_positions,
+        "option_orders": [dict(o) for o in option_orders],
         "num_positions": len(positions),
         "num_open_orders": len(open_orders),
+        "num_options_positions": len(options_positions),
+        "num_option_orders": len(option_orders),
     }
 
     headers = {
