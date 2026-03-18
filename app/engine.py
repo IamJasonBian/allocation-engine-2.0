@@ -16,11 +16,13 @@ class AllocationEngine:
         runtime: RuntimeClient,
         dry_run: bool = True,
         data_broker: BrokerClient | None = None,
+        max_order_qty: int = 50,
     ):
         self.trader = trader          # execution broker (Robinhood)
         self.data_broker = data_broker  # market data broker (Alpaca), optional
         self.runtime = runtime
         self.dry_run = dry_run
+        self.max_order_qty = max_order_qty
         self._last_snapshot_key: str | None = None
 
     # -- public -------------------------------------------------------------
@@ -110,6 +112,16 @@ class AllocationEngine:
 
         results = []
         for order in orders:
+            # Enforce max order quantity
+            qty = order["quantity"]
+            if qty > self.max_order_qty:
+                log.warning(
+                    "Order capped: %s %s qty %g -> %d (max_order_qty=%d)",
+                    order["side"], order["symbol"], qty,
+                    self.max_order_qty, self.max_order_qty,
+                )
+                order["quantity"] = self.max_order_qty
+
             if self.dry_run:
                 log.info("[DRY RUN] Would submit: %s %s %s @ %s",
                          order["side"], order["quantity"],
