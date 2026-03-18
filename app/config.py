@@ -48,3 +48,9 @@ class Config:
     ENGINE_BROKER = os.getenv("ENGINE_BROKER", "robinhood")
     DATA_BROKER = os.getenv("DATA_BROKER", "alpaca")
     MAX_ORDER_QTY = int(os.getenv("MAX_ORDER_QTY", "50"))
+
+    # -- S3 (order event storage) --
+    S3_BUCKET = os.getenv("S3_BUCKET", "")
+    S3_PREFIX = os.getenv("S3_PREFIX", "order-events")
+    AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
+    # AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY read by boto3 automatically

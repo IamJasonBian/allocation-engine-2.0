@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 import pyotp
 import robin_stocks.robinhood as rh
 
+from app.enums import OrderType
 from app.pickle_store import download_pickle, upload_pickle
 from app.slack import notify as slack_notify
 
@@ -326,11 +327,11 @@ class RobinhoodTrader:
         symbol = order["symbol"]
         side = order["side"].lower()
         qty = float(order["quantity"])
-        otype = order.get("order_type", "market").lower()
+        otype = order.get("order_type", OrderType.MARKET).lower()
         limit_px = order.get("limit_price")
 
         try:
-            if otype == "limit" and limit_px:
+            if otype == OrderType.LIMIT and limit_px:
                 result = rh.orders.order(
                     symbol, qty, side,
                     limitPrice=float(limit_px),

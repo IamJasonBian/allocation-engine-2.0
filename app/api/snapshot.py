@@ -83,6 +83,10 @@ def snapshot():
                 "updated_at": "",
             })
 
+        # Include options from blob if available
+        options_positions = data.get("options_positions", [])
+        option_orders = data.get("option_orders", [])
+
         return jsonify({
             "timestamp": data.get("timestamp", datetime.now(timezone.utc).isoformat()),
             "order_book": snapshot_orders,
@@ -97,6 +101,10 @@ def snapshot():
                 "market_value": account.get("portfolio_value", 0),
                 "positions": snapshot_positions,
                 "open_orders": snapshot_orders,
+                "open_option_orders": [o for o in option_orders
+                                       if o.get("state") in ("queued", "confirmed",
+                                                              "partially_filled", "pending")],
+                "options": options_positions,
             },
             "market_data": None,
         })
@@ -109,6 +117,20 @@ def snapshot():
         account = broker.account()
         positions = broker.positions()
         open_orders = broker.open_orders()
+
+        # Fetch options if broker supports them
+        options_positions = []
+        option_orders_raw = []
+        if hasattr(broker, "options_positions"):
+            try:
+                options_positions = broker.options_positions()
+            except Exception:
+                log.exception("Failed to fetch live options positions")
+        if hasattr(broker, "options_orders"):
+            try:
+                option_orders_raw = broker.options_orders(limit=50)
+            except Exception:
+                log.exception("Failed to fetch live options orders")
 
         snapshot_positions = []
         for p in positions:
@@ -144,6 +166,10 @@ def snapshot():
             "updated_at": "",
         } for o in open_orders]
 
+        open_option_states = {"queued", "confirmed", "partially_filled", "pending"}
+        open_option_orders = [o for o in option_orders_raw
+                              if o.get("state") in open_option_states]
+
         return jsonify({
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "order_book": snapshot_orders,
@@ -158,6 +184,8 @@ def snapshot():
                 "market_value": account.get("portfolio_value", 0),
                 "positions": snapshot_positions,
                 "open_orders": snapshot_orders,
+                "open_option_orders": open_option_orders,
+                "options": options_positions,
             },
             "market_data": None,
         })

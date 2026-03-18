@@ -4,6 +4,7 @@ reconciles against broker positions/orders, and submits the delta."""
 import logging
 
 from app.brokers.base import BrokerClient
+from app.enums import OrderSide
 from app.runtime_client import RuntimeClient
 
 log = logging.getLogger(__name__)
@@ -92,7 +93,7 @@ class AllocationEngine:
             key = _order_key(o)
             if key in current_map:
                 continue
-            if o["symbol"] in position_symbols and o["side"] == "BUY":
+            if o["symbol"] in position_symbols and o["side"] == OrderSide.BUY:
                 log.info("Skipping %s BUY — already holding position", o["symbol"])
                 continue
             to_submit.append(o)

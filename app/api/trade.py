@@ -2,6 +2,7 @@
 
 from flask import Blueprint, jsonify, request, current_app
 from app.brokers import get_broker
+from app.enums import OrderSide, OrderType
 
 bp = Blueprint("trade", __name__)
 
@@ -33,7 +34,7 @@ def place_order(broker_name=None):
     errors = []
     if not symbol or not isinstance(symbol, str):
         errors.append("symbol is required (string)")
-    if side not in ("BUY", "SELL"):
+    if side not in (OrderSide.BUY, OrderSide.SELL):
         errors.append("side must be 'BUY' or 'SELL'")
     if quantity is None:
         errors.append("quantity is required")
@@ -52,9 +53,9 @@ def place_order(broker_name=None):
     limit_price = body.get("limit_price")
     stop_price = body.get("stop_price")
 
-    if order_type in ("limit", "stop_limit") and limit_price is None:
+    if order_type in (OrderType.LIMIT, OrderType.STOP_LIMIT) and limit_price is None:
         return jsonify({"error": "limit_price required for limit/stop_limit orders"}), 400
-    if order_type in ("stop", "stop_limit") and stop_price is None:
+    if order_type in (OrderType.STOP, OrderType.STOP_LIMIT) and stop_price is None:
         return jsonify({"error": "stop_price required for stop/stop_limit orders"}), 400
 
     # --- check dry_run ---
@@ -100,7 +101,7 @@ def place_order(broker_name=None):
 def buy(broker_name=None):
     """Convenience: place a BUY order."""
     data = request.get_json(force=True)
-    data["side"] = "BUY"
+    data["side"] = OrderSide.BUY
     request._cached_json = (data, data)
     return place_order(broker_name)
 
@@ -110,7 +111,7 @@ def buy(broker_name=None):
 def sell(broker_name=None):
     """Convenience: place a SELL order."""
     data = request.get_json(force=True)
-    data["side"] = "SELL"
+    data["side"] = OrderSide.SELL
     request._cached_json = (data, data)
     return place_order(broker_name)
 
