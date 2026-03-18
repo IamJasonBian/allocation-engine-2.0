@@ -13,6 +13,8 @@ from alpaca.trading.requests import (
 from alpaca.trading.enums import OrderSide, TimeInForce
 from alpaca.common.exceptions import APIError
 
+from app.enums import OrderSide as AppOrderSide, OrderType
+
 log = logging.getLogger(__name__)
 
 SYMBOL_MAP = {
@@ -74,24 +76,24 @@ class AlpacaTrader:
 
     def submit_order(self, order: dict) -> dict | None:
         symbol = _map_symbol(order["symbol"])
-        side = OrderSide.BUY if order["side"] == "BUY" else OrderSide.SELL
+        side = OrderSide.BUY if order["side"] == AppOrderSide.BUY else OrderSide.SELL
         qty = float(order["quantity"])
-        otype = order.get("order_type", "market").lower()
+        otype = order.get("order_type", OrderType.MARKET).lower()
         limit_px = order.get("limit_price")
         stop_px = order.get("stop_price")
 
         try:
-            if otype == "limit" and limit_px is not None:
+            if otype == OrderType.LIMIT and limit_px is not None:
                 req = LimitOrderRequest(
                     symbol=symbol, qty=qty, side=side,
                     limit_price=float(limit_px), time_in_force=TimeInForce.GTC,
                 )
-            elif otype == "stop" and stop_px is not None:
+            elif otype == OrderType.STOP and stop_px is not None:
                 req = StopOrderRequest(
                     symbol=symbol, qty=qty, side=side,
                     stop_price=float(stop_px), time_in_force=TimeInForce.GTC,
                 )
-            elif otype == "stop_limit" and limit_px and stop_px:
+            elif otype == OrderType.STOP_LIMIT and limit_px and stop_px:
                 req = StopLimitOrderRequest(
                     symbol=symbol, qty=qty, side=side,
                     limit_price=float(limit_px), stop_price=float(stop_px),

@@ -4,7 +4,11 @@ import threading
 import time
 import logging
 from datetime import datetime, timezone
-from typing import TypedDict, Literal
+from typing import TypedDict
+
+from app.enums import (
+    OrderSide, OrderType, AssetType, OrderState, OrderTrigger, OPEN_STATES,
+)
 
 log = logging.getLogger(__name__)
 
@@ -17,11 +21,11 @@ class OrderEvent(TypedDict, total=False):
     """Normalised order record used by Redis/Blob sync and the API layer."""
     id: str
     symbol: str
-    side: str                             # BUY / SELL
-    order_type: str                       # market / limit / stop / stop_limit
-    asset_type: Literal["equity", "option"]
-    trigger: str                          # immediate / stop
-    state: str                            # queued, confirmed, filled, cancelled …
+    side: OrderSide
+    order_type: OrderType
+    asset_type: AssetType
+    trigger: OrderTrigger
+    state: OrderState | str
     quantity: float
     filled_quantity: float
     limit_price: float | None
@@ -38,14 +42,15 @@ class OrderEvent(TypedDict, total=False):
 
 def _equity_order_to_event(o: dict, *, is_open: bool = False) -> OrderEvent:
     """Convert a stock order dict (from broker) into an OrderEvent."""
+    raw_type = o.get("type", "market")
     return OrderEvent(
         id=o.get("id", ""),
         symbol=o.get("symbol", ""),
         side=o.get("side", "").upper(),
-        order_type=o.get("type", "market"),
-        asset_type="equity",
-        trigger="stop" if o.get("type") in ("stop", "stop_limit") else "immediate",
-        state=o.get("status") or o.get("state", "unknown"),
+        order_type=raw_type,
+        asset_type=AssetType.EQUITY,
+        trigger=OrderTrigger.STOP if raw_type in (OrderType.STOP, OrderType.STOP_LIMIT) else OrderTrigger.IMMEDIATE,
+        state=o.get("status") or o.get("state", OrderState.UNKNOWN),
         quantity=float(o.get("qty", 0) or o.get("quantity", 0)),
         filled_quantity=float(o.get("filled_quantity", 0)),
         limit_price=o.get("limit_price"),
@@ -63,7 +68,6 @@ def _equity_order_to_event(o: dict, *, is_open: bool = False) -> OrderEvent:
 
 def _option_order_to_event(o: dict) -> OrderEvent:
     """Convert an options order dict (from broker) into an OrderEvent."""
-    # Derive symbol from first leg's chain_symbol, or top-level
     legs = o.get("legs", [])
     symbol = o.get("chain_symbol", "")
     if not symbol and legs:
@@ -72,11 +76,11 @@ def _option_order_to_event(o: dict) -> OrderEvent:
     return OrderEvent(
         id=o.get("order_id", o.get("id", "")),
         symbol=symbol,
-        side=o.get("direction", "").upper(),  # debit=BUY, credit=SELL
-        order_type=o.get("order_type", o.get("type", "limit")),
-        asset_type="option",
-        trigger=o.get("trigger", "immediate"),
-        state=o.get("state", "unknown"),
+        side=o.get("direction", "").upper(),
+        order_type=o.get("order_type", o.get("type", OrderType.LIMIT)),
+        asset_type=AssetType.OPTION,
+        trigger=o.get("trigger", OrderTrigger.IMMEDIATE),
+        state=o.get("state", OrderState.UNKNOWN),
         quantity=float(o.get("quantity", 0)),
         filled_quantity=float(o.get("processed_quantity", 0)),
         limit_price=float(o["price"]) if o.get("price") else None,
@@ -204,8 +208,6 @@ def start_engine_thread(app):
                             log.exception("Failed to fetch options orders")
 
                     # --- Build unified OrderEvent lists ---
-                    open_states = {"queued", "unconfirmed", "confirmed",
-                                   "partially_filled", "pending"}
                     equity_events: list[OrderEvent] = [
                         _equity_order_to_event(o, is_open=True) for o in open_orders
                     ]

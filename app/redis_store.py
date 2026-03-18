@@ -12,6 +12,8 @@ import logging
 import os
 from datetime import datetime, timezone
 
+from app.enums import AssetType, OrderType, OrderTrigger, OPEN_STATES
+
 log = logging.getLogger(__name__)
 
 
@@ -80,32 +82,31 @@ def sync_to_redis(positions, open_orders, account, live=False,
     ts = datetime.now(timezone.utc).isoformat()
 
     # --- Split order events by asset type and state ---
-    open_states = {"queued", "unconfirmed", "confirmed", "partially_filled", "pending"}
-
     if order_events:
         equity_open = [e for e in order_events
-                       if e.get("asset_type") == "equity"
-                       and e.get("state") in open_states]
+                       if e.get("asset_type") == AssetType.EQUITY
+                       and e.get("state") in OPEN_STATES]
         option_open = [e for e in order_events
-                       if e.get("asset_type") == "option"
-                       and e.get("state") in open_states]
+                       if e.get("asset_type") == AssetType.OPTION
+                       and e.get("state") in OPEN_STATES]
         equity_hist = [e for e in order_events
-                       if e.get("asset_type") == "equity"
-                       and e.get("state") not in open_states]
+                       if e.get("asset_type") == AssetType.EQUITY
+                       and e.get("state") not in OPEN_STATES]
         option_hist = [e for e in order_events
-                       if e.get("asset_type") == "option"
-                       and e.get("state") not in open_states]
+                       if e.get("asset_type") == AssetType.OPTION
+                       and e.get("state") not in OPEN_STATES]
     else:
         # Fallback: wrap raw open_orders as equity events
         equity_open = []
         for order in open_orders:
+            raw_type = order.get("type", OrderType.MARKET)
             equity_open.append({
                 "id": order.get("id", "unknown"),
                 "symbol": order.get("symbol", ""),
                 "side": order.get("side", "").upper(),
-                "order_type": order.get("type", "market"),
-                "asset_type": "equity",
-                "trigger": "stop" if order.get("type") in ("stop", "stop_limit") else "immediate",
+                "order_type": raw_type,
+                "asset_type": AssetType.EQUITY,
+                "trigger": OrderTrigger.STOP if raw_type in (OrderType.STOP, OrderType.STOP_LIMIT) else OrderTrigger.IMMEDIATE,
                 "state": order.get("status", "unknown"),
                 "quantity": order.get("qty", 0),
                 "limit_price": order.get("limit_price"),
@@ -185,9 +186,9 @@ def sync_to_redis(positions, open_orders, account, live=False,
                 "order_id": oid,
                 "symbol": evt.get("symbol", ""),
                 "side": evt.get("side", "").upper(),
-                "order_type": evt.get("order_type", "market"),
-                "asset_type": evt.get("asset_type", "equity"),
-                "trigger": evt.get("trigger", "immediate"),
+                "order_type": evt.get("order_type", OrderType.MARKET),
+                "asset_type": evt.get("asset_type", AssetType.EQUITY),
+                "trigger": evt.get("trigger", OrderTrigger.IMMEDIATE),
                 "state": state,
                 "quantity": evt.get("quantity", 0),
                 "filled_quantity": evt.get("filled_quantity", 0),
@@ -196,7 +197,7 @@ def sync_to_redis(positions, open_orders, account, live=False,
                 "price": evt.get("price"),
                 "created_at": evt.get("created_at", ts),
                 "updated_at": evt.get("updated_at", ts),
-                "_status": "open" if state in open_states else "historical",
+                "_status": "open" if state in OPEN_STATES else "historical",
                 "_type": evt.get("asset_type", "equity"),
             }
             # Include option-specific fields
