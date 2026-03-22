@@ -6,6 +6,7 @@ For production, use: gunicorn app.wsgi:application
 
 import argparse
 import logging
+import os
 import sys
 import time
 
@@ -13,6 +14,7 @@ from app import create_app
 from app.config import Config
 from app.engine import AllocationEngine
 from app.brokers import get_broker
+from app.risk import RiskSubject, SlackAlertObserver, RebalancerObserver
 from app.runtime_client import RuntimeClient
 
 logging.basicConfig(
@@ -65,10 +67,26 @@ def status(engine: AllocationEngine, broker_name: str):
         print(f"  {o['side']} {o['quantity']} {o['symbol']} "
               f"{o.get('order_type', 'market')} @ {o.get('limit_price', 'MKT')}")
 
+    # -- Market data & drift --
+    try:
+        mkt = engine.runtime.market_data()
+        tickers = mkt.get("tickers", {})
+        print(f"\n=== Market Data ({len(tickers)} tickers) ===")
+        for sym, m in sorted(tickers.items()):
+            drift = m.get("drift_pct", 0)
+            flag = " ** DRIFT" if abs(drift) >= 0.08 else ""
+            price = m.get("price")
+            price_str = f"${price:,.2f}" if price is not None else "n/a"
+            print(f"  {sym:6s}  {price_str:>12s}  "
+                  f"target={m.get('target_pct', 0):6.2%}  "
+                  f"actual={m.get('actual_pct', 0):6.2%}  "
+                  f"drift={drift:+6.2%}{flag}")
+    except Exception as e:
+        print(f"\n=== Market Data (unavailable: {e}) ===")
+
 
 def serve():
     """Run the Flask development server (use gunicorn for production)."""
-    import os
     app = create_app()
     port = int(os.getenv("PORT", "10000"))
     app.run(host="0.0.0.0", port=port, debug=Config.DEBUG)
@@ -97,7 +115,19 @@ def main():
     with app.app_context():
         broker = get_broker(args.broker)
         runtime = RuntimeClient(Config.RUNTIME_SERVICE_URL)
-        engine = AllocationEngine(trader=broker, runtime=runtime, dry_run=Config.DRY_RUN)
+
+        # Set up risk event bus with observers
+        risk_subject = RiskSubject()
+        slack_url = os.getenv("SLACK_WEBHOOK_URL")
+        if slack_url:
+            risk_subject.attach(SlackAlertObserver(slack_url))
+        rebalancer = RebalancerObserver()
+
+        engine = AllocationEngine(
+            trader=broker, runtime=runtime,
+            dry_run=Config.DRY_RUN, risk_subject=risk_subject,
+        )
+        engine.register_rebalancer(rebalancer)
 
         if args.command == "run":
             run_loop(engine, Config.POLL_INTERVAL_SECONDS)

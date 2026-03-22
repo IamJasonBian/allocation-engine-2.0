@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 import pyotp
 import robin_stocks.robinhood as rh
 
+from app.brokers.base import BrokerClient
 from app.enums import OrderType
 from app.pickle_store import download_pickle, upload_pickle
 from app.slack import notify as slack_notify
@@ -60,7 +61,7 @@ def seconds_until_hour_et(hour: int = 11) -> float:
     return (target - now_et).total_seconds()
 
 
-class RobinhoodTrader:
+class RobinhoodTrader(BrokerClient):
     def __init__(
         self,
         email: str,
