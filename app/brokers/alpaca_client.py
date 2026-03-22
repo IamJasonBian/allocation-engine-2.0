@@ -13,6 +13,7 @@ from alpaca.trading.requests import (
 from alpaca.trading.enums import OrderSide, TimeInForce
 from alpaca.common.exceptions import APIError
 
+from app.brokers.base import BrokerClient
 from app.enums import OrderSide as AppOrderSide, OrderType
 
 log = logging.getLogger(__name__)
@@ -27,7 +28,7 @@ def _map_symbol(symbol: str) -> str:
     return SYMBOL_MAP.get(symbol, symbol)
 
 
-class AlpacaTrader:
+class AlpacaTrader(BrokerClient):
     def __init__(self, api_key: str, secret_key: str, paper: bool = True):
         self.client = TradingClient(api_key, secret_key, paper=paper)
         self.data_client = StockHistoricalDataClient(api_key, secret_key)

@@ -1,4 +1,4 @@
-"""Shared enums for order side, type, asset type, state, and trigger."""
+"""Shared enums for order side, type, asset type, state, trigger, and risk events."""
 
 from enum import StrEnum
 
@@ -43,3 +43,10 @@ OPEN_STATES = frozenset({
 class OrderTrigger(StrEnum):
     IMMEDIATE = "immediate"
     STOP = "stop"
+
+
+class RiskEventType(StrEnum):
+    """Risk events emitted during engine reconciliation."""
+    STRUCTURAL_DRIFT = "structural_drift"   # drift > threshold → possible structural change
+    POSITION_LIMIT = "position_limit"       # position exceeds concentration limit
+    ORDER_REJECTED = "order_rejected"       # broker rejected an order
