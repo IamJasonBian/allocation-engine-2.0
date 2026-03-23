@@ -181,14 +181,15 @@ def start_engine_thread(app):
             open_orders = []
             account = {}
 
-            _engine_status["last_error"] = "pre_loop_v2"
+            import time as _time
+            _engine_status["last_error"] = f"pre_loop_v3_{int(_time.time())}"
             log.info("[engine] About to enter main loop")
 
             while True:
                 # --- Broker initialization ---
                 if broker is None:
                     try:
-                        _engine_status["last_error"] = "broker_init_v2"
+                        _engine_status["last_error"] = f"broker_get_{config['ENGINE_BROKER']}_{int(_time.time())}"
                         broker = get_broker(config["ENGINE_BROKER"])
                         _engine_status["last_error"] = "broker_init_done"
                         if data_broker_name and data_broker_name != config["ENGINE_BROKER"]:

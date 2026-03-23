@@ -112,10 +112,6 @@ class RobinhoodTrader(BrokerClient):
         log.info("[pickle] No local pickle. Attempting blob store restore...")
         if download_pickle(self._pickle_path):
             log.info("[pickle] Restored session pickle from blob store")
-            slack_notify(
-                ":floppy_disk: FlipActivate: allocation-engine-2.0 — "
-                "Restored Robinhood session pickle from blob store"
-            )
             return
 
         # No blob either — seed a stub pickle with the static device_token
