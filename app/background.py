@@ -116,13 +116,15 @@ def start_engine_thread(app):
         log.info("[engine] Thread already alive, skipping")
         return
 
-    log.info("[engine] Starting background engine thread")
+    log.info("[engine] Scheduling background engine thread (5s delay)")
+
+    def _start_delayed():
+        """Called by Timer after create_app() has fully returned."""
+        global _engine_thread
+        _engine_thread = threading.Thread(target=_loop, daemon=True, name="engine-loop")
+        _engine_thread.start()
 
     def _loop():
-        # Wait for create_app() to finish before importing to avoid
-        # import-lock deadlocks between main and background threads
-        time.sleep(2)
-
         # Push app context for the entire thread lifetime
         ctx = app.app_context()
         ctx.push()
@@ -406,8 +408,11 @@ def start_engine_thread(app):
             log.exception("Engine thread crashed")
             _engine_status["last_error"] = f"thread_crash: {e}"
 
-    _engine_thread = threading.Thread(target=_loop, daemon=True, name="engine-loop")
-    _engine_thread.start()
+    # Delay thread start to ensure create_app() fully returns first.
+    # This avoids import-lock deadlocks between main and background threads.
+    _timer = threading.Timer(5.0, _start_delayed)
+    _timer.daemon = True
+    _timer.start()
 
 
 def get_engine_status() -> dict:
