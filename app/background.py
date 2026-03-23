@@ -122,28 +122,30 @@ def start_engine_thread(app):
     def _loop():
         log.info("[engine] _loop entered")
         _engine_status["last_error"] = "loop_entered"
-        with app.app_context():
-            try:
+        try:
+            with app.app_context():
+                _engine_status["last_error"] = "app_context_entered"
                 from app.brokers import get_broker, clear_broker
+                _engine_status["last_error"] = "imports_brokers"
                 from app.brokers.robinhood_client import RobinhoodTrader, seconds_until_hour_et
+                _engine_status["last_error"] = "imports_rh"
                 from app.engine import AllocationEngine
+                _engine_status["last_error"] = "imports_engine"
                 from app.runtime_client import RuntimeClient
                 from app.redis_store import sync_to_redis
                 from app.blob_store import sync_to_blob
                 from app.s3_store import sync_order_events
                 from app.slack import notify as slack_notify
+                _engine_status["last_error"] = "imports_risk"
                 from app.risk.observer import RiskSubject
                 from app.risk.slack_observer import SlackAlertObserver
                 from app.shadow_index import (
                     BTC_MINI, build_shadow_position, check_shadow_drift,
                     check_order_shadow_drift,
                 )
-            except Exception as e:
-                log.exception("Engine thread failed during imports")
-                _engine_status["last_error"] = f"import error: {e}"
-                return
+                _engine_status["last_error"] = "imports_done"
 
-            config = app.config
+                config = app.config
             broker = None
             data_broker = None
             engine = None
@@ -394,6 +396,9 @@ def start_engine_thread(app):
 
                 _tick_event.wait(timeout=interval)
                 _tick_event.clear()
+        except Exception as e:
+            log.exception("Engine thread crashed")
+            _engine_status["last_error"] = f"thread_crash: {e}"
 
     _engine_thread = threading.Thread(target=_loop, daemon=True, name="engine-loop")
     _engine_thread.start()
