@@ -116,30 +116,32 @@ def start_engine_thread(app):
         log.info("[engine] Thread already alive, skipping")
         return
 
-    # Import everything in the main thread to avoid import-lock deadlocks
-    # when the background thread tries to import while create_app() is still running.
-    from app.brokers import get_broker, clear_broker
-    from app.brokers.robinhood_client import RobinhoodTrader, seconds_until_hour_et
-    from app.engine import AllocationEngine
-    from app.runtime_client import RuntimeClient
-    from app.redis_store import sync_to_redis
-    from app.blob_store import sync_to_blob
-    from app.s3_store import sync_order_events
-    from app.slack import notify as slack_notify
-    from app.risk.observer import RiskSubject
-    from app.risk.slack_observer import SlackAlertObserver
-    from app.shadow_index import (
-        BTC_MINI, build_shadow_position, check_shadow_drift,
-        check_order_shadow_drift,
-    )
-
-    log.info("[engine] Starting background engine thread (imports done)")
+    log.info("[engine] Starting background engine thread")
 
     def _loop():
+        # Wait for create_app() to finish before importing to avoid
+        # import-lock deadlocks between main and background threads
+        time.sleep(2)
+
         # Push app context for the entire thread lifetime
         ctx = app.app_context()
         ctx.push()
         try:
+            from app.brokers import get_broker, clear_broker
+            from app.brokers.robinhood_client import RobinhoodTrader, seconds_until_hour_et
+            from app.engine import AllocationEngine
+            from app.runtime_client import RuntimeClient
+            from app.redis_store import sync_to_redis
+            from app.blob_store import sync_to_blob
+            from app.s3_store import sync_order_events
+            from app.slack import notify as slack_notify
+            from app.risk.observer import RiskSubject
+            from app.risk.slack_observer import SlackAlertObserver
+            from app.shadow_index import (
+                BTC_MINI, build_shadow_position, check_shadow_drift,
+                check_order_shadow_drift,
+            )
+
             config = app.config
             broker = None
             data_broker = None
