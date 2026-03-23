@@ -409,7 +409,10 @@ def start_engine_thread(app):
 
 
 def get_engine_status() -> dict:
-    return dict(_engine_status)
+    from app.brokers.robinhood_client import _init_phase
+    status = dict(_engine_status)
+    status["rh_init_phase"] = _init_phase
+    return status
 
 
 def trigger_tick() -> dict:
