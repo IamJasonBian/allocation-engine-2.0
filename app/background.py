@@ -116,34 +116,29 @@ def start_engine_thread(app):
         log.info("[engine] Thread already alive, skipping")
         return
 
-    log.info("[engine] Scheduling background engine thread (5s delay)")
+    # Import everything here (called from gunicorn post_fork, not create_app)
+    from app.brokers import get_broker, clear_broker
+    from app.brokers.robinhood_client import RobinhoodTrader, seconds_until_hour_et
+    from app.engine import AllocationEngine
+    from app.runtime_client import RuntimeClient
+    from app.redis_store import sync_to_redis
+    from app.blob_store import sync_to_blob
+    from app.s3_store import sync_order_events
+    from app.slack import notify as slack_notify
+    from app.risk.observer import RiskSubject
+    from app.risk.slack_observer import SlackAlertObserver
+    from app.shadow_index import (
+        BTC_MINI, build_shadow_position, check_shadow_drift,
+        check_order_shadow_drift,
+    )
 
-    def _start_delayed():
-        """Called by Timer after create_app() has fully returned."""
-        global _engine_thread
-        _engine_thread = threading.Thread(target=_loop, daemon=True, name="engine-loop")
-        _engine_thread.start()
+    log.info("[engine] Starting background engine thread (imports done)")
 
     def _loop():
         # Push app context for the entire thread lifetime
         ctx = app.app_context()
         ctx.push()
         try:
-            from app.brokers import get_broker, clear_broker
-            from app.brokers.robinhood_client import RobinhoodTrader, seconds_until_hour_et
-            from app.engine import AllocationEngine
-            from app.runtime_client import RuntimeClient
-            from app.redis_store import sync_to_redis
-            from app.blob_store import sync_to_blob
-            from app.s3_store import sync_order_events
-            from app.slack import notify as slack_notify
-            from app.risk.observer import RiskSubject
-            from app.risk.slack_observer import SlackAlertObserver
-            from app.shadow_index import (
-                BTC_MINI, build_shadow_position, check_shadow_drift,
-                check_order_shadow_drift,
-            )
-
             config = app.config
             broker = None
             data_broker = None
@@ -408,11 +403,8 @@ def start_engine_thread(app):
             log.exception("Engine thread crashed")
             _engine_status["last_error"] = f"thread_crash: {e}"
 
-    # Delay thread start to ensure create_app() fully returns first.
-    # This avoids import-lock deadlocks between main and background threads.
-    _timer = threading.Timer(5.0, _start_delayed)
-    _timer.daemon = True
-    _timer.start()
+    _engine_thread = threading.Thread(target=_loop, daemon=True, name="engine-loop")
+    _engine_thread.start()
 
 
 def get_engine_status() -> dict:

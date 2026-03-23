@@ -26,13 +26,11 @@ def create_app(config_class=Config):
     from app.api import register_blueprints
     register_blueprints(app)
 
-    engine_enabled = app.config.get("ENGINE_ENABLED", True)
+    # Engine thread is started by gunicorn's post_fork hook (gunicorn.conf.py)
+    # to avoid import-lock deadlocks during create_app().
     log.info("[create_app] ENGINE_ENABLED=%s, DRY_RUN=%s, ENGINE_BROKER=%s",
-             engine_enabled, app.config.get("DRY_RUN"), app.config.get("ENGINE_BROKER"))
-
-    if engine_enabled:
-        start_engine_thread(app)
-    else:
-        log.warning("[create_app] Engine is DISABLED — skipping background thread")
+             app.config.get("ENGINE_ENABLED", True),
+             app.config.get("DRY_RUN"),
+             app.config.get("ENGINE_BROKER"))
 
     return app
