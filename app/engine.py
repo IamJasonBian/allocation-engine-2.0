@@ -73,12 +73,16 @@ class AllocationEngine:
             desired_orders, current_orders, current_positions
         )
 
-        # Append any rebalance orders queued by the rebalancer observer
+        # Append any rebalance orders / cancels queued by the rebalancer observer
         if self._rebalancer:
-            rebalance_orders = self._rebalancer.drain()
+            rebalance_orders, rebalance_cancels = self._rebalancer.drain()
             if rebalance_orders:
                 log.info("Adding %d rebalance order(s) from drift events", len(rebalance_orders))
                 new_orders.extend(rebalance_orders)
+            if rebalance_cancels:
+                log.info("Adding %d cancel(s) from shadow depeg events", len(rebalance_cancels))
+                for cancel in rebalance_cancels:
+                    stale_order_ids.append(cancel["order_id"])
 
         self._execute(new_orders, stale_order_ids)
 

@@ -148,11 +148,13 @@ def start_engine_thread(app):
             # Shadow index config — project BTC/USD → Grayscale Bitcoin Mini Trust ETF
             shadow_index = BTC_MINI
             etf_close = os.environ.get("BTC_ETF_LAST_CLOSE")
-            if etf_close:
+            btc_at_close = os.environ.get("BTC_AT_CLOSE")
+            if etf_close and btc_at_close:
                 shadow_index.last_close = float(etf_close)
-                log.info("Shadow index %s configured (last_close=$%.2f, ratio=%.6f)",
+                shadow_index.btc_at_close = float(btc_at_close)
+                log.info("Shadow index %s configured (last_close=$%.2f, btc_at_close=$%,.2f)",
                          shadow_index.shadow_symbol, shadow_index.last_close,
-                         shadow_index.btc_per_share)
+                         shadow_index.btc_at_close)
 
             _engine_status["running"] = True
             _engine_status["dry_run"] = config["DRY_RUN"]
@@ -260,7 +262,7 @@ def start_engine_thread(app):
                             log.exception("Failed to enrich positions with Alpaca prices")
 
                     # --- Shadow equity: project BTC → GBTC index drift ---
-                    if shadow_index and shadow_index.last_close and data_broker:
+                    if shadow_index and shadow_index.last_close and shadow_index.btc_at_close and data_broker:
                         btc_pos = next(
                             (p for p in positions if p["symbol"] == shadow_index.crypto_symbol),
                             None,
