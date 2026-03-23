@@ -113,9 +113,15 @@ def start_engine_thread(app):
     global _engine_thread
 
     if _engine_thread and _engine_thread.is_alive():
+        log.info("[engine] Thread already alive, skipping")
         return
 
+    log.info("[engine] Starting background engine thread")
+    _engine_status["last_error"] = "thread_starting"
+
     def _loop():
+        log.info("[engine] _loop entered")
+        _engine_status["last_error"] = "loop_entered"
         with app.app_context():
             try:
                 from app.brokers import get_broker, clear_broker
