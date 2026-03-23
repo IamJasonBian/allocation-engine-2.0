@@ -21,7 +21,7 @@ _instrument_cache: dict[str, str] = {}
 
 # Login timeout: max seconds to wait for rh.login() (guards against the
 # infinite polling loop inside robin_stocks' _validate_sherrif_id).
-_LOGIN_TIMEOUT = 180
+_LOGIN_TIMEOUT = 30
 
 
 def _symbol_from_instrument(instrument_url: str) -> str:
