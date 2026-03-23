@@ -12,7 +12,7 @@ log = logging.getLogger(__name__)
 
 
 class RebalancerObserver(RiskObserver):
-    """On STRUCTURAL_DRIFT, generates a market sell to flatten the drifted position.
+    """On PRICE_DEPEG, generates a market sell to flatten the drifted position.
 
     Rebalance orders are collected in ``pending_orders`` so the engine can
     pick them up on the next execution pass.
@@ -26,7 +26,7 @@ class RebalancerObserver(RiskObserver):
         pass
 
     def on_risk_event(self, event: RiskEvent) -> None:
-        if event.event_type != RiskEventType.STRUCTURAL_DRIFT:
+        if event.event_type != RiskEventType.PRICE_DEPEG:
             return
 
         position_qty = event.metadata.get("position_qty", 0)
