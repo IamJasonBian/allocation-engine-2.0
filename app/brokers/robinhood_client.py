@@ -116,18 +116,29 @@ class RobinhoodTrader(BrokerClient):
           3. Seed a stub pickle with RH_DEVICE_TOKEN env var so robin_stocks
              uses our known device_token instead of generating a random one
         """
+        global _init_phase
+        _init_phase = "pickle_check_local"
         if os.path.isfile(self._pickle_path):
             log.info("[pickle] Local pickle exists at %s", self._pickle_path)
             return
 
+        _init_phase = "pickle_downloading"
         log.info("[pickle] No local pickle. Attempting blob store restore...")
-        if download_pickle(self._pickle_path):
+        try:
+            restored = download_pickle(self._pickle_path)
+        except Exception:
+            log.exception("[pickle] download_pickle raised")
+            restored = False
+        _init_phase = f"pickle_downloaded={restored}"
+
+        if restored:
             log.info("[pickle] Restored session pickle from blob store")
             return
 
         # No blob either — seed a stub pickle with the static device_token
         # so robin_stocks reuses our approved device instead of generating
         # a random one that triggers Robinhood's device verification.
+        _init_phase = "pickle_seeding_stub"
         from app.config import Config
         device_token = Config.RH_DEVICE_TOKEN
         if not device_token:
@@ -147,6 +158,7 @@ class RobinhoodTrader(BrokerClient):
             pickle.dump(stub, f)
         log.info("[pickle] Seeded stub pickle with static device_token=%s...%s",
                  device_token[:8], device_token[-4:])
+        _init_phase = "pickle_stub_seeded"
 
     def _try_restore_session(self) -> bool:
         """Try to restore a Robinhood session directly from the pickle file.
