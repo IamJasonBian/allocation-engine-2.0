@@ -190,7 +190,7 @@ class AllocationEngine:
             drift = abs(metrics.get("drift_pct", 0))
             if drift >= DRIFT_THRESHOLD:
                 event = RiskEvent(
-                    event_type=RiskEventType.STRUCTURAL_DRIFT,
+                    event_type=RiskEventType.PRICE_DEPEG,
                     symbol=symbol,
                     drift_pct=drift,
                     message=(

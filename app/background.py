@@ -1,5 +1,6 @@
 """Background engine thread — runs reconciliation loop alongside Flask."""
 
+import os
 import threading
 import time
 import logging
@@ -124,12 +125,34 @@ def start_engine_thread(app):
             from app.blob_store import sync_to_blob
             from app.s3_store import sync_order_events
             from app.slack import notify as slack_notify
+            from app.risk.observer import RiskSubject
+            from app.risk.slack_observer import SlackAlertObserver
+            from app.shadow_index import (
+                BTC_MINI, build_shadow_position, check_shadow_drift,
+                check_order_shadow_drift,
+            )
 
             config = app.config
             broker = None
             data_broker = None
             engine = None
             runtime = RuntimeClient(config["RUNTIME_SERVICE_URL"])
+
+            # Risk infrastructure
+            risk_subject = RiskSubject()
+            webhook_url = config.get("SLACK_WEBHOOK_URL") or os.environ.get("SLACK_WEBHOOK_URL")
+            if webhook_url:
+                risk_subject.attach(SlackAlertObserver(webhook_url))
+                log.info("SlackAlertObserver attached to background engine")
+
+            # Shadow index config — project BTC/USD → Grayscale Bitcoin Mini Trust ETF
+            shadow_index = BTC_MINI
+            etf_close = os.environ.get("BTC_ETF_LAST_CLOSE")
+            if etf_close:
+                shadow_index.last_close = float(etf_close)
+                log.info("Shadow index %s configured (last_close=$%.2f, ratio=%.6f)",
+                         shadow_index.shadow_symbol, shadow_index.last_close,
+                         shadow_index.btc_per_share)
 
             _engine_status["running"] = True
             _engine_status["dry_run"] = config["DRY_RUN"]
@@ -167,6 +190,7 @@ def start_engine_thread(app):
                             dry_run=config["DRY_RUN"],
                             data_broker=data_broker,
                             max_order_qty=config["MAX_ORDER_QTY"],
+                            risk_subject=risk_subject,
                         )
                         log.info("Broker initialized successfully")
                     except Exception as e:
@@ -234,6 +258,42 @@ def start_engine_thread(app):
                                      len(prices), len(positions))
                         except Exception:
                             log.exception("Failed to enrich positions with Alpaca prices")
+
+                    # --- Shadow equity: project BTC → GBTC index drift ---
+                    if shadow_index and shadow_index.last_close and data_broker:
+                        btc_pos = next(
+                            (p for p in positions if p["symbol"] == shadow_index.crypto_symbol),
+                            None,
+                        )
+                        if btc_pos:
+                            try:
+                                btc_prices = data_broker.get_latest_prices(
+                                    [shadow_index.crypto_symbol]
+                                )
+                                btc_px = btc_prices.get(shadow_index.crypto_symbol)
+                                if btc_px:
+                                    shadow_pos = build_shadow_position(
+                                        btc_px, shadow_index, qty=btc_pos["qty"],
+                                    )
+                                    log.info(
+                                        "[shadow] %s projected $%.2f (BTC $%,.2f) "
+                                        "vs close $%.2f → drift %+.2f%%",
+                                        shadow_index.shadow_symbol,
+                                        shadow_pos["current_price"], btc_px,
+                                        shadow_index.last_close,
+                                        shadow_pos["unrealized_pl_pct"] * 100,
+                                    )
+                                    event = check_shadow_drift(btc_px, shadow_index)
+                                    if event:
+                                        risk_subject.notify(event)
+                                    # Check open limit orders against projected price
+                                    order_events = check_order_shadow_drift(
+                                        btc_px, shadow_index, open_orders,
+                                    )
+                                    for oe in order_events:
+                                        risk_subject.notify(oe)
+                            except Exception:
+                                log.exception("Shadow index check failed")
 
                     log.info(
                         f"[portfolio] Equity: ${account.get('equity', 0):,.2f} | "

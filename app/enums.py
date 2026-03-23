@@ -18,6 +18,7 @@ class OrderType(StrEnum):
 class AssetType(StrEnum):
     EQUITY = "equity"
     OPTION = "option"
+    SHADOW_EQUITY = "shadow_equity"
 
 
 class OrderState(StrEnum):
@@ -47,6 +48,6 @@ class OrderTrigger(StrEnum):
 
 class RiskEventType(StrEnum):
     """Risk events emitted during engine reconciliation."""
-    STRUCTURAL_DRIFT = "structural_drift"   # drift > threshold → possible structural change
+    PRICE_DEPEG = "price_depeg"             # live price diverges from cached/stale price
     POSITION_LIMIT = "position_limit"       # position exceeds concentration limit
     ORDER_REJECTED = "order_rejected"       # broker rejected an order
