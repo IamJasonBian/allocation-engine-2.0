@@ -112,15 +112,30 @@ class RobinhoodTrader(BrokerClient):
 
         Priority:
           1. Local pickle already on disk → use it
-          2. Download full pickle from Netlify Blobs → use it
-          3. Seed a stub pickle with RH_DEVICE_TOKEN env var so robin_stocks
-             uses our known device_token instead of generating a random one
+          2. RH_PICKLE_B64 env var (base64-encoded pickle) → decode and write
+          3. Download full pickle from Netlify Blobs → use it
+          4. Seed a stub pickle with RH_DEVICE_TOKEN env var
         """
         global _init_phase
         _init_phase = "pickle_check_local"
         if os.path.isfile(self._pickle_path):
             log.info("[pickle] Local pickle exists at %s", self._pickle_path)
             return
+
+        # Try base64-encoded pickle from env var (fastest, no network)
+        _init_phase = "pickle_from_env"
+        pickle_b64 = os.environ.get("RH_PICKLE_B64", "")
+        if pickle_b64:
+            try:
+                import base64
+                raw = base64.b64decode(pickle_b64)
+                os.makedirs(os.path.dirname(self._pickle_path), exist_ok=True)
+                with open(self._pickle_path, "wb") as f:
+                    f.write(raw)
+                log.info("[pickle] Restored from RH_PICKLE_B64 env var (%d bytes)", len(raw))
+                return
+            except Exception:
+                log.exception("[pickle] Failed to decode RH_PICKLE_B64")
 
         _init_phase = "pickle_downloading"
         log.info("[pickle] No local pickle. Attempting blob store restore...")

@@ -46,7 +46,7 @@ def download_pickle(local_path: str) -> bool:
         return False
 
     try:
-        resp = requests.get(url, headers=_auth_headers(), timeout=15)
+        resp = requests.get(url, headers=_auth_headers(), timeout=(5, 10))
         if resp.status_code == 404:
             log.info("[pickle_store] No pickle found in blob store (first deploy?)")
             return False
