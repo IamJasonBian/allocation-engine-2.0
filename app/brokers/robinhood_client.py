@@ -78,12 +78,21 @@ class RobinhoodTrader(BrokerClient):
         self._device_challenge_mode = False
 
         # Restore pickle from blob store before attempting login
+        log.info("[rh] Starting pickle restore...")
         self._restore_pickle_from_blob()
+        log.info("[rh] Pickle restore done.")
 
-        try:
-            self._login()
-        except Exception:
-            log.warning("Initial login failed — engine will retry each tick")
+        # Try to restore session directly from pickle without calling rh.login()
+        # (rh.login can hang on Robinhood API validation requests)
+        if self._try_restore_session():
+            log.info("[rh] Session restored from pickle — skipping rh.login()")
+        else:
+            log.info("[rh] No valid pickle session — attempting rh.login()...")
+            try:
+                self._login()
+            except Exception:
+                log.warning("Initial login failed — engine will retry each tick")
+        log.info("[rh] __init__ complete (authenticated=%s)", self._authenticated)
 
     # -- session pickle persistence -----------------------------------------
 
@@ -131,6 +140,43 @@ class RobinhoodTrader(BrokerClient):
             pickle.dump(stub, f)
         log.info("[pickle] Seeded stub pickle with static device_token=%s...%s",
                  device_token[:8], device_token[-4:])
+
+    def _try_restore_session(self) -> bool:
+        """Try to restore a Robinhood session directly from the pickle file.
+
+        Sets robin_stocks' internal session headers without calling rh.login(),
+        which can hang on Robinhood API validation requests.
+        Returns True if a valid session was restored.
+        """
+        if not os.path.isfile(self._pickle_path):
+            return False
+
+        try:
+            with open(self._pickle_path, "rb") as f:
+                data = pickle.load(f)
+
+            access_token = data.get("access_token", "")
+            token_type = data.get("token_type", "Bearer")
+            refresh_token = data.get("refresh_token", "")
+            device_token = data.get("device_token", "")
+
+            if not access_token or not refresh_token:
+                log.info("[rh] Pickle has empty tokens — cannot restore session")
+                return False
+
+            # Set robin_stocks internal state
+            rh.authentication.set_login_state(True)
+            rh.authentication.update_session(
+                "Authorization", f"{token_type} {access_token}"
+            )
+            self._authenticated = True
+            log.info("[rh] Restored session from pickle (device=%s...%s)",
+                     device_token[:8] if device_token else "?",
+                     device_token[-4:] if device_token else "?")
+            return True
+        except Exception:
+            log.exception("[rh] Failed to restore session from pickle")
+            return False
 
     def _upload_pickle_to_blob(self):
         """Upload the current pickle to Netlify Blobs after successful login."""
