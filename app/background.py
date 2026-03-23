@@ -136,9 +136,11 @@ def start_engine_thread(app):
     log.info("[engine] Starting background engine thread (imports done)")
 
     def _loop():
+        # Push app context for the entire thread lifetime
+        ctx = app.app_context()
+        ctx.push()
         try:
-            with app.app_context():
-                config = app.config
+            config = app.config
             broker = None
             data_broker = None
             engine = None
