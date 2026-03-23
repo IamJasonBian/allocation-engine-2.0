@@ -18,6 +18,7 @@ log = logging.getLogger(__name__)
 
 # Cache instrument URL -> symbol to avoid repeated API calls
 _instrument_cache: dict[str, str] = {}
+_init_phase: str = "not_started"
 
 # Login timeout: max seconds to wait for rh.login() (guards against the
 # infinite polling loop inside robin_stocks' _validate_sherrif_id).
@@ -77,22 +78,32 @@ class RobinhoodTrader(BrokerClient):
         self._pickle_path = _pickle_path(pickle_name)
         self._device_challenge_mode = False
 
+        # Expose init phase via module-level variable for diagnostics
+        global _init_phase
+        _init_phase = "pickle_restore"
+
         # Restore pickle from blob store before attempting login
         log.info("[rh] Starting pickle restore...")
         self._restore_pickle_from_blob()
-        log.info("[rh] Pickle restore done.")
+        log.info("[rh] Pickle restore done. File exists: %s", os.path.isfile(self._pickle_path))
+        _init_phase = "try_restore_session"
 
         # Try to restore session directly from pickle without calling rh.login()
         # (rh.login can hang on Robinhood API validation requests)
-        if self._try_restore_session():
+        restored = self._try_restore_session()
+        _init_phase = f"restored={restored}"
+        if restored:
             log.info("[rh] Session restored from pickle — skipping rh.login()")
         else:
+            _init_phase = "rh_login"
             log.info("[rh] No valid pickle session — attempting rh.login()...")
             try:
                 self._login()
             except Exception:
                 log.warning("Initial login failed — engine will retry each tick")
+            _init_phase = "rh_login_done"
         log.info("[rh] __init__ complete (authenticated=%s)", self._authenticated)
+        _init_phase = f"init_done_auth={self._authenticated}"
 
     # -- session pickle persistence -----------------------------------------
 
