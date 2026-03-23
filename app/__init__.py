@@ -14,6 +14,9 @@ logging.basicConfig(
 )
 
 
+log = logging.getLogger(__name__)
+
+
 def create_app(config_class=Config):
     app = Flask(__name__)
     app.config.from_object(config_class)
@@ -23,7 +26,13 @@ def create_app(config_class=Config):
     from app.api import register_blueprints
     register_blueprints(app)
 
-    if app.config.get("ENGINE_ENABLED", True):
+    engine_enabled = app.config.get("ENGINE_ENABLED", True)
+    log.info("[create_app] ENGINE_ENABLED=%s, DRY_RUN=%s, ENGINE_BROKER=%s",
+             engine_enabled, app.config.get("DRY_RUN"), app.config.get("ENGINE_BROKER"))
+
+    if engine_enabled:
         start_engine_thread(app)
+    else:
+        log.warning("[create_app] Engine is DISABLED — skipping background thread")
 
     return app
