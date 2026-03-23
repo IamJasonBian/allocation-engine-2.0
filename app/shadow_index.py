@@ -1,11 +1,11 @@
 """Shadow Index Engine — converts live BTC/USD to Grayscale Bitcoin Mini Trust ETF (BTC).
 
-The Grayscale Bitcoin Mini Trust ETF (ticker BTC, NYSE Arca) holds
-~0.000367 BTC per share.  On weekends equity markets are closed so the
-ETF doesn't trade, but BTC/USD does.  This module:
+The Grayscale Bitcoin Mini Trust ETF (ticker BTC, NYSE Arca) tracks BTC.
+On weekends equity markets are closed so the ETF doesn't trade, but
+BTC/USD does.  This module:
 
   1. Fetches the latest BTC/USD price from the data broker (Alpaca).
-  2. Converts to a projected ETF share price via the BTC-per-share ratio.
+  2. Projects the ETF price using the relative BTC move since Friday close.
   3. Compares against the last known Friday close.
   4. Produces a ShadowEquity position that the risk pipeline can drift-check.
 """
@@ -27,27 +27,32 @@ log = logging.getLogger(__name__)
 @dataclass
 class IndexConfig:
     """Conversion config for a crypto-backed equity index."""
-    shadow_symbol: str        # projected ticker name (e.g. "BTC.shadow")
-    crypto_symbol: str        # underlying crypto (e.g. "BTC")
-    btc_per_share: float      # crypto units per ETF share
-    last_close: float | None  # last Friday equity close price ($)
+    shadow_symbol: str            # projected ticker name (e.g. "BTC.shadow")
+    crypto_symbol: str            # underlying crypto (e.g. "BTC")
+    last_close: float | None      # last Friday ETF close price ($)
+    btc_at_close: float | None    # BTC/USD price at Friday equity close
 
 
 # Grayscale Bitcoin Mini Trust ETF — ticker BTC on NYSE Arca
-# ~0.000367 BTC per share (derived from $31.05 close / ~$84,500 BTC)
 BTC_MINI = IndexConfig(
     shadow_symbol="BTC.shadow",
     crypto_symbol="BTC",
-    btc_per_share=float(os.environ.get("BTC_ETF_RATIO", "0.000367")),
-    last_close=None,  # populated at runtime from BTC_ETF_LAST_CLOSE env var
+    last_close=None,      # populated at runtime from BTC_ETF_LAST_CLOSE env var
+    btc_at_close=None,    # populated at runtime from BTC_AT_CLOSE env var
 )
 
 
 # ── Conversion engine ────────────────────────────────────────────────────────
 
 def btc_to_index_price(btc_price: float, config: IndexConfig) -> float:
-    """Convert a BTC spot price to projected ETF share price."""
-    return btc_price * config.btc_per_share
+    """Project the ETF price from a live BTC/USD price.
+
+    Uses relative movement: projected = last_close * (btc_now / btc_at_close).
+    This avoids needing a static btc-per-share ratio that drifts over time.
+    """
+    if not config.last_close or not config.btc_at_close or config.btc_at_close <= 0:
+        return 0.0
+    return config.last_close * (btc_price / config.btc_at_close)
 
 
 def build_shadow_position(
@@ -79,7 +84,7 @@ def build_shadow_position(
         "_source": {
             "crypto_symbol": config.crypto_symbol,
             "btc_price": btc_price,
-            "btc_per_share": config.btc_per_share,
+            "btc_at_close": config.btc_at_close,
             "last_close": config.last_close,
         },
     }
@@ -94,7 +99,7 @@ def check_shadow_drift(
 
     Returns a RiskEvent if drift >= threshold, else None.
     """
-    if config.last_close is None or config.last_close <= 0:
+    if not config.last_close or config.last_close <= 0 or not config.btc_at_close:
         return None
 
     projected = btc_to_index_price(btc_price, config)
@@ -122,7 +127,7 @@ def check_shadow_drift(
             "btc_price": btc_price,
             "projected_price": projected,
             "last_close": config.last_close,
-            "btc_per_share": config.btc_per_share,
+            "btc_at_close": config.btc_at_close,
             "direction": direction,
             "asset_type": AssetType.SHADOW_EQUITY,
         },
