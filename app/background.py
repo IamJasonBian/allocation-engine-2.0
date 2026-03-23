@@ -185,15 +185,19 @@ def start_engine_thread(app):
                 # --- Broker initialization ---
                 if broker is None:
                     try:
+                        _engine_status["last_error"] = "broker_init_started"
                         broker = get_broker(config["ENGINE_BROKER"])
+                        _engine_status["last_error"] = "broker_init_done"
                         if data_broker_name and data_broker_name != config["ENGINE_BROKER"]:
                             try:
+                                _engine_status["last_error"] = "data_broker_init"
                                 data_broker = get_broker(data_broker_name)
                                 log.info("Data broker (%s) initialized", data_broker_name)
                             except Exception:
                                 log.exception("Failed to init data broker (%s) — continuing without",
                                               data_broker_name)
                                 data_broker = None
+                        _engine_status["last_error"] = "engine_init"
                         engine = AllocationEngine(
                             trader=broker,
                             runtime=runtime,
@@ -202,10 +206,11 @@ def start_engine_thread(app):
                             max_order_qty=config["MAX_ORDER_QTY"],
                             risk_subject=risk_subject,
                         )
+                        _engine_status["last_error"] = None
                         log.info("Broker initialized successfully")
                     except Exception as e:
                         log.exception("Failed to initialize broker")
-                        _engine_status["last_error"] = str(e)
+                        _engine_status["last_error"] = f"broker_init_error: {e}"
                         _tick_event.wait(timeout=interval)
                         _tick_event.clear()
                         continue
