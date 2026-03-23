@@ -117,20 +117,25 @@ def start_engine_thread(app):
 
     def _loop():
         with app.app_context():
-            from app.brokers import get_broker, clear_broker
-            from app.brokers.robinhood_client import RobinhoodTrader, seconds_until_hour_et
-            from app.engine import AllocationEngine
-            from app.runtime_client import RuntimeClient
-            from app.redis_store import sync_to_redis
-            from app.blob_store import sync_to_blob
-            from app.s3_store import sync_order_events
-            from app.slack import notify as slack_notify
-            from app.risk.observer import RiskSubject
-            from app.risk.slack_observer import SlackAlertObserver
-            from app.shadow_index import (
-                BTC_MINI, build_shadow_position, check_shadow_drift,
-                check_order_shadow_drift,
-            )
+            try:
+                from app.brokers import get_broker, clear_broker
+                from app.brokers.robinhood_client import RobinhoodTrader, seconds_until_hour_et
+                from app.engine import AllocationEngine
+                from app.runtime_client import RuntimeClient
+                from app.redis_store import sync_to_redis
+                from app.blob_store import sync_to_blob
+                from app.s3_store import sync_order_events
+                from app.slack import notify as slack_notify
+                from app.risk.observer import RiskSubject
+                from app.risk.slack_observer import SlackAlertObserver
+                from app.shadow_index import (
+                    BTC_MINI, build_shadow_position, check_shadow_drift,
+                    check_order_shadow_drift,
+                )
+            except Exception as e:
+                log.exception("Engine thread failed during imports")
+                _engine_status["last_error"] = f"import error: {e}"
+                return
 
             config = app.config
             broker = None
