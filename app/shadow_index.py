@@ -199,6 +199,7 @@ def check_order_shadow_drift(
             metadata={
                 "order_id": o.get("id", ""),
                 "side": side,
+                "quantity": float(o.get("qty", 0)),
                 "limit_price": limit_px,
                 "projected_price": projected,
                 "btc_price": btc_price,
