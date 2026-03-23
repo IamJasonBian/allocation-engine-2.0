@@ -116,35 +116,28 @@ def start_engine_thread(app):
         log.info("[engine] Thread already alive, skipping")
         return
 
-    log.info("[engine] Starting background engine thread")
-    _engine_status["last_error"] = "thread_starting"
+    # Import everything in the main thread to avoid import-lock deadlocks
+    # when the background thread tries to import while create_app() is still running.
+    from app.brokers import get_broker, clear_broker
+    from app.brokers.robinhood_client import RobinhoodTrader, seconds_until_hour_et
+    from app.engine import AllocationEngine
+    from app.runtime_client import RuntimeClient
+    from app.redis_store import sync_to_redis
+    from app.blob_store import sync_to_blob
+    from app.s3_store import sync_order_events
+    from app.slack import notify as slack_notify
+    from app.risk.observer import RiskSubject
+    from app.risk.slack_observer import SlackAlertObserver
+    from app.shadow_index import (
+        BTC_MINI, build_shadow_position, check_shadow_drift,
+        check_order_shadow_drift,
+    )
+
+    log.info("[engine] Starting background engine thread (imports done)")
 
     def _loop():
-        log.info("[engine] _loop entered")
-        _engine_status["last_error"] = "loop_entered"
         try:
             with app.app_context():
-                _engine_status["last_error"] = "app_context_entered"
-                from app.brokers import get_broker, clear_broker
-                _engine_status["last_error"] = "imports_brokers"
-                from app.brokers.robinhood_client import RobinhoodTrader, seconds_until_hour_et
-                _engine_status["last_error"] = "imports_rh"
-                from app.engine import AllocationEngine
-                _engine_status["last_error"] = "imports_engine"
-                from app.runtime_client import RuntimeClient
-                from app.redis_store import sync_to_redis
-                from app.blob_store import sync_to_blob
-                from app.s3_store import sync_order_events
-                from app.slack import notify as slack_notify
-                _engine_status["last_error"] = "imports_risk"
-                from app.risk.observer import RiskSubject
-                from app.risk.slack_observer import SlackAlertObserver
-                from app.shadow_index import (
-                    BTC_MINI, build_shadow_position, check_shadow_drift,
-                    check_order_shadow_drift,
-                )
-                _engine_status["last_error"] = "imports_done"
-
                 config = app.config
             broker = None
             data_broker = None
