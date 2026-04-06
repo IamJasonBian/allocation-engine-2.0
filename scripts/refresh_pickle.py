@@ -3,43 +3,67 @@
 
 Run locally:  python scripts/refresh_pickle.py
 
-This will prompt for your Robinhood credentials interactively,
-then upload the session pickle so Render can use it.
+Uses a temporary pickle path so it does not overwrite your local session.
+The static device token from Config is seeded automatically so the session
+is created under the same device identity that Render uses.
 """
 
 import os
 import pickle
 import sys
+import tempfile
 
 # Ensure project root is on the path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 import robin_stocks.robinhood as rh
+from app.config import Config
 
-PICKLE_NAME = os.getenv("RH_PICKLE_NAME", "taipei_session")
-HOME = os.path.expanduser("~")
-PICKLE_PATH = os.path.join(HOME, ".tokens", f"robinhood{PICKLE_NAME}.pickle")
+PICKLE_NAME = Config.RH_PICKLE_NAME
+DEVICE_TOKEN = Config.RH_DEVICE_TOKEN
 
-# Netlify Blobs config — set these or they'll be read from env
+# Use a temp directory so we don't clobber the local session
+PICKLE_DIR = tempfile.mkdtemp(prefix="rh_refresh_")
+PICKLE_PATH = os.path.join(PICKLE_DIR, f"robinhood{PICKLE_NAME}.pickle")
+
 NETLIFY_API_TOKEN = os.getenv("NETLIFY_API_TOKEN", "nfp_EJhNguVjnSF5dF2KnJjxPyU6Ghq9nsVE7201")
 NETLIFY_SITE_ID = os.getenv("NETLIFY_SITE_ID", "3d014fc3-e919-4b4d-b374-e8606dee50df")
 BLOB_URL = f"https://api.netlify.com/api/v1/blobs/{NETLIFY_SITE_ID}/rh-session/robinhood-pickle"
 
 
 def login():
-    """Interactive Robinhood login — will prompt for username/password/MFA."""
-    email = input("Robinhood email: ").strip()
-    password = input("Robinhood password: ").strip()
+    """Login using the static device token and upload to Netlify."""
+    # Seed the static device token so robin_stocks uses Render's device identity
+    stub = {
+        "device_token": DEVICE_TOKEN,
+        "access_token": "",
+        "token_type": "Bearer",
+        "refresh_token": "",
+    }
+    with open(PICKLE_PATH, "wb") as f:
+        pickle.dump(stub, f)
+    print(f"Using device_token={DEVICE_TOKEN[:8]}...{DEVICE_TOKEN[-4:]}")
 
-    print("\nLogging in...")
+    email = Config.RH_USER or input("Robinhood email: ").strip()
+    password = Config.RH_PASS or input("Robinhood password: ").strip()
+
+    mfa_code = None
+    if Config.RH_TOTP_SECRET:
+        import pyotp
+        mfa_code = pyotp.TOTP(Config.RH_TOTP_SECRET).now()
+        print(f"Using TOTP from env")
+
+    print(f"Logging in as {email}...")
     result = rh.login(
         email, password,
+        mfa_code=mfa_code,
         store_session=True,
         pickle_name=PICKLE_NAME,
+        pickle_path=PICKLE_DIR,
     )
 
     if result:
-        print(f"Login successful! Pickle saved to {PICKLE_PATH}")
+        print(f"Login successful!")
         return True
     else:
         print("Login failed.")
@@ -54,7 +78,6 @@ def upload():
         print(f"No pickle found at {PICKLE_PATH}")
         return False
 
-    # Show what's in the pickle
     with open(PICKLE_PATH, "rb") as f:
         data = pickle.load(f)
     print("\nPickle contents:")
@@ -64,7 +87,6 @@ def upload():
         else:
             print(f"  {k} = {v}")
 
-    # Upload
     with open(PICKLE_PATH, "rb") as f:
         payload = f.read()
 

@@ -222,12 +222,45 @@ class RobinhoodTrader(BrokerClient):
 
     # -- authentication -----------------------------------------------------
 
+    def _seed_device_token(self):
+        """Ensure the pickle contains the static device token before login.
+
+        robin_stocks reads the device_token from the pickle file. If the
+        pickle has a different (or missing) device_token, Robinhood will
+        trigger a device challenge. Always overwrite it with our static
+        token so every login — local or remote — uses the same device.
+        """
+        from app.config import Config
+        device_token = Config.RH_DEVICE_TOKEN
+        if not device_token:
+            return
+
+        data = {}
+        if os.path.isfile(self._pickle_path):
+            try:
+                with open(self._pickle_path, "rb") as f:
+                    data = pickle.load(f)
+            except Exception:
+                data = {}
+
+        if data.get("device_token") == device_token:
+            return
+
+        data["device_token"] = device_token
+        os.makedirs(os.path.dirname(self._pickle_path), exist_ok=True)
+        with open(self._pickle_path, "wb") as f:
+            pickle.dump(data, f)
+        log.info("[rh] Seeded static device_token=%s...%s into pickle",
+                 device_token[:8], device_token[-4:])
+
     def _login(self):
         """Authenticate with Robinhood using stored session or fresh TOTP login.
 
         Runs rh.login() in a child thread with a timeout to guard against
         the infinite polling loop in robin_stocks' device verification.
         """
+        self._seed_device_token()
+
         mfa_code = None
         if self.totp_secret:
             totp = pyotp.TOTP(self.totp_secret)
