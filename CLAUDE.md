@@ -25,12 +25,20 @@ Deploys are **destructive to session state** — Render's ephemeral filesystem w
 If you deploy first, the service downloads the old/stale pickle from Netlify and fails.
 **Always regenerate the pickle before a fresh deploy.**
 
+### Token lifetime and self-healing
+- Robinhood access tokens last ~24 hours
+- Within that window, code-only deploys are safe — Render pulls the still-valid pickle from Netlify
+- After the token expires, `_ensure_auth()` detects it and `_login()` fires with credentials + TOTP from env vars
+- `_seed_device_token()` ensures the correct device token is in the pickle before login, so `_login()` should self-heal without a device challenge as long as the device is trusted
+- If Robinhood revokes device trust (rare), `refresh_pickle.py` must be re-run locally
+
 ## Robinhood Reauth Workflow
 
 ### `scripts/refresh_pickle.py`
-- Interactive script — prompts for email, password, MFA
-- Generates session pickle and uploads to Netlify Blobs
-- Must be run locally (requires TTY for input)
+- Generates session pickle with the static device token and uploads to Netlify Blobs
+- Uses a temp directory — does not modify local session state
+- Reads `RH_USER`, `RH_PASS`, `RH_TOTP_SECRET` from env vars (falls back to interactive prompts)
+- Must be run locally (requires TTY if env vars are not set)
 
 ### Device token
 - The static device token (`8508c7fc-...`) in `Config.RH_DEVICE_TOKEN` is the approved device identity
