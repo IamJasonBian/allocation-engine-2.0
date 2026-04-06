@@ -315,7 +315,9 @@ class RobinhoodTrader(BrokerClient):
         # Tolerate transient errors (429, network blips) so we don't
         # trigger a full re-login that could hit the device challenge loop.
         try:
-            rh.profiles.load_account_profile()
+            result = rh.profiles.load_account_profile()
+            if not result:
+                raise ValueError("load_account_profile returned empty result")
         except Exception as e:
             err_str = str(e)
             if "429" in err_str or "Too Many Requests" in err_str:
@@ -336,6 +338,12 @@ class RobinhoodTrader(BrokerClient):
         self._ensure_auth()
         profile = rh.profiles.load_account_profile()
         portfolio = rh.profiles.load_portfolio_profile()
+        if not profile or not portfolio:
+            log.warning("Robinhood returned empty profile/portfolio — forcing re-auth")
+            self._authenticated = False
+            self._login()
+            profile = rh.profiles.load_account_profile() or {}
+            portfolio = rh.profiles.load_portfolio_profile() or {}
         return {
             "equity": float(portfolio.get("equity", 0)),
             "cash": float(profile.get("cash", 0)),
