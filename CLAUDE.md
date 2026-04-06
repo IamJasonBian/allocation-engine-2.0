@@ -13,15 +13,17 @@ Deploys are **destructive to session state** — Render's ephemeral filesystem w
 
 ### Pickle restore priority (on boot)
 1. Local pickle on disk (gone after deploy)
-2. `RH_PICKLE_B64` env var (base64-encoded)
+2. `RH_PICKLE_B64` env var (base64-encoded) — **removed as of 2026-04-06**, was causing stale session issues
 3. Download from **Netlify Blobs** (durable external storage)
 4. Seed stub with `RH_DEVICE_TOKEN` (triggers fresh login)
 
-### Deploy ordering when session is stale
+### Deploy checklist
 1. **First** run `python scripts/refresh_pickle.py` locally to upload a fresh pickle to Netlify Blobs
 2. **Then** deploy — the service will pull the fresh pickle from Netlify on boot
+3. After deploy, check logs: `render logs -r <service-id> --limit 30 -o text --direction backward`
 
 If you deploy first, the service downloads the old/stale pickle from Netlify and fails.
+**Always regenerate the pickle before a fresh deploy.**
 
 ## Robinhood Reauth Workflow
 
@@ -30,10 +32,22 @@ If you deploy first, the service downloads the old/stale pickle from Netlify and
 - Generates session pickle and uploads to Netlify Blobs
 - Must be run locally (requires TTY for input)
 
+### Device token
+- The static device token (`8508c7fc-...`) in `Config.RH_DEVICE_TOKEN` is the approved device identity
+- `_login()` calls `_seed_device_token()` to ensure the pickle always has this token before calling `rh.login()`
+- If the pickle has a **different** device token, Robinhood triggers a device challenge
+- `refresh_pickle.py` also seeds this token so the uploaded pickle matches Render's identity
+
 ### Device challenge mode
 - If `rh.login()` times out (30s), Robinhood is requiring device approval via email
 - Engine enters device challenge mode and sleeps until 11 AM ET (configurable)
 - Check device challenge status: `GET /api/auth/status`
+
+### 429 rate limit storm (robin_stocks bug)
+- When a device challenge is triggered, `robin_stocks` polls `get_prompts_status` in a `while True` loop with no timeout
+- Our 30s login timeout kills the thread, but the damage is done — Robinhood 429s cascade
+- **Prevention:** ensure the pickle always has the correct static device token before login (handled by `_seed_device_token()`). If the device is trusted, the verification workflow is never triggered
+- This cannot be fixed without patching robin_stocks itself
 
 ### Auth status endpoint
 - `GET /api/auth/status` — returns `authenticated`, `device_challenge_pending`, `email`
