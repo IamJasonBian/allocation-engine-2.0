@@ -646,8 +646,10 @@ class RobinhoodTrader(BrokerClient):
                 except (ValueError, TypeError):
                     pass
 
-            # Get market data for this option
+            # Get market data for this option (includes greeks)
             mark_price = avg_price
+            greeks = {"delta": None, "gamma": None, "theta": None, "vega": None, "iv": None}
+            underlying_price = None
             try:
                 market_data = rh.options.get_option_market_data(
                     chain_symbol, expiration, str(strike),
@@ -656,8 +658,38 @@ class RobinhoodTrader(BrokerClient):
                 if market_data and isinstance(market_data, list) and market_data[0]:
                     md = market_data[0]
                     mark_price = float(md.get("mark_price", avg_price))
+                    for g in ("delta", "gamma", "theta", "vega"):
+                        val = md.get(g)
+                        if val is not None:
+                            try:
+                                greeks[g] = round(float(val), 6)
+                            except (ValueError, TypeError):
+                                pass
+                    iv_val = md.get("implied_volatility")
+                    if iv_val is not None:
+                        try:
+                            greeks["iv"] = round(float(iv_val), 6)
+                        except (ValueError, TypeError):
+                            pass
+                    hp = md.get("high_fill_rate_buy_price") or md.get("adjusted_mark_price")
+                    # Underlying price from instrument or latest quote
+                    up = md.get("underlying_price")
+                    if up is not None:
+                        try:
+                            underlying_price = round(float(up), 4)
+                        except (ValueError, TypeError):
+                            pass
             except Exception:
                 pass
+
+            # Fall back to latest stock price for underlying
+            if underlying_price is None and chain_symbol:
+                try:
+                    prices = rh.stocks.get_latest_price(chain_symbol)
+                    if prices and prices[0]:
+                        underlying_price = round(float(prices[0]), 4)
+                except Exception:
+                    pass
 
             cost_basis = qty * avg_price * trade_value_multiplier
             current_value = qty * mark_price * trade_value_multiplier
@@ -670,6 +702,7 @@ class RobinhoodTrader(BrokerClient):
                 "expiration": expiration,
                 "dte": dte,
                 "quantity": qty,
+                "position_type": "long" if qty > 0 else "short",
                 "avg_price": round(avg_price, 4),
                 "mark_price": round(mark_price, 4),
                 "multiplier": trade_value_multiplier,
@@ -677,6 +710,8 @@ class RobinhoodTrader(BrokerClient):
                 "current_value": round(current_value, 2),
                 "unrealized_pl": round(unrealized_pl, 2),
                 "unrealized_pl_pct": round(unrealized_pl / cost_basis, 4) if cost_basis else 0,
+                "underlying_price": underlying_price,
+                "greeks": greeks,
             })
         return result
 

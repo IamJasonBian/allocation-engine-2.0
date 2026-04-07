@@ -123,6 +123,7 @@ def start_engine_thread(app):
     from app.runtime_client import RuntimeClient
     from app.redis_store import sync_to_redis
     from app.blob_store import sync_to_blob
+    from app.state_log_store import sync_state_log
     from app.s3_store import sync_order_events
     from app.slack import notify as slack_notify
     from app.risk.observer import RiskSubject
@@ -378,6 +379,16 @@ def start_engine_thread(app):
                             last_blob_sync = now_mono
                         except Exception:
                             log.exception("Blob sync error")
+
+                        # Sync state-log snapshot
+                        try:
+                            sync_state_log(
+                                positions, open_orders, account,
+                                options_positions=options_positions,
+                                order_events=all_order_events,
+                            )
+                        except Exception:
+                            log.exception("State-log sync error")
 
                         # Sync order events to S3
                         try:
