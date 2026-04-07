@@ -680,8 +680,16 @@ class RobinhoodTrader(BrokerClient):
             })
         return result
 
-    def options_orders(self, limit: int = 50) -> list[dict]:
-        """Return recent options orders."""
+    _OPEN_OPTION_STATES = {"queued", "confirmed", "partially_filled", "pending"}
+
+    def options_orders(self, limit: int = 50, open_only: bool = False) -> list[dict]:
+        """Return recent options orders.
+
+        Args:
+            limit: Maximum number of orders to return.
+            open_only: If True, only return orders in open states
+                       (queued, confirmed, partially_filled, pending).
+        """
         self._ensure_auth()
         try:
             raw = rh.orders.get_all_option_orders()
@@ -692,6 +700,8 @@ class RobinhoodTrader(BrokerClient):
         result = []
         for o in (raw or []):
             if not isinstance(o, dict):
+                continue
+            if open_only and o.get("state", "") not in self._OPEN_OPTION_STATES:
                 continue
             legs = []
             for leg in o.get("legs", []):
