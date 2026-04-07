@@ -83,24 +83,72 @@ def _build_options(options_positions):
     """Build options list with greeks and recommended actions."""
     result = []
     for opt in (options_positions or []):
+        # Ensure greeks always have numeric defaults
+        raw_greeks = opt.get("greeks") or {}
+        greeks = {
+            "delta": raw_greeks.get("delta") or 0,
+            "gamma": raw_greeks.get("gamma") or 0,
+            "theta": raw_greeks.get("theta") or 0,
+            "vega": raw_greeks.get("vega") or 0,
+            "iv": raw_greeks.get("iv") or 0,
+            "rho": raw_greeks.get("rho") or 0,
+        }
+
+        strike = opt.get("strike", 0)
+        mark_price = opt.get("mark_price", 0)
+        avg_price = opt.get("avg_price", 0)
+        underlying_price = opt.get("underlying_price") or 0
+        option_type = opt.get("option_type", "")
+        position_type = opt.get("position_type", "long")
+        quantity = opt.get("quantity", 0)
+
+        # Break-even: strike +/- avg_price depending on call/put
+        if option_type == "call":
+            break_even = strike + avg_price
+        elif option_type == "put":
+            break_even = strike - avg_price
+        else:
+            break_even = strike
+
+        # Chance of profit: rough estimate from delta
+        delta = greeks["delta"]
+        if option_type == "call":
+            chance_of_profit = abs(delta) if delta else 0
+        elif option_type == "put":
+            chance_of_profit = 1 - abs(delta) if delta else 0
+        else:
+            chance_of_profit = 0
+
+        # Expected P&L scenarios using delta/gamma
+        multiplier = opt.get("multiplier", 100)
+        contracts = abs(quantity)
+        sign = 1 if position_type == "long" else -1
+        expected_pl = {}
+        for pct_label, pct in [("-5%", -0.05), ("-1%", -0.01), ("+1%", 0.01), ("+5%", 0.05)]:
+            price_move = underlying_price * pct
+            delta_pl = delta * price_move
+            gamma_pl = 0.5 * greeks["gamma"] * price_move ** 2
+            expected_pl[pct_label] = round((delta_pl + gamma_pl) * multiplier * contracts * sign, 2)
+        expected_pl["theta_daily"] = round(greeks["theta"] * multiplier * contracts * sign, 2)
+
         entry = {
             "chain_symbol": opt.get("chain_symbol", ""),
-            "strike": opt.get("strike", 0),
-            "option_type": opt.get("option_type", ""),
+            "strike": strike,
+            "option_type": option_type,
             "expiration": opt.get("expiration", ""),
-            "quantity": opt.get("quantity", 0),
-            "position_type": opt.get("position_type", "long"),
-            "mark_price": opt.get("mark_price", 0),
-            "avg_price": opt.get("avg_price", 0),
+            "quantity": quantity,
+            "position_type": position_type,
+            "mark_price": mark_price,
+            "avg_price": avg_price,
             "current_value": opt.get("current_value", 0),
             "unrealized_pl": opt.get("unrealized_pl", 0),
             "unrealized_pl_pct": opt.get("unrealized_pl_pct", 0),
             "dte": opt.get("dte", 0),
-            "underlying_price": opt.get("underlying_price") or 0,
-            "greeks": opt.get("greeks", {
-                "delta": None, "gamma": None,
-                "theta": None, "vega": None, "iv": None,
-            }),
+            "underlying_price": underlying_price,
+            "break_even": round(break_even, 2),
+            "chance_of_profit": round(chance_of_profit, 4),
+            "greeks": greeks,
+            "expected_pl": expected_pl,
             "recommended_action": _recommend_option_action(opt),
         }
         result.append(entry)
