@@ -86,6 +86,19 @@ class AllocationEngine:
 
         self._execute(new_orders, stale_order_ids)
 
+        # --- Options order reconciliation (dry-run only) ---
+        try:
+            desired_opt_orders = self._desired_option_orders()
+            if desired_opt_orders and hasattr(self.trader, "options_orders"):
+                current_opt_orders = self.trader.options_orders(limit=200)
+                opt_to_submit, opt_stale_ids = self._reconcile_option_orders(
+                    desired_opt_orders, current_opt_orders
+                )
+                if opt_to_submit or opt_stale_ids:
+                    self._execute_option_orders(opt_to_submit, opt_stale_ids)
+        except Exception:
+            log.exception("Options reconciliation failed — continuing")
+
     # -- internals ----------------------------------------------------------
 
     def _fetch_market_data(self) -> dict:
@@ -212,6 +225,11 @@ class AllocationEngine:
         data = self.runtime.orders()
         return data.get("stock_orders", [])
 
+    def _desired_option_orders(self) -> list[dict]:
+        """Fetch desired option orders from the runtime service."""
+        data = self.runtime.orders()
+        return data.get("option_orders", [])
+
     def _reconcile(
         self,
         desired: list[dict],
@@ -254,6 +272,84 @@ class AllocationEngine:
             len(stale_ids), len(to_submit),
         )
         return to_submit, stale_ids
+
+    # -- options reconciliation ----------------------------------------------
+
+    @staticmethod
+    def _option_order_key(o: dict) -> tuple:
+        """Canonical key for matching option orders.
+
+        For desired orders: fields are top-level.
+        For broker orders: fields are in legs[0].
+        """
+        leg = o.get("legs", [{}])[0] if o.get("legs") else {}
+        return (
+            (leg.get("chain_symbol") or o.get("chain_symbol", "")).upper(),
+            (leg.get("option_type") or o.get("option_type", "")).lower(),
+            float(leg.get("strike") or o.get("strike", 0)),
+            leg.get("expiration") or o.get("expiration", ""),
+            (leg.get("side") or o.get("side", "")).lower(),
+            float(leg.get("quantity") or o.get("quantity", 0)),
+        )
+
+    def _reconcile_option_orders(
+        self,
+        desired: list[dict],
+        current_orders: list[dict],
+    ) -> tuple[list[dict], list[str]]:
+        """Compare desired option orders against current broker option orders.
+
+        Same pattern as equity _reconcile: returns (to_submit, stale_ids).
+        Only considers open orders from the broker.
+        """
+        OPEN_STATES = {"queued", "confirmed", "partially_filled", "pending"}
+
+        current_open = [o for o in current_orders if o.get("state") in OPEN_STATES]
+
+        desired_keys = {self._option_order_key(o) for o in desired}
+
+        current_map: dict[tuple, dict] = {}
+        for o in current_open:
+            current_map[self._option_order_key(o)] = o
+
+        stale_ids = [
+            o["order_id"] for key, o in current_map.items() if key not in desired_keys
+        ]
+
+        to_submit = []
+        for o in desired:
+            key = self._option_order_key(o)
+            if key in current_map:
+                continue
+            to_submit.append(o)
+
+        log.info(
+            "Options reconciliation: %d desired, %d open, %d stale, %d to submit",
+            len(desired), len(current_open) - len(stale_ids),
+            len(stale_ids), len(to_submit),
+        )
+        return to_submit, stale_ids
+
+    def _execute_option_orders(
+        self, orders: list[dict], cancel_ids: list[str]
+    ):
+        """Log option order actions. Execution not yet implemented — always dry-run."""
+        if cancel_ids:
+            log.info("[OPTIONS] Found %d stale option order(s): %s", len(cancel_ids), cancel_ids)
+
+        for order in orders:
+            log.info(
+                "[OPTIONS DRY RUN] Would submit: %s %s %s %.2f %s qty=%g @ %s",
+                order.get("side", "?"),
+                order.get("chain_symbol", "?"),
+                order.get("option_type", "?"),
+                float(order.get("strike", 0)),
+                order.get("expiration", "?"),
+                float(order.get("quantity", 0)),
+                f"${order['limit_price']:,.2f}" if order.get("limit_price") else "MKT",
+            )
+
+    # -- equity execution ----------------------------------------------------
 
     def _execute(self, orders: list[dict], cancel_ids: list[str]):
         """Log stale orders and submit new ones. Cancellation is disabled."""
