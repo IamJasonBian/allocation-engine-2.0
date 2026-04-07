@@ -336,6 +336,25 @@ def start_engine_thread(app):
                                     if oo.get("state", "") in ("queued", "confirmed", "partially_filled", "pending")]
                         log.info("[options] %d option positions, %d option orders (%d open)",
                                  len(options_positions), len(options_open_orders), len(open_opt))
+                        for op in options_positions:
+                            log.info("[option-pos] %s %s $%s exp=%s qty=%s P/L=$%s (%.1f%%)",
+                                     op.get("chain_symbol"), op.get("option_type", "").upper(),
+                                     op.get("strike"), op.get("expiration"),
+                                     op.get("quantity"), op.get("unrealized_pl"),
+                                     op.get("unrealized_pl_pct", 0) * 100)
+                        for oo in open_opt:
+                            leg = (oo.get("legs") or [{}])[0] if oo.get("legs") else {}
+                            opt_desc = "%s %s $%s %s" % (
+                                leg.get("chain_symbol") or oo.get("symbol", "?"),
+                                (leg.get("option_type") or "?").upper(),
+                                leg.get("strike", "?"),
+                                leg.get("expiration", "?"),
+                            ) if leg else oo.get("symbol", "?")
+                            log.info("[option-ord] %s %s — %s qty=%s price=$%s state=%s",
+                                     opt_desc, oo.get("side", "?"),
+                                     oo.get("order_type", "?"), oo.get("quantity"),
+                                     oo.get("limit_price") or oo.get("price", "?"),
+                                     oo.get("state"))
 
                     # Sync to Redis (now with options)
                     try:
