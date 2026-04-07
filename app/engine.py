@@ -90,7 +90,7 @@ class AllocationEngine:
         try:
             desired_opt_orders = self._desired_option_orders()
             if desired_opt_orders and hasattr(self.trader, "options_orders"):
-                current_opt_orders = self.trader.options_orders(limit=200)
+                current_opt_orders = self.trader.options_orders(limit=200, open_only=True)
                 opt_to_submit, opt_stale_ids = self._reconcile_option_orders(
                     desired_opt_orders, current_opt_orders
                 )

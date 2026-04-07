@@ -331,9 +331,11 @@ def start_engine_thread(app):
                     else:
                         log.info("[order] No open orders")
 
-                    if options_positions:
-                        log.info("[options] %d option positions, %d option orders",
-                                 len(options_positions), len(options_open_orders))
+                    if options_positions or options_open_orders:
+                        open_opt = [oo for oo in options_open_orders
+                                    if oo.get("state", "") in ("queued", "confirmed", "partially_filled", "pending")]
+                        log.info("[options] %d option positions, %d option orders (%d open)",
+                                 len(options_positions), len(options_open_orders), len(open_opt))
 
                     # Sync to Redis (now with options)
                     try:
