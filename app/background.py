@@ -281,7 +281,7 @@ def start_engine_thread(app):
                     # --- Shadow equity: project BTC → GBTC index drift ---
                     if shadow_index and shadow_index.last_close and shadow_index.btc_at_close and data_broker:
                         btc_pos = next(
-                            (p for p in positions if p["symbol"] == shadow_index.crypto_symbol),
+                            (p for p in positions if p["symbol"] == shadow_index.etf_symbol),
                             None,
                         )
                         if btc_pos:

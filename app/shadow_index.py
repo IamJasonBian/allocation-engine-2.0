@@ -28,7 +28,8 @@ log = logging.getLogger(__name__)
 class IndexConfig:
     """Conversion config for a crypto-backed equity index."""
     shadow_symbol: str            # projected ticker name (e.g. "BTC.shadow")
-    crypto_symbol: str            # underlying crypto (e.g. "BTC")
+    etf_symbol: str               # ETF stock ticker (e.g. "BTC")
+    crypto_symbol: str            # underlying crypto pair (e.g. "BTC/USD")
     last_close: float | None      # last Friday ETF close price ($)
     btc_at_close: float | None    # BTC/USD price at Friday equity close
 
@@ -36,7 +37,8 @@ class IndexConfig:
 # Grayscale Bitcoin Mini Trust ETF — ticker BTC on NYSE Arca
 BTC_MINI = IndexConfig(
     shadow_symbol="BTC.shadow",
-    crypto_symbol="BTC",
+    etf_symbol="BTC",
+    crypto_symbol="BTC/USD",
     last_close=None,      # populated at runtime from BTC_ETF_LAST_CLOSE env var
     btc_at_close=None,    # populated at runtime from BTC_AT_CLOSE env var
 )
@@ -155,7 +157,7 @@ def check_order_shadow_drift(
     events: list[RiskEvent] = []
 
     # Match orders whose symbol is the ETF ticker (e.g. "BTC")
-    etf_symbol = config.crypto_symbol  # both use ticker "BTC"
+    etf_symbol = config.etf_symbol
     btc_orders = [
         o for o in open_orders
         if o.get("symbol") == etf_symbol and o.get("limit_price") is not None
