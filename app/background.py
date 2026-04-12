@@ -302,6 +302,9 @@ def start_engine_thread(app):
                                         shadow_index.last_close,
                                         shadow_pos["unrealized_pl_pct"] * 100,
                                     )
+                                    # Append shadow position so it flows to Redis/Blob/API
+                                    positions.append(shadow_pos)
+
                                     event = check_shadow_drift(btc_px, shadow_index)
                                     if event:
                                         risk_subject.notify(event)
