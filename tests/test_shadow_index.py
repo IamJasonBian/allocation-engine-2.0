@@ -17,7 +17,8 @@ def config():
     """Standard BTC Mini Trust config: ETF closed at $31.05 when BTC was $70k."""
     return IndexConfig(
         shadow_symbol="BTC.shadow",
-        crypto_symbol="BTC",
+        etf_symbol="BTC",
+        crypto_symbol="BTC/USD",
         last_close=31.05,
         btc_at_close=70_000,
     )
@@ -27,7 +28,8 @@ def config():
 def config_no_close():
     return IndexConfig(
         shadow_symbol="BTC.shadow",
-        crypto_symbol="BTC",
+        etf_symbol="BTC",
+        crypto_symbol="BTC/USD",
         last_close=None,
         btc_at_close=None,
     )
@@ -94,7 +96,7 @@ class TestBuildShadowPosition:
     def test_source_metadata(self, config):
         pos = build_shadow_position(90_000, config, qty=1)
         src = pos["_source"]
-        assert src["crypto_symbol"] == "BTC"
+        assert src["crypto_symbol"] == "BTC/USD"
         assert src["btc_price"] == 90_000
         assert src["btc_at_close"] == 70_000
         assert src["last_close"] == 31.05

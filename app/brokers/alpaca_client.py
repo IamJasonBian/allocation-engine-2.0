@@ -19,7 +19,6 @@ from app.enums import OrderSide as AppOrderSide, OrderType
 log = logging.getLogger(__name__)
 
 SYMBOL_MAP = {
-    "BTC": "BTC/USD",
     "ETH": "ETH/USD",
 }
 
