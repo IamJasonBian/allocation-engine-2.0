@@ -130,24 +130,48 @@ class AlpacaTrader(BrokerClient):
     # -- market data -----------------------------------------------------------
 
     def get_latest_prices(self, symbols: list[str]) -> dict[str, float]:
-        """Fetch latest quote prices from Alpaca market data for the given symbols."""
+        """Fetch latest quote prices from Alpaca market data for the given symbols.
+
+        Automatically routes crypto pairs (containing '/') to the crypto
+        endpoint and regular tickers to the stock endpoint.
+        """
         if not symbols:
             return {}
-        try:
-            mapped = [_map_symbol(s) for s in symbols]
-            req = StockLatestQuoteRequest(symbol_or_symbols=mapped)
-            quotes = self.data_client.get_stock_latest_quote(req)
-            prices = {}
-            for sym, quote in quotes.items():
-                # ask_price is more conservative; fall back to bid
-                price = float(quote.ask_price) if quote.ask_price else float(quote.bid_price)
-                prices[sym] = price
-            # Reverse-map symbols back to original names
-            reverse_map = {v: k for k, v in SYMBOL_MAP.items()}
-            return {reverse_map.get(k, k): v for k, v in prices.items()}
-        except Exception:
-            log.exception("Failed to fetch Alpaca prices for %s", symbols)
-            return {}
+
+        prices: dict[str, float] = {}
+
+        # Split into stock vs crypto symbols
+        stock_syms = [s for s in symbols if "/" not in s]
+        crypto_syms = [s for s in symbols if "/" in s]
+
+        # Stock quotes
+        if stock_syms:
+            try:
+                mapped = [_map_symbol(s) for s in stock_syms]
+                req = StockLatestQuoteRequest(symbol_or_symbols=mapped)
+                quotes = self.data_client.get_stock_latest_quote(req)
+                reverse_map = {v: k for k, v in SYMBOL_MAP.items()}
+                for sym, quote in quotes.items():
+                    price = float(quote.ask_price) if quote.ask_price else float(quote.bid_price)
+                    prices[reverse_map.get(sym, sym)] = price
+            except Exception:
+                log.exception("Failed to fetch Alpaca stock prices for %s", stock_syms)
+
+        # Crypto quotes
+        if crypto_syms:
+            try:
+                from alpaca.data.historical import CryptoHistoricalDataClient
+                from alpaca.data.requests import CryptoLatestQuoteRequest
+                crypto_client = CryptoHistoricalDataClient()
+                req = CryptoLatestQuoteRequest(symbol_or_symbols=crypto_syms)
+                quotes = crypto_client.get_crypto_latest_quote(req)
+                for sym, quote in quotes.items():
+                    price = float(quote.ask_price) if quote.ask_price else float(quote.bid_price)
+                    prices[sym] = price
+            except Exception:
+                log.exception("Failed to fetch Alpaca crypto prices for %s", crypto_syms)
+
+        return prices
 
     def get_latest_quote(self, symbol: str) -> dict:
         """Fetch detailed quote for a single symbol (bid, ask, last)."""
