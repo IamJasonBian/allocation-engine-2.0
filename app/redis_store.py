@@ -126,10 +126,12 @@ def sync_to_redis(positions, open_orders, account, live=False,
             if not symbol:
                 continue
             qty = pos["qty"]
+            asset_type = pos.get("asset_type", "equity")
             entry = {
                 "symbol": symbol,
                 "name": symbol,
-                "type": "stock",
+                "type": "shadow_equity" if asset_type == "shadow_equity" else "stock",
+                "asset_type": asset_type,
                 "quantity": qty,
                 "avg_buy_price": pos.get("avg_entry", 0),
                 "current_price": round(pos["market_value"] / qty, 4) if qty else 0,

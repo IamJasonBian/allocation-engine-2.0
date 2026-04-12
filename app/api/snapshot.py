@@ -65,6 +65,7 @@ def snapshot():
                 "profit_loss_pct": pl_pct * 100 if abs(pl_pct) < 1 else pl_pct,
                 "percent_change": None,
                 "percentage": None,
+                "asset_type": p.get("asset_type", "equity"),
             })
 
         snapshot_orders = []
@@ -150,6 +151,7 @@ def snapshot():
                 "profit_loss_pct": float(p.get("unrealized_pl_pct", 0)) * 100,
                 "percent_change": None,
                 "percentage": None,
+                "asset_type": p.get("asset_type", "equity"),
             })
 
         snapshot_orders = [{
