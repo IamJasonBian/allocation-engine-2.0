@@ -619,7 +619,8 @@ class RobinhoodTrader(BrokerClient):
                 continue
 
             chain_symbol = pos.get("chain_symbol", "")
-            option_type = pos.get("type", "")
+            # RH's position.type is direction (long/short), not contract kind.
+            position_type = pos.get("type", "")
             avg_price = float(pos.get("average_price", 0)) / 100  # RH stores in cents
             trade_value_multiplier = float(pos.get("trade_value_multiplier", 100))
 
@@ -636,6 +637,11 @@ class RobinhoodTrader(BrokerClient):
 
             strike = float(option_data.get("strike_price", 0))
             expiration = option_data.get("expiration_date", "")
+            # The instrument's `type` is the contract kind (call/put). Fall back
+            # to position_type only if the instrument lookup failed — that path
+            # preserves the old (broken) behaviour rather than silently emitting
+            # an empty string.
+            option_type = option_data.get("type") or position_type
 
             # Calculate DTE
             dte = 0
@@ -646,7 +652,9 @@ class RobinhoodTrader(BrokerClient):
                 except (ValueError, TypeError):
                     pass
 
-            # Get market data for this option (includes greeks)
+            # Get market data for this option (includes greeks). The RH
+            # endpoint requires call/put — we pass option_type which now holds
+            # the instrument's contract kind, not direction.
             mark_price = avg_price
             greeks = {"delta": None, "gamma": None, "theta": None, "vega": None, "iv": None}
             underlying_price = None
@@ -697,12 +705,12 @@ class RobinhoodTrader(BrokerClient):
 
             result.append({
                 "chain_symbol": chain_symbol,
-                "option_type": option_type,
+                "option_type": option_type,        # call/put (contract kind)
+                "position_type": position_type,    # long/short (direction)
                 "strike": strike,
                 "expiration": expiration,
                 "dte": dte,
                 "quantity": qty,
-                "position_type": "long" if qty > 0 else "short",
                 "avg_price": round(avg_price, 4),
                 "mark_price": round(mark_price, 4),
                 "multiplier": trade_value_multiplier,

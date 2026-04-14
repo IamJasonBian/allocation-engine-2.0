@@ -125,6 +125,10 @@ def start_engine_thread(app):
     from app.blob_store import sync_to_blob
     from app.state_log_store import sync_state_log
     from app.s3_store import sync_order_events
+    from app.option_history_store import (
+        put_position_snapshot as put_option_position_snapshot,
+        put_order_snapshot as put_option_order_snapshot,
+    )
     from app.slack import notify as slack_notify
     from app.risk.observer import RiskSubject
     from app.risk.slack_observer import SlackAlertObserver
@@ -370,6 +374,20 @@ def start_engine_thread(app):
                         )
                     except Exception:
                         log.exception("Redis sync error")
+
+                    # Option history — unconditional (runs in dry-run too) so
+                    # the observational record isn't gated by trading mode.
+                    # Dedup on the writer side keeps blob counts sane.
+                    try:
+                        now_utc = datetime.now(timezone.utc)
+                        put_option_position_snapshot(
+                            options_positions, ts=now_utc, account=account,
+                        )
+                        put_option_order_snapshot(
+                            [dict(o) for o in options_open_orders], ts=now_utc,
+                        )
+                    except Exception:
+                        log.exception("Option history sync error")
 
                     now_mono = time.monotonic()
                     if is_live and (now_mono - last_blob_sync) >= blob_interval:
