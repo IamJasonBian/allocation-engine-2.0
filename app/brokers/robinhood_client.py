@@ -69,11 +69,13 @@ class RobinhoodTrader(BrokerClient):
         password: str,
         totp_secret: str = "",
         pickle_name: str = "taipei_session",
+        account_number: str = "",
     ):
         self.email = email
         self.password = password
         self.totp_secret = totp_secret
         self.pickle_name = pickle_name
+        self.account_number = account_number
         self._authenticated = False
         self._pickle_path = _pickle_path(pickle_name)
         self._device_challenge_mode = False
@@ -348,7 +350,10 @@ class RobinhoodTrader(BrokerClient):
         # Tolerate transient errors (429, network blips) so we don't
         # trigger a full re-login that could hit the device challenge loop.
         try:
-            result = rh.profiles.load_account_profile()
+            kwargs = {}
+            if self.account_number:
+                kwargs["account_number"] = self.account_number
+            result = rh.profiles.load_account_profile(**kwargs)
             if not result:
                 raise ValueError("load_account_profile returned empty result")
         except Exception as e:

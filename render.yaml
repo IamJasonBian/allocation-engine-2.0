@@ -2,7 +2,7 @@ services:
   - type: web
     name: allocation-engine
     runtime: python
-    buildCommand: pip install -r requirements.txt
+    buildCommand: pip install -r requirements.txt && python scripts/check_schemas.py
     startCommand: gunicorn app.wsgi:application
     envVars:
       - key: PYTHON_VERSION

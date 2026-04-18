@@ -1,5 +1,6 @@
 from flask import Blueprint, jsonify, current_app
 from app.brokers import get_broker
+from app.schemas import validate_orders
 
 bp = Blueprint("orders", __name__)
 
@@ -11,6 +12,8 @@ def orders(broker_name=None):
     try:
         broker = get_broker(broker_name)
         data = broker.open_orders()
-        return jsonify({"broker": broker_name, "count": len(data), "orders": data})
+        validated = validate_orders(data)
+        dumped = [o.model_dump() for o in validated]
+        return jsonify({"broker": broker_name, "count": len(dumped), "orders": dumped})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
