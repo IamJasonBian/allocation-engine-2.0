@@ -78,22 +78,100 @@ Broker defaults to `DEFAULT_BROKER` env var. Append `/alpaca` or `/robinhood` to
 
 ## Architecture
 
+### System overview
+
+```mermaid
+graph TD
+    AM[allocation-manager<br/><i>React frontend</i>] -->|GET /api/portfolio<br/>GET /api/positions<br/>GET /api/orders| GU
+
+    subgraph Render
+        GU[gunicorn<br/><i>1 worker · 4 threads · port 10000</i>]
+        GU --> FLASK[Flask API]
+        GU --> BG[Background Engine<br/><i>daemon thread</i>]
+    end
+
+    RTS[allocation-runtime-service<br/><i>Netlify · read-only</i>] -->|GET /orders<br/>GET /state| BG
+    BG --> ENG[AllocationEngine.tick]
+    ENG -->|reconcile & execute| BROKER
+
+    FLASK -->|account · positions<br/>orders · portfolio| BROKER[BrokerClient Protocol]
+
+    BROKER --> RH[RobinhoodTrader<br/><i>robin-stocks + pyotp</i>]
+    BROKER --> ALP[AlpacaTrader<br/><i>alpaca-py</i>]
+
+    RH -->|REST| RH_API[Robinhood API]
+    ALP -->|REST| ALP_API[Alpaca API]
+
+    SCHEMAS[Pydantic Schemas<br/><i>deploy-time contract checks</i>] -.->|validates| FLASK
 ```
-allocation-runtime-service (read-only API)
-        │
-        │  GET /api/orders
-        ▼
-┌────────────────────────┐
-│  allocation-engine 2.0 │
-│  (Flask + gunicorn)    │
-│                        │
-│  ┌──────────────────┐  │   GET /api/positions/robinhood
-│  │ Background Engine │  │   GET /api/account/alpaca
-│  │ (daemon thread)   │  │   ...
-│  └──────────────────┘  │
-│                        │
-│  ┌─────────┐ ┌──────┐ │
-│  │Robinhood│ │Alpaca│ │
-│  └─────────┘ └──────┘ │
-└────────────────────────┘
+
+### Reconciliation loop
+
+```mermaid
+sequenceDiagram
+    participant RT as Runtime Service
+    participant ENG as AllocationEngine
+    participant BR as BrokerClient
+
+    loop every POLL_INTERVAL_SECONDS
+        ENG->>RT: GET /state (snapshot_key)
+        alt snapshot_key unchanged
+            ENG-->>ENG: skip
+        else new snapshot
+            ENG->>RT: GET /orders (desired orders)
+            ENG->>BR: open_orders()
+            ENG->>BR: positions()
+            ENG->>ENG: reconcile(desired vs current)
+            opt stale orders exist
+                ENG->>BR: cancel_order(id)
+            end
+            opt new orders to submit
+                ENG->>BR: submit_order(order)
+            end
+        end
+    end
+```
+
+### Request flow
+
+```mermaid
+graph LR
+    REQ[HTTP Request] --> ROUTE[Flask Route<br/>/api/positions/robinhood]
+    ROUTE --> GB[get_broker<br/><i>lazy init + cache</i>]
+    GB --> BC[BrokerClient.positions]
+    BC --> VAL[Pydantic Schema<br/>validate_positions]
+    VAL --> JSON[JSON Response]
+```
+
+### Module dependencies
+
+```mermaid
+graph TD
+    WSGI[app/wsgi.py] --> INIT[app/__init__.py<br/><i>create_app</i>]
+    MAIN[main.py<br/><i>CLI</i>] --> INIT
+
+    INIT --> CFG[app/config.py]
+    INIT --> API[app/api/__init__.py]
+    INIT --> BGM[app/background.py]
+
+    API --> HEALTH[health.py]
+    API --> ACCT[account.py]
+    API --> POS[positions.py]
+    API --> ORD[orders.py]
+    API --> PORT[portfolio.py]
+    API --> EAPI[engine_api.py]
+
+    ACCT & POS & ORD & PORT --> SCH[app/schemas.py]
+    ACCT & POS & ORD & PORT & EAPI --> BREG[app/brokers/__init__.py]
+
+    BGM --> ENG[app/engine.py]
+    BGM --> BREG
+    BGM --> RTC[app/runtime_client.py]
+
+    ENG --> RTC
+    ENG --> BASE[app/brokers/base.py<br/><i>BrokerClient Protocol</i>]
+
+    BREG --> ALP[alpaca_client.py]
+    BREG --> RHC[robinhood_client.py]
+    ALP & RHC -.->|implements| BASE
 ```

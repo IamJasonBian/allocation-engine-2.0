@@ -8,6 +8,9 @@ alpaca-py>=0.31.0
 robin-stocks>=3.0.0
 pyotp>=2.9.0
 
+# Validation
+pydantic>=2.5.0
+
 # Utilities
 requests>=2.31.0
 python-dotenv>=1.0.0
