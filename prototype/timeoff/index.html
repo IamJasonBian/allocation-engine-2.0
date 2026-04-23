@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Time Off — vacation planner & boss chat coach</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            ink: '#0f172a',
+            sand: '#f6f3ee',
+            pine: '#1f6a4a',
+            coral: '#e06055',
+          },
+          fontFamily: {
+            display: ['"Fraunces"', 'Georgia', 'serif'],
+            body: ['"Inter"', 'system-ui', 'sans-serif'],
+          },
+        },
+      },
+    };
+  </script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Inter:wght@400;500;600&display=swap"
+    rel="stylesheet"
+  />
+  <style>
+    html, body { background: #f6f3ee; color: #0f172a; font-family: 'Inter', system-ui, sans-serif; }
+    .font-display { font-family: 'Fraunces', Georgia, serif; }
+    .card { background: white; border: 1px solid #e7e2d8; border-radius: 14px; }
+    .chip { border: 1px solid #d7d1c3; background: #fbfaf6; border-radius: 999px; padding: 3px 10px; font-size: 12px; }
+    .btn-primary { background: #1f6a4a; color: white; border-radius: 10px; padding: 10px 16px; font-weight: 600; }
+    .btn-primary:hover { filter: brightness(0.95); }
+    .btn-ghost { border: 1px solid #d7d1c3; background: white; border-radius: 10px; padding: 10px 16px; font-weight: 500; }
+    .score-bar { background: linear-gradient(90deg, #1f6a4a var(--w,0%), #eee var(--w,0%)); }
+    .bubble-user { background: #1f6a4a; color: white; border-radius: 14px 14px 2px 14px; }
+    .bubble-boss { background: white; border: 1px solid #e7e2d8; border-radius: 14px 14px 14px 2px; }
+    textarea, input, select { font-family: inherit; }
+  </style>
+</head>
+<body class="min-h-screen">
+  <header class="max-w-5xl mx-auto px-6 pt-10 pb-6 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <div class="w-9 h-9 rounded-lg bg-pine text-white grid place-items-center font-display text-lg">T</div>
+      <div>
+        <div class="font-display text-xl leading-none">Time Off</div>
+        <div class="text-xs text-slate-500">vacation planner &middot; boss chat coach</div>
+      </div>
+    </div>
+    <nav class="flex gap-2">
+      <button data-tab="planner" class="tab-btn btn-ghost">Planner</button>
+      <button data-tab="coach" class="tab-btn btn-ghost">Boss Coach</button>
+      <button data-tab="settings" class="tab-btn btn-ghost">Profile</button>
+    </nav>
+  </header>
+
+  <main class="max-w-5xl mx-auto px-6 pb-24">
+    <!-- Hero -->
+    <section class="mb-10">
+      <h1 class="font-display text-4xl md:text-5xl leading-tight max-w-2xl">
+        Take the trip. <span class="text-pine">Then</span> have the conversation.
+      </h1>
+      <p class="text-slate-600 mt-3 max-w-xl">
+        Pick dates your team and wallet will forgive, then rehearse the 1:1 with your boss until it lands.
+      </p>
+    </section>
+
+    <!-- PLANNER -->
+    <section data-panel="planner" class="grid md:grid-cols-5 gap-6">
+      <div class="card p-5 md:col-span-2">
+        <h2 class="font-display text-2xl mb-1">Plan the trip</h2>
+        <p class="text-sm text-slate-500 mb-4">We score windows on PTO, coverage, prices, and holiday proximity.</p>
+
+        <label class="block text-sm font-medium mb-1">Destination</label>
+        <input id="destination" class="w-full border rounded-lg px-3 py-2 mb-3" placeholder="e.g. Lisbon" value="Lisbon" />
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-sm font-medium mb-1">Trip length (days)</label>
+            <input id="length" type="number" min="1" max="30" value="7" class="w-full border rounded-lg px-3 py-2" />
+          </div>
+          <div>
+            <label class="block text-sm font-medium mb-1">PTO days left</label>
+            <input id="pto" type="number" min="0" max="60" value="12" class="w-full border rounded-lg px-3 py-2" />
+          </div>
+        </div>
+
+        <label class="block text-sm font-medium mt-3 mb-1">Earliest start</label>
+        <input id="earliest" type="date" class="w-full border rounded-lg px-3 py-2" />
+
+        <label class="block text-sm font-medium mt-3 mb-1">Team coverage</label>
+        <select id="coverage" class="w-full border rounded-lg px-3 py-2">
+          <option value="strong">Strong — someone can cover me end to end</option>
+          <option value="ok" selected>OK — partial coverage, async handoff</option>
+          <option value="thin">Thin — I'm the only one who owns this</option>
+        </select>
+
+        <label class="block text-sm font-medium mt-3 mb-1">Workload during window</label>
+        <select id="workload" class="w-full border rounded-lg px-3 py-2">
+          <option value="calm">Calm — no launches or deadlines</option>
+          <option value="normal" selected>Normal — steady ops</option>
+          <option value="crunch">Crunch — launch or quarter-end</option>
+        </select>
+
+        <button id="runPlanner" class="btn-primary mt-5 w-full">Suggest windows</button>
+      </div>
+
+      <div class="md:col-span-3 space-y-3" id="plannerResults">
+        <div class="card p-5 text-sm text-slate-500">Fill out the form and click <b>Suggest windows</b>. We'll rank three options.</div>
+      </div>
+    </section>
+
+    <!-- COACH -->
+    <section data-panel="coach" class="hidden grid md:grid-cols-5 gap-6">
+      <div class="card p-5 md:col-span-2">
+        <h2 class="font-display text-2xl mb-1">Boss Coach</h2>
+        <p class="text-sm text-slate-500 mb-4">Draft the ask, then rehearse until the pushback stops surprising you.</p>
+
+        <label class="block text-sm font-medium mb-1">Boss style</label>
+        <select id="bossStyle" class="w-full border rounded-lg px-3 py-2">
+          <option value="skeptic">Skeptical — asks hard coverage questions</option>
+          <option value="warm" selected>Warm — supportive but anxious about deadlines</option>
+          <option value="blunt">Blunt — wants the bottom line, fast</option>
+        </select>
+
+        <label class="block text-sm font-medium mt-3 mb-1">Pick a scored window</label>
+        <select id="pickWindow" class="w-full border rounded-lg px-3 py-2">
+          <option value="">— run the planner first —</option>
+        </select>
+
+        <label class="block text-sm font-medium mt-3 mb-1">Why this trip matters (1 line)</label>
+        <input id="reason" class="w-full border rounded-lg px-3 py-2" placeholder="e.g. wedding anniversary, first real break this year" value="first real break this year" />
+
+        <label class="block text-sm font-medium mt-3 mb-1">Channel</label>
+        <select id="channel" class="w-full border rounded-lg px-3 py-2">
+          <option value="slack">Slack DM</option>
+          <option value="email" selected>Email</option>
+          <option value="1on1">1:1 talking points</option>
+        </select>
+
+        <div class="flex gap-2 mt-5">
+          <button id="draftBtn" class="btn-primary flex-1">Draft it</button>
+          <button id="rehearseBtn" class="btn-ghost flex-1">Rehearse 1:1</button>
+        </div>
+      </div>
+
+      <div class="md:col-span-3 space-y-4">
+        <div class="card p-5">
+          <div class="flex items-center justify-between mb-2">
+            <h3 class="font-display text-lg">Draft</h3>
+            <button id="copyDraft" class="chip">Copy</button>
+          </div>
+          <pre id="draftOut" class="whitespace-pre-wrap text-sm leading-relaxed text-slate-700">Click <b>Draft it</b> to generate the message.</pre>
+        </div>
+        <div class="card p-5">
+          <h3 class="font-display text-lg mb-2">Rehearsal</h3>
+          <div id="chat" class="space-y-3 max-h-80 overflow-y-auto pr-2"></div>
+          <div class="flex gap-2 mt-3">
+            <input id="userLine" class="flex-1 border rounded-lg px-3 py-2" placeholder="Your line (press Enter)" />
+            <button id="sendLine" class="btn-primary">Send</button>
+          </div>
+          <div id="debrief" class="hidden mt-4 p-3 bg-sand rounded-lg text-sm"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SETTINGS / PROFILE -->
+    <section data-panel="settings" class="hidden grid md:grid-cols-2 gap-6">
+      <div class="card p-5">
+        <h2 class="font-display text-2xl mb-1">Profile</h2>
+        <p class="text-sm text-slate-500 mb-4">Nothing leaves this browser. Prototype only.</p>
+        <label class="block text-sm font-medium mb-1">Your name</label>
+        <input id="profName" class="w-full border rounded-lg px-3 py-2" placeholder="Alex" />
+        <label class="block text-sm font-medium mt-3 mb-1">Boss's name</label>
+        <input id="profBoss" class="w-full border rounded-lg px-3 py-2" placeholder="Priya" />
+        <label class="block text-sm font-medium mt-3 mb-1">Team</label>
+        <input id="profTeam" class="w-full border rounded-lg px-3 py-2" placeholder="Platform Eng" />
+        <button id="saveProf" class="btn-primary mt-4">Save locally</button>
+      </div>
+      <div class="card p-5">
+        <h3 class="font-display text-xl mb-2">History</h3>
+        <p class="text-sm text-slate-500 mb-3">Past rehearsals. The coach learns which objections land hardest.</p>
+        <ul id="historyList" class="text-sm space-y-2"></ul>
+      </div>
+    </section>
+  </main>
+
+  <footer class="max-w-5xl mx-auto px-6 pb-10 text-xs text-slate-400">
+    Prototype &middot; single-file static app &middot; no backend, no tracking
+  </footer>
+
+  <script src="./app.js"></script>
+</body>
+</html>
