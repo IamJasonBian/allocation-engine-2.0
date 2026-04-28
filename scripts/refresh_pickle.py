@@ -44,8 +44,9 @@ def login():
         pickle.dump(stub, f)
     print(f"Using device_token={DEVICE_TOKEN[:8]}...{DEVICE_TOKEN[-4:]}")
 
-    email = Config.RH_USER or input("Robinhood email: ").strip()
-    password = Config.RH_PASS or input("Robinhood password: ").strip()
+    env_email, env_password = Config.rh_credentials()
+    email = env_email or input("Robinhood email: ").strip()
+    password = env_password or input("Robinhood password: ").strip()
 
     mfa_code = None
     if Config.RH_TOTP_SECRET:
