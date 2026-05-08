@@ -152,10 +152,9 @@ def start_engine_thread(app):
 
             # Risk infrastructure
             risk_subject = RiskSubject()
-            webhook_url = config.get("SLACK_WEBHOOK_URL") or os.environ.get("SLACK_WEBHOOK_URL")
-            if webhook_url:
-                risk_subject.attach(SlackAlertObserver(webhook_url))
-                log.info("SlackAlertObserver attached to background engine")
+            if os.environ.get("TELEGRAM_BOT_TOKEN") and os.environ.get("TELEGRAM_CHAT_ID"):
+                risk_subject.attach(SlackAlertObserver())
+                log.info("Telegram risk observer attached to background engine")
 
             # Shadow index config — project BTC/USD → Grayscale Bitcoin Mini Trust ETF
             shadow_index = BTC_MINI
