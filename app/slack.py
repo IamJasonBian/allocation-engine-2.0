@@ -17,8 +17,8 @@ log = logging.getLogger(__name__)
 _TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 _CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
 _DEBOUNCE_WINDOW_SEC = int(os.getenv("ALERT_DEBOUNCE_SECONDS", "300"))
-_ALERTS_ENABLED = os.getenv("ALERTS_ENABLED", "true").strip().lower() not in (
-    "false", "0", "no", "off",
+_ALERTS_ENABLED = os.getenv("ALERTS_ENABLED", "false").strip().lower() in (
+    "true", "1", "yes", "on",
 )
 
 _lock = threading.Lock()
@@ -70,7 +70,10 @@ def notify(message: str, *, bypass_debounce: bool = False):
         global _last_disabled_log_ts
         now = time.time()
         if now - _last_disabled_log_ts >= _DISABLED_LOG_THROTTLE_SEC:
-            log.info("[telegram] notify() called but ALERTS_ENABLED=false")
+            log.info(
+                "[telegram] notify() suppressed — ALERTS_ENABLED is not truthy "
+                "(set ALERTS_ENABLED=true on Render to enable)"
+            )
             _last_disabled_log_ts = now
         return
 
