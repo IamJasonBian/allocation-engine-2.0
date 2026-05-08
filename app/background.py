@@ -163,9 +163,9 @@ def start_engine_thread(app):
             if etf_close and btc_at_close:
                 shadow_index.last_close = float(etf_close)
                 shadow_index.btc_at_close = float(btc_at_close)
-                log.info("Shadow index %s configured (last_close=$%.2f, btc_at_close=$%,.2f)",
+                log.info("Shadow index %s configured (last_close=$%.2f, btc_at_close=$%s)",
                          shadow_index.shadow_symbol, shadow_index.last_close,
-                         shadow_index.btc_at_close)
+                         f"{shadow_index.btc_at_close:,.2f}")
 
             _engine_status["running"] = True
             _engine_status["dry_run"] = config["DRY_RUN"]
