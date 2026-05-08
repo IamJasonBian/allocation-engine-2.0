@@ -1,7 +1,9 @@
-"""Telegram notifications via bot API.
+"""Slack notifications via incoming webhook.
 
-Module name and `notify(message)` signature preserved for import-stability with
-existing call sites in app.brokers.robinhood_client and app.background.
+Standing fallback path — swap this in if Telegram becomes unreliable. Same
+public surface as the Telegram version (`notify(message, *, bypass_debounce)`)
+plus the same in-process debouncing, so call sites and operator behavior are
+unchanged when this PR is merged.
 """
 
 import hashlib
@@ -14,54 +16,37 @@ import requests
 
 log = logging.getLogger(__name__)
 
-_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
-_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "")
+_WEBHOOK_URL = os.getenv("SLACK_WEBHOOK_URL", "")
 _DEBOUNCE_WINDOW_SEC = int(os.getenv("ALERT_DEBOUNCE_SECONDS", "300"))
 
 _lock = threading.Lock()
 _last_sent: dict[str, tuple[float, int]] = {}
 
 
-def _strip_slack_markup(text: str) -> str:
-    """Drop Slack-only tokens that would render as literal text in Telegram."""
-    return (
-        text
-        .replace("<!channel>", "")
-        .replace("<!here>", "")
-        .strip()
-    )
-
-
 def _send(text: str) -> bool:
-    if not _TOKEN or not _CHAT_ID:
-        log.debug("[telegram] TELEGRAM_BOT_TOKEN/CHAT_ID not set, skipping")
+    if not _WEBHOOK_URL:
+        log.debug("[slack] SLACK_WEBHOOK_URL not set, skipping")
         return False
     try:
-        resp = requests.post(
-            f"https://api.telegram.org/bot{_TOKEN}/sendMessage",
-            json={
-                "chat_id": _CHAT_ID,
-                "text": text,
-                "disable_web_page_preview": True,
-            },
-            timeout=10,
-        )
+        resp = requests.post(_WEBHOOK_URL, json={"text": text}, timeout=10)
         resp.raise_for_status()
-        log.info("[telegram] Notification sent")
+        log.info("[slack] Notification sent")
         return True
     except Exception:
-        log.exception("[telegram] Failed to send message")
+        log.exception("[slack] Failed to send message")
         return False
 
 
 def notify(message: str, *, bypass_debounce: bool = False):
-    """Post a message to the configured Telegram chat.
+    """Post a message to the configured Slack webhook.
 
     Identical messages within ALERT_DEBOUNCE_SECONDS (default 300) are suppressed
-    and counted; the next emit appends `[+N suppressed in last Ns]`.
+    and counted; the next emit appends `[+N suppressed in last Ns]`. Slack
+    incoming-webhook quotas are tight (HTTP 429 message_limit_exceeded under
+    sustained load), so the debouncer matters more here than on Telegram.
     Pass `bypass_debounce=True` for critical alerts that must always go through.
     """
-    text = _strip_slack_markup(message)
+    text = message.strip()
     if not text:
         return
 

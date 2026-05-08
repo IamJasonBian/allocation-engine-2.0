@@ -118,7 +118,7 @@ def main():
 
         # Set up risk event bus with observers
         risk_subject = RiskSubject()
-        if os.getenv("TELEGRAM_BOT_TOKEN") and os.getenv("TELEGRAM_CHAT_ID"):
+        if os.getenv("SLACK_WEBHOOK_URL"):
             risk_subject.attach(SlackAlertObserver())
         rebalancer = RebalancerObserver()
 
