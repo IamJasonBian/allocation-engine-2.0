@@ -31,6 +31,20 @@ def get_broker(name: str) -> BrokerClient:
             pickle_name=config.get("RH_PICKLE_NAME", "taipei_session"),
             account_number=config.get("RH_AUTOMATED_ACCOUNT_NUMBER", ""),
         )
+    elif name == "ibkr":
+        from app.brokers.ibkr import IBKRTrader
+        from app.config import Config
+        sig_path, enc_path = Config.ibkr_key_files()
+        client = IBKRTrader(
+            account_id=config.get("IBKR_ACCOUNT_ID", ""),
+            paper=config.get("IBKR_PAPER", True),
+            consumer_key=config.get("IBKR_CONSUMER_KEY", ""),
+            access_token=config.get("IBKR_ACCESS_TOKEN", ""),
+            access_token_secret=config.get("IBKR_ACCESS_TOKEN_SECRET", ""),
+            dh_prime=config.get("IBKR_DH_PRIME", ""),
+            signature_key_path=sig_path,
+            encryption_key_path=enc_path,
+        )
     else:
         raise ValueError(f"Unknown broker: {name}")
 
