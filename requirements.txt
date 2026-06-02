@@ -6,6 +6,7 @@ flask-cors>=4.0.0
 # Brokers
 alpaca-py>=0.31.0
 robin-stocks>=3.0.0
+ibind[oauth]>=0.1.13
 pyotp>=2.9.0
 
 # Validation

@@ -52,6 +52,30 @@ class Config:
             return cls.RH_AUTO_EMAIL, cls.RH_AUTO_PASSWORD
         return cls.RH_MAIN_EMAIL, cls.RH_MAIN_PASSWORD
 
+    # -- Interactive Brokers (Client Portal Web API, OAuth 1.0a) --
+    IBKR_ACCOUNT_ID = os.getenv("IBKR_ACCOUNT_ID", "")
+    IBKR_PAPER = os.getenv("IBKR_PAPER", "true").lower() == "true"
+    IBKR_CONSUMER_KEY = os.getenv("IBKR_CONSUMER_KEY", "")
+    IBKR_ACCESS_TOKEN = os.getenv("IBKR_ACCESS_TOKEN", "")
+    IBKR_ACCESS_TOKEN_SECRET = os.getenv("IBKR_ACCESS_TOKEN_SECRET", "")
+    IBKR_DH_PRIME = os.getenv("IBKR_DH_PRIME", "")
+    IBKR_SIGNATURE_KEY = os.getenv("IBKR_SIGNATURE_KEY", "")   # RSA private key PEM contents
+    IBKR_ENCRYPTION_KEY = os.getenv("IBKR_ENCRYPTION_KEY", "") # RSA private key PEM contents
+    IBKR_MAX_OPTION_ORDER_QTY = int(os.getenv("IBKR_MAX_OPTION_ORDER_QTY", os.getenv("MAX_ORDER_QTY", "50")))
+
+    @classmethod
+    def ibkr_key_files(cls) -> tuple[str, str]:
+        """Write IBKR signature/encryption PEM env vars to temp files; return (signature_path, encryption_path)."""
+        import tempfile, os as _os
+        def _write(content: str, suffix: str) -> str:
+            if not content:
+                return ""
+            fd, path = tempfile.mkstemp(suffix=suffix)
+            with _os.fdopen(fd, "w") as f:
+                f.write(content)
+            return path
+        return _write(cls.IBKR_SIGNATURE_KEY, "_sig.pem"), _write(cls.IBKR_ENCRYPTION_KEY, "_enc.pem")
+
     # -- Runtime service --
     RUNTIME_SERVICE_URL = os.getenv(
         "RUNTIME_SERVICE_URL",
