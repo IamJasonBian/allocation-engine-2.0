@@ -6,7 +6,7 @@ _broker_cache: dict[str, BrokerClient] = {}
 
 
 def get_broker(name: str) -> BrokerClient:
-    """Get or create a broker client by name ('alpaca' or 'robinhood')."""
+    """Get or create a broker client by name ('alpaca', 'robinhood', or 'ibkr')."""
     if name in _broker_cache:
         return _broker_cache[name]
 
@@ -30,6 +30,17 @@ def get_broker(name: str) -> BrokerClient:
             totp_secret=config.get("RH_TOTP_SECRET", ""),
             pickle_name=config.get("RH_PICKLE_NAME", "taipei_session"),
             account_number=config.get("RH_AUTOMATED_ACCOUNT_NUMBER", ""),
+        )
+    elif name == "ibkr":
+        from app.brokers.ibkr import IBKRTrader
+        client = IBKRTrader(
+            account_id=config.get("IBKR_ACCOUNT_ID", ""),
+            host=config.get("IBKR_HOST", "127.0.0.1"),
+            port=config.get("IBKR_PORT", 4002),
+            client_id=config.get("IBKR_CLIENT_ID", 1),
+            paper=config.get("IBKR_PAPER", True),
+            peg_delta_default=config.get("IBKR_PEG_DELTA_DEFAULT", 0.5),
+            max_option_order_qty=config.get("IBKR_MAX_OPTION_ORDER_QTY", 50),
         )
     else:
         raise ValueError(f"Unknown broker: {name}")
