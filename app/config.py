@@ -52,6 +52,17 @@ class Config:
             return cls.RH_AUTO_EMAIL, cls.RH_AUTO_PASSWORD
         return cls.RH_MAIN_EMAIL, cls.RH_MAIN_PASSWORD
 
+    # -- Interactive Brokers (IB Gateway via ib_async / TWS socket) --
+    IBKR_HOST = os.getenv("IBKR_HOST", "127.0.0.1")
+    IBKR_PORT = int(os.getenv("IBKR_PORT", "4002"))          # 4002 paper / 4001 live
+    IBKR_CLIENT_ID = int(os.getenv("IBKR_CLIENT_ID", "1"))
+    IBKR_ACCOUNT_ID = os.getenv("IBKR_ACCOUNT_ID", "")
+    IBKR_PAPER = os.getenv("IBKR_PAPER", "true").lower() == "true"
+    IBKR_PEG_DELTA_DEFAULT = float(os.getenv("IBKR_PEG_DELTA_DEFAULT", "0.5"))
+    IBKR_MAX_OPTION_ORDER_QTY = int(os.getenv("IBKR_MAX_OPTION_ORDER_QTY", os.getenv("MAX_ORDER_QTY", "50")))
+    IBKR_OPEN_BUFFER_MIN = int(os.getenv("IBKR_OPEN_BUFFER_MIN", "2"))
+    IBKR_CLOSE_BUFFER_MIN = int(os.getenv("IBKR_CLOSE_BUFFER_MIN", "5"))
+
     # -- Runtime service --
     RUNTIME_SERVICE_URL = os.getenv(
         "RUNTIME_SERVICE_URL",
