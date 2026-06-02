@@ -62,6 +62,10 @@ If you deploy first, the service downloads the old/stale pickle from Netlify and
 - `GET /api/auth/status/robinhood` — broker-specific status
 - `GET /api/health` — general service health
 
+## Interactive Brokers (IBKR)
+
+An IBKR broker places live options orders headless via the **Client Portal Web API with OAuth 1.0a**, using the [`ibind`](https://github.com/Voyz/ibind) library (it handles the RSA/Diffie-Hellman live-session-token handshake, `ssodh/init`, and `tickle` keepalive — no CP Gateway process to run). The session is re-minted from stored secrets each ~24h with no human step, unlike the Robinhood device challenge. Secrets (`IBKR_*`, plus `ENGINE_BROKER=ibkr` and `DRY_RUN`), one-time portal setup, paper-first rollout, and session lifecycle are documented in [docs/ibkr-setup.md](docs/ibkr-setup.md).
+
 ## Render CLI
 
 ```bash
