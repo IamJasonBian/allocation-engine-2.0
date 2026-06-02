@@ -7,6 +7,7 @@ flask-cors>=4.0.0
 alpaca-py>=0.31.0
 robin-stocks>=3.0.0
 pyotp>=2.9.0
+ibind[oauth]>=0.1.23
 
 # Validation
 pydantic>=2.5.0
