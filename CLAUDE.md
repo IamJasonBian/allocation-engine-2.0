@@ -62,6 +62,21 @@ If you deploy first, the service downloads the old/stale pickle from Netlify and
 - `GET /api/auth/status/robinhood` — broker-specific status
 - `GET /api/health` — general service health
 
+## Interactive Brokers (IBKR)
+
+An IBKR broker places **live options orders, always as Pegged-to-Stock (`PEG STK`)**, with an
+optional conditional cancel (cancel the working order if the underlying trades above/below a
+threshold). It connects via [`ib_async`](https://github.com/ib-api-reloaded/ib_async) over the
+TWS socket to a persistent **IB Gateway** running as a separate private Render service
+(`deploy/ib-gateway/`, dockerized `gnzsnz/ib-gateway`; ports 4001 live / 4002 paper). `PEG STK`
+and native cancel-on-price conditions are TWS/Gateway-only — the Client Portal Web API can't do
+them, which is why a Gateway process is required. **Caveat:** pegged orders are DAY orders and
+their cancel guards are **intraday-only** (not an overnight stop); the engine re-stages each RTH
+session and gates submission with open/close buffers (`IBKR_OPEN_BUFFER_MIN`/`IBKR_CLOSE_BUFFER_MIN`).
+Secrets (`TWS_*` on the gateway; `IBKR_*`, `ENGINE_BROKER=ibkr`, `DRY_RUN` on worker+api), the
+2FA operational risk, and paper-first rollout are documented in
+[docs/ibkr-setup.md](docs/ibkr-setup.md).
+
 ## Render CLI
 
 ```bash
