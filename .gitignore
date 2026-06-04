@@ -15,3 +15,7 @@ market-data-service/build/
 
 # Local Netlify folder
 .netlify
+
+# local trade-alert state
+data/watchlist_trades.json
+data/trade_sell_check.log
