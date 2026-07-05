@@ -52,6 +52,21 @@ class Config:
             return cls.RH_AUTO_EMAIL, cls.RH_AUTO_PASSWORD
         return cls.RH_MAIN_EMAIL, cls.RH_MAIN_PASSWORD
 
+    # -- Auth-service (Robinhood session on the external box) --
+    # Base URL must be https — the request token is sent as a Bearer header.
+    AUTH_SERVICE_URL = os.getenv("AUTH_SERVICE_URL", "")
+    RH_AUTH_SERVICE_REQUEST_TOKEN = os.getenv("RH_AUTH_SERVICE_REQUEST_TOKEN", "")
+    AUTH_SERVICE_TIMEOUT = int(os.getenv("AUTH_SERVICE_TIMEOUT", "30"))
+
+    # -- Claude Code reauth (in-box login flow) --
+    # Command that starts the Claude login and prints a browser callback URL.
+    CLAUDE_LOGIN_CMD = os.getenv("CLAUDE_LOGIN_CMD", "claude setup-token")
+    # File that appears/updates once Claude verification completes.
+    CLAUDE_CREDENTIALS_PATH = os.getenv(
+        "CLAUDE_CREDENTIALS_PATH",
+        os.path.expanduser("~/.claude/.credentials.json"),
+    )
+
     # -- Runtime service --
     RUNTIME_SERVICE_URL = os.getenv(
         "RUNTIME_SERVICE_URL",
