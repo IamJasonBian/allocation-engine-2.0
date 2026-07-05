@@ -70,6 +70,13 @@ class Config:
         os.path.join(os.path.dirname(__file__), "..", "data", "stops.sqlite3"),
     )
 
+    # -- Trading DB write path (5thstreetcapital Netlify functions) --
+    TRADING_DB_URL = os.getenv(
+        "TRADING_DB_URL", "https://5thstreetcapital.org/.netlify/functions"
+    )
+    TRADING_DB_TOKEN = os.getenv("TRADING_DB_TOKEN", "")
+    TRADING_DB_SYNC_SECONDS = int(os.getenv("TRADING_DB_SYNC_SECONDS", "900"))
+
     # -- Claude Code reauth (in-box login flow) --
     # Command that starts the Claude login and prints a browser callback URL.
     CLAUDE_LOGIN_CMD = os.getenv("CLAUDE_LOGIN_CMD", "claude setup-token")

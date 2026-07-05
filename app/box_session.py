@@ -29,8 +29,17 @@ def _db_path():
     return Config.STOP_DB_PATH
 
 
+def _ensure_dir(path):
+    import os
+    parent = os.path.dirname(os.path.abspath(path))
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+
+
 def _read_meta(path, key):
     # Short-lived connection per call — safe across Flask/engine threads.
+    # Ensure the parent dir exists (ephemeral FS: data/ may not exist yet).
+    _ensure_dir(path)
     with sqlite3.connect(path) as db:
         db.execute(_SCHEMA)
         row = db.execute("SELECT value FROM meta WHERE key=?", (key,)).fetchone()
@@ -38,8 +47,7 @@ def _read_meta(path, key):
 
 
 def _write_meta(path, key, value):
-    import os
-    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    _ensure_dir(path)
     with sqlite3.connect(path) as db:
         db.execute(_SCHEMA)
         db.execute("INSERT INTO meta(key,value) VALUES(?,?) "

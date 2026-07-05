@@ -173,6 +173,8 @@ def start_engine_thread(app):
             is_live = not config["DRY_RUN"]
             blob_interval = 15 * 60  # 15 minutes
             last_blob_sync = 0.0
+            db_sync_interval = config.get("TRADING_DB_SYNC_SECONDS", 900)
+            last_db_sync = 0.0
             retry_hour = config.get("RH_RETRY_HOUR_ET", 11)
 
             data_broker_name = config.get("DATA_BROKER", "")
@@ -232,6 +234,35 @@ def start_engine_thread(app):
                          [r.get("symbol") for r in out["renewed"]] or "none",
                          out["pruned"] or "none",
                          [s["symbol"] for s in out.get("skipped", [])] or "none")
+
+                if not dry:
+                    # Live sweeper actions land in the bot-activity feed
+                    # (de-duped on {order_id}:{status} downstream).
+                    events = []
+                    for p in out["placed"]:
+                        result = p.get("result") or {}
+                        if result.get("id"):
+                            events.append({
+                                "order_id": result["id"],
+                                "type": "TRAILING_STOP_ORDER",
+                                "status": result.get("state", "submitted"),
+                                "symbol": p["symbol"],
+                                "quantity": float(qty_map.get(p["symbol"]) or 0),
+                            })
+                    for r in out["renewed"]:
+                        result = r.get("result") or {}
+                        if r.get("action") == "renewed" and result.get("id"):
+                            events.append({
+                                "order_id": result["id"],
+                                "type": "TRAILING_STOP_REPLACED",
+                                "status": result.get("state", "submitted"),
+                                "symbol": r.get("symbol", ""),
+                            })
+                    if events:
+                        from app.trading_db import post_bot_activity
+                        res = post_bot_activity(events)
+                        log.info("[trading-db] bot activity posted: %s",
+                                 (res or {}).get("data", "failed"))
 
             import time as _time
             _engine_status["last_error"] = f"pre_loop_v3_{int(_time.time())}"
@@ -446,6 +477,24 @@ def start_engine_thread(app):
                         log.exception("Option history sync error")
 
                     now_mono = time.monotonic()
+
+                    # --- Trading DB write path (stock + option orders) ---
+                    # Not gated on is_live: dry-run engines still read the
+                    # real book and the frontend should reflect it.
+                    if (now_mono - last_db_sync) >= db_sync_interval:
+                        try:
+                            from app.trading_db import post_orders
+                            res = post_orders(
+                                open_orders=open_orders,
+                                recent_option_orders=options_open_orders,
+                            )
+                            if res:
+                                log.info("[trading-db] orders synced: %s",
+                                         res.get("data"))
+                            last_db_sync = now_mono
+                        except Exception:
+                            log.exception("[trading-db] order sync error")
+
                     if is_live and (now_mono - last_blob_sync) >= blob_interval:
                         try:
                             sync_to_blob(
