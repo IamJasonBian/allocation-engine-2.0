@@ -235,6 +235,43 @@ def test_renew_skips_buy_side_stop_instead_of_crashing(store):
     assert c.replaced == []
 
 
+def test_live_sweep_places_with_real_qty_and_urls(store):
+    c = FakeClient()
+    out = sweep(c, store, ["AAPL"], dry_run=False,
+                qty_map={"AAPL": 42.5},
+                account_url="https://api.robinhood.com/accounts/X/",
+                instrument_resolver=lambda s: f"https://api.robinhood.com/instruments/{s}/")
+    assert [p["symbol"] for p in out["placed"]] == ["AAPL"]
+    payload, dry = c.placed[0]
+    assert dry is False
+    assert payload["quantity"] == "42.5"
+    assert payload["account"] and payload["instrument"]
+    assert store.get("AAPL")["state"] == "submitted"
+
+
+def test_live_sweep_skips_without_quantity(store):
+    c = FakeClient()
+    out = sweep(c, store, ["AAPL"], dry_run=False, qty_map={},
+                account_url="https://a/", instrument_resolver=lambda s: "https://i/")
+    assert c.placed == []
+    assert out["skipped"] == [{"symbol": "AAPL", "reason": "no_quantity"}]
+
+
+def test_live_sweep_skips_unresolved_instrument(store):
+    c = FakeClient()
+    out = sweep(c, store, ["AAPL"], dry_run=False, qty_map={"AAPL": 5},
+                account_url="https://a/", instrument_resolver=lambda s: "")
+    assert c.placed == []
+    assert out["skipped"][0]["reason"] == "unresolved_urls"
+
+
+def test_dry_run_sweep_unchanged_without_urls(store):
+    c = FakeClient()
+    out = sweep(c, store, ["AAPL"], dry_run=True)
+    assert [p["symbol"] for p in out["placed"]] == ["AAPL"]
+    assert c.placed[0][1] is True
+
+
 def test_prune_removes_rows_gone_from_rh(store):
     c = FakeClient(book=[rh_order("AAPL"), rh_order("IWN")])
     sweep(c, store, ["AAPL", "IWN"])
