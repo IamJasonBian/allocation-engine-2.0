@@ -1,28 +1,24 @@
-"""Robinhood trading client — wraps robin-stocks with server-side TOTP auth."""
+"""Robinhood trading client — robin-stocks reads with box-vended auth.
+
+This client NEVER authenticates to Robinhood itself (no rh.login, no TOTP,
+no pickle/device-token handling). The auth-service box owns the credentials
+and session; we fetch its access token (sqlite-cached via app.box_session)
+and inject it into robin_stocks' request session.
+"""
 
 import logging
-import os
-import pickle
-import threading
 from datetime import datetime, timedelta, timezone
 
-import pyotp
 import robin_stocks.robinhood as rh
 
 from app.brokers.base import BrokerClient
 from app.enums import OrderType
-from app.pickle_store import download_pickle, upload_pickle
-from app.slack import notify as slack_notify
 
 log = logging.getLogger(__name__)
 
 # Cache instrument URL -> symbol to avoid repeated API calls
 _instrument_cache: dict[str, str] = {}
 _init_phase: str = "not_started"
-
-# Login timeout: max seconds to wait for rh.login() (guards against the
-# infinite polling loop inside robin_stocks' _validate_sherrif_id).
-_LOGIN_TIMEOUT = 30
 
 
 def _symbol_from_instrument(instrument_url: str) -> str:
@@ -36,12 +32,6 @@ def _symbol_from_instrument(instrument_url: str) -> str:
         symbol = "UNKNOWN"
     _instrument_cache[instrument_url] = symbol
     return symbol
-
-
-def _pickle_path(pickle_name: str) -> str:
-    """Compute the full path to the robin_stocks pickle file."""
-    home = os.path.expanduser("~")
-    return os.path.join(home, ".tokens", f"robinhood{pickle_name}.pickle")
 
 
 def seconds_until_hour_et(hour: int = 11) -> float:
@@ -65,310 +55,70 @@ def seconds_until_hour_et(hour: int = 11) -> float:
 class RobinhoodTrader(BrokerClient):
     def __init__(
         self,
-        email: str,
-        password: str,
+        email: str = "",
+        password: str = "",
         totp_secret: str = "",
-        pickle_name: str = "taipei_session",
+        pickle_name: str = "",
         account_number: str = "",
     ):
+        # email is kept for status reporting; password/totp/pickle are legacy
+        # arguments accepted (and ignored) so get_broker() stays unchanged —
+        # authentication lives exclusively in the auth-service box.
         self.email = email
-        self.password = password
-        self.totp_secret = totp_secret
-        self.pickle_name = pickle_name
         self.account_number = account_number
         self._authenticated = False
-        self._pickle_path = _pickle_path(pickle_name)
-        self._device_challenge_mode = False
 
-        # Expose init phase via module-level variable for diagnostics
         global _init_phase
-        _init_phase = "pickle_restore"
-
-        # Restore pickle from blob store before attempting login
-        log.info("[rh] Starting pickle restore...")
-        self._restore_pickle_from_blob()
-        log.info("[rh] Pickle restore done. File exists: %s", os.path.isfile(self._pickle_path))
-        _init_phase = "try_restore_session"
-
-        # Try to restore session directly from pickle without calling rh.login()
-        # (rh.login can hang on Robinhood API validation requests)
-        restored = self._try_restore_session()
-        _init_phase = f"restored={restored}"
-        if restored:
-            log.info("[rh] Session restored from pickle — skipping rh.login()")
-        else:
-            _init_phase = "rh_login"
-            log.info("[rh] No valid pickle session — attempting rh.login()...")
-            try:
-                self._login()
-            except Exception:
-                log.warning("Initial login failed — engine will retry each tick")
-            _init_phase = "rh_login_done"
-        log.info("[rh] __init__ complete (authenticated=%s)", self._authenticated)
+        _init_phase = "box_auth"
+        log.info("[rh] Authenticating via auth-service box (no local login)...")
+        try:
+            self._box_auth()
+        except Exception:
+            log.exception("[rh] Box auth failed at init — engine retries each tick")
         _init_phase = f"init_done_auth={self._authenticated}"
+        log.info("[rh] __init__ complete (authenticated=%s)", self._authenticated)
 
-    # -- session pickle persistence -----------------------------------------
+    # -- authentication (box-vended token only) ------------------------------
 
-    def _restore_pickle_from_blob(self):
-        """Ensure a pickle with the trusted device_token exists before login.
+    def _box_auth(self, force: bool = False) -> bool:
+        """Fetch the box token (sqlite-first) and inject it into robin_stocks.
 
-        Priority:
-          1. Local pickle already on disk → use it
-          2. RH_PICKLE_B64 env var (base64-encoded pickle) → decode and write
-          3. Download full pickle from Netlify Blobs → use it
-          4. Seed a stub pickle with RH_DEVICE_TOKEN env var
+        Auth calls route through the box and are exempt from the
+        destructive-action gates (those guard order payloads only).
         """
-        global _init_phase
-        _init_phase = "pickle_check_local"
-        if os.path.isfile(self._pickle_path):
-            log.info("[pickle] Local pickle exists at %s", self._pickle_path)
-            return
-
-        # Try base64-encoded pickle from env var (fastest, no network)
-        _init_phase = "pickle_from_env"
-        pickle_b64 = os.environ.get("RH_PICKLE_B64", "")
-        if pickle_b64:
-            try:
-                import base64
-                raw = base64.b64decode(pickle_b64)
-                os.makedirs(os.path.dirname(self._pickle_path), exist_ok=True)
-                with open(self._pickle_path, "wb") as f:
-                    f.write(raw)
-                log.info("[pickle] Restored from RH_PICKLE_B64 env var (%d bytes)", len(raw))
-                return
-            except Exception:
-                log.exception("[pickle] Failed to decode RH_PICKLE_B64")
-
-        _init_phase = "pickle_downloading"
-        log.info("[pickle] No local pickle. Attempting blob store restore...")
-        try:
-            restored = download_pickle(self._pickle_path)
-        except Exception:
-            log.exception("[pickle] download_pickle raised")
-            restored = False
-        _init_phase = f"pickle_downloaded={restored}"
-
-        if restored:
-            log.info("[pickle] Restored session pickle from blob store")
-            return
-
-        # No blob either — seed a stub pickle with the static device_token
-        # so robin_stocks reuses our approved device instead of generating
-        # a random one that triggers Robinhood's device verification.
-        _init_phase = "pickle_seeding_stub"
-        from app.config import Config
-        device_token = Config.RH_DEVICE_TOKEN
-        if not device_token:
-            log.warning("[pickle] RH_DEVICE_TOKEN not set — "
-                        "robin_stocks will generate a random device_token "
-                        "(may trigger device challenge)")
-            return
-
-        os.makedirs(os.path.dirname(self._pickle_path), exist_ok=True)
-        stub = {
-            "device_token": device_token,
-            "access_token": "",
-            "token_type": "Bearer",
-            "refresh_token": "",
-        }
-        with open(self._pickle_path, "wb") as f:
-            pickle.dump(stub, f)
-        log.info("[pickle] Seeded stub pickle with static device_token=%s...%s",
-                 device_token[:8], device_token[-4:])
-        _init_phase = "pickle_stub_seeded"
-
-    def _try_restore_session(self) -> bool:
-        """Try to restore a Robinhood session directly from the pickle file.
-
-        Sets robin_stocks' internal session headers without calling rh.login(),
-        which can hang on Robinhood API validation requests.
-        Returns True if a valid session was restored.
-        """
-        if not os.path.isfile(self._pickle_path):
+        from app.box_session import get_box_token
+        tok = get_box_token(force=force)
+        if not tok or not tok.get("token"):
+            self._authenticated = False
             return False
-
-        try:
-            with open(self._pickle_path, "rb") as f:
-                data = pickle.load(f)
-
-            access_token = data.get("access_token", "")
-            token_type = data.get("token_type", "Bearer")
-            refresh_token = data.get("refresh_token", "")
-            device_token = data.get("device_token", "")
-
-            if not access_token or not refresh_token:
-                log.info("[rh] Pickle has empty tokens — cannot restore session")
-                return False
-
-            # Set robin_stocks internal state
-            rh.authentication.set_login_state(True)
-            rh.authentication.update_session(
-                "Authorization", f"{token_type} {access_token}"
-            )
-            self._authenticated = True
-            log.info("[rh] Restored session from pickle (device=%s...%s)",
-                     device_token[:8] if device_token else "?",
-                     device_token[-4:] if device_token else "?")
-            return True
-        except Exception:
-            log.exception("[rh] Failed to restore session from pickle")
-            return False
-
-    def _upload_pickle_to_blob(self):
-        """Upload the current pickle to Netlify Blobs after successful login."""
-        if os.path.isfile(self._pickle_path):
-            if upload_pickle(self._pickle_path):
-                log.info("[pickle] Uploaded session pickle to blob store")
-            else:
-                log.warning("[pickle] Failed to upload pickle to blob store")
-
-    # -- authentication -----------------------------------------------------
-
-    def _seed_device_token(self):
-        """Ensure the pickle contains the static device token before login.
-
-        robin_stocks reads the device_token from the pickle file. If the
-        pickle has a different (or missing) device_token, Robinhood will
-        trigger a device challenge. Always overwrite it with our static
-        token so every login — local or remote — uses the same device.
-        """
-        from app.config import Config
-        device_token = Config.RH_DEVICE_TOKEN
-        if not device_token:
-            return
-
-        data = {}
-        if os.path.isfile(self._pickle_path):
-            try:
-                with open(self._pickle_path, "rb") as f:
-                    data = pickle.load(f)
-            except Exception:
-                data = {}
-
-        if data.get("device_token") == device_token:
-            return
-
-        data["device_token"] = device_token
-        os.makedirs(os.path.dirname(self._pickle_path), exist_ok=True)
-        with open(self._pickle_path, "wb") as f:
-            pickle.dump(data, f)
-        log.info("[rh] Seeded static device_token=%s...%s into pickle",
-                 device_token[:8], device_token[-4:])
+        rh.authentication.set_login_state(True)
+        rh.authentication.update_session(
+            "Authorization",
+            f"{tok.get('token_type') or 'Bearer'} {tok['token']}",
+        )
+        if not self.account_number and tok.get("account_number"):
+            self.account_number = tok["account_number"]
+        self._authenticated = True
+        log.info("[rh] Injected box token (account=%s, expires_at=%s)",
+                 tok.get("account_number", "?"), tok.get("expires_at"))
+        return True
 
     def _login(self):
-        """Authenticate with Robinhood using stored session or fresh TOTP login.
-
-        Runs rh.login() in a child thread with a timeout to guard against
-        the infinite polling loop in robin_stocks' device verification.
-        """
-        self._seed_device_token()
-
-        mfa_code = None
-        if self.totp_secret:
-            totp = pyotp.TOTP(self.totp_secret)
-            mfa_code = totp.now()
-
-        login_result: list = [None]
-        login_error: list = [None]
-
-        def _do_login():
-            try:
-                login_result[0] = rh.login(
-                    self.email,
-                    self.password,
-                    mfa_code=mfa_code,
-                    store_session=True,
-                    pickle_name=self.pickle_name,
-                )
-            except Exception as e:
-                login_error[0] = e
-
-        login_thread = threading.Thread(target=_do_login, name="rh-login", daemon=True)
-        login_thread.start()
-        login_thread.join(timeout=_LOGIN_TIMEOUT)
-
-        # --- Thread timed out (stuck in device challenge infinite loop) ---
-        if login_thread.is_alive():
-            self._authenticated = False
-            self._device_challenge_mode = True
-            log.error("[login] Timed out after %ds waiting for device approval",
-                      _LOGIN_TIMEOUT)
-            slack_notify(
-                f"<!channel> :rotating_light: FlipActivate: allocation-engine-2.0 — "
-                f"Robinhood login TIMED OUT for {self.email}. "
-                "Device challenge triggered — approve in Robinhood app. "
-                "Will retry at next scheduled window."
-            )
-            raise RuntimeError("Robinhood login timed out — device challenge pending")
-
-        # --- Thread raised an exception ---
-        if login_error[0]:
-            self._authenticated = False
-            log.error("Robinhood login failed: %s", login_error[0])
-            slack_notify(
-                f"<!channel> :rotating_light: FlipActivate: allocation-engine-2.0 — "
-                f"Robinhood login FAILED for {self.email}: {login_error[0]}"
-            )
-            raise login_error[0]
-
-        # --- Thread returned a result ---
-        result = login_result[0]
-        if result:
-            self._authenticated = True
-            self._device_challenge_mode = False
-            log.info("Robinhood login successful for %s", self.email)
-            slack_notify(
-                f"<!channel> :white_check_mark: FlipActivate: allocation-engine-2.0 — "
-                f"Robinhood login successful for {self.email}"
-            )
-            self._upload_pickle_to_blob()
-        else:
-            self._authenticated = False
-            log.error("Robinhood login returned empty result — "
-                      "check Robinhood app for device approval")
-            slack_notify(
-                f"<!channel> :warning: FlipActivate: allocation-engine-2.0 — "
-                f"Robinhood login returned empty result for {self.email} "
-                f"— check Robinhood app for device approval"
-            )
+        """Force-refresh the box token. Never runs a local Robinhood login."""
+        if not self._box_auth(force=True):
             raise RuntimeError(
-                "Robinhood login empty — device approval may be required"
-            )
+                "auth-service box could not vend a Robinhood token — "
+                "see [box-session] logs")
 
     @property
     def in_device_challenge_mode(self) -> bool:
-        """True when login failed due to a device challenge timeout."""
-        return self._device_challenge_mode
+        """Local device challenges no longer exist — the box owns auth."""
+        return False
 
     def _ensure_auth(self):
-        """Re-authenticate if session has expired."""
-        if not self._authenticated:
-            if self._device_challenge_mode:
-                raise RuntimeError("Cannot authenticate — device challenge pending")
-            self._login()
-            return
-        # Tolerate transient errors (429, network blips) so we don't
-        # trigger a full re-login that could hit the device challenge loop.
-        try:
-            kwargs = {}
-            if self.account_number:
-                kwargs["account_number"] = self.account_number
-            result = rh.profiles.load_account_profile(**kwargs)
-            if not result:
-                raise ValueError("load_account_profile returned empty result")
-        except Exception as e:
-            err_str = str(e)
-            if "429" in err_str or "Too Many Requests" in err_str:
-                log.warning("Robinhood 429 during session check — "
-                            "skipping re-auth (session likely still valid)")
-                return
-            log.warning("Robinhood session expired, re-authenticating...")
-            slack_notify(
-                "<!channel> :warning: FlipActivate: allocation-engine-2.0 — "
-                "Robinhood session expired, re-authenticating..."
-            )
-            self._authenticated = False
-            self._login()
+        """Keep the injected token fresh; sqlite-first, box only on expiry."""
+        if not self._box_auth():
+            raise RuntimeError("not authenticated — box token unavailable")
 
     # -- account / positions ------------------------------------------------
 
@@ -786,9 +536,12 @@ class RobinhoodTrader(BrokerClient):
     # -- auth status --------------------------------------------------------
 
     def auth_status(self) -> dict:
-        """Return current authentication state."""
+        """Return current authentication state (box-vended token)."""
+        from app.box_session import cached_token_status
         return {
             "authenticated": self._authenticated,
-            "device_challenge_pending": self._device_challenge_mode,
+            "device_challenge_pending": False,
             "email": self.email,
+            "auth_source": "auth-service-box",
+            **cached_token_status(),
         }
