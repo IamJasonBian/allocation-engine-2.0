@@ -1,0 +1,18 @@
+# Caddy reverse proxy: terminates HTTPS and forwards to the local auth-service.
+# Hostname uses sslip.io (free wildcard DNS) so Let's Encrypt can issue a cert
+# for the VM's static IP without owning a domain:
+#   34-30-182-125.sslip.io  ->  34.30.182.125
+#
+# Caddy auto-obtains/renews the Let's Encrypt cert (HTTP-01 on port 80, which
+# must be open to the internet — it only serves the ACME challenge + HTTPS
+# redirect). The actual API on :443 is restricted to Render egress IPs by the
+# GCP firewall, not by Caddy.
+#
+# Deploy:
+#   sudo apt-get install -y caddy         # or the official Caddy repo
+#   sudo cp Caddyfile /etc/caddy/Caddyfile
+#   sudo systemctl restart caddy
+
+34-30-182-125.sslip.io {
+	reverse_proxy localhost:8080
+}
