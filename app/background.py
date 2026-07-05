@@ -209,20 +209,29 @@ def start_engine_thread(app):
                         token=config.get("RH_AUTH_SERVICE_REQUEST_TOKEN", ""))
                 tickers = [t.strip().upper() for t in
                            config.get("STOP_TICKERS", "").split(",") if t.strip()]
-                tickers += [p.get("symbol", "").upper() for p in current_positions
-                            if p.get("symbol")]
-                tickers = sorted(set(tickers))
+                qty_map = {p["symbol"].upper(): p.get("qty")
+                           for p in current_positions if p.get("symbol")}
+                tickers = sorted(set(tickers) | set(qty_map))
                 dry = config.get("STOP_SWEEP_DRY_RUN", True)
+                if not dry and not qty_map:
+                    # Live sweeps need real position sizes; wait for a tick
+                    # where positions have loaded rather than latching the day.
+                    log.info("[stop-sweeper] live sweep deferred — positions "
+                             "not loaded yet")
+                    return
                 log.info("[stop-sweeper] starting daily sweep "
                          "(tickers=%s, trail=%.0f%%, dry_run=%s)",
                          tickers or "book-only", sw.TRAIL_PERCENT, dry)
-                out = sw.sweep(sweeper_client, sweeper_store, tickers, dry_run=dry)
+                out = sw.sweep(sweeper_client, sweeper_store, tickers,
+                               dry_run=dry, qty_map=qty_map,
+                               account_url=sw.account_url_from_box())
                 log.info("[stop-sweeper] sweep done: %d active in RH book, "
-                         "placed=%s, renewed=%s, pruned=%s",
+                         "placed=%s, renewed=%s, pruned=%s, skipped=%s",
                          out["active_from_rh"],
                          [p["symbol"] for p in out["placed"]] or "none",
                          [r.get("symbol") for r in out["renewed"]] or "none",
-                         out["pruned"] or "none")
+                         out["pruned"] or "none",
+                         [s["symbol"] for s in out.get("skipped", [])] or "none")
 
             import time as _time
             _engine_status["last_error"] = f"pre_loop_v3_{int(_time.time())}"
@@ -264,11 +273,6 @@ def start_engine_thread(app):
 
                 # --- Normal tick ---
                 try:
-                    try:
-                        _maybe_stop_sweep(positions)
-                    except Exception as sweep_err:
-                        log.exception("[stop-sweeper] sweep failed: %s", sweep_err)
-
                     if is_live:
                         log.info("Live mode: refreshing broker state")
                     else:
@@ -281,6 +285,13 @@ def start_engine_thread(app):
                     positions = broker.positions()
                     open_orders = broker.open_orders()
                     account = broker.account()
+
+                    # Sweep after positions load so the universe (and live
+                    # quantities) reflect the real book.
+                    try:
+                        _maybe_stop_sweep(positions)
+                    except Exception as sweep_err:
+                        log.exception("[stop-sweeper] sweep failed: %s", sweep_err)
 
                     # --- Fetch options positions & orders ---
                     options_positions = []

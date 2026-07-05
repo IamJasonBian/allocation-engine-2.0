@@ -335,8 +335,37 @@ def _symbol_of(order):
     return (order.get("symbol") or order.get("chain_symbol") or "").upper()
 
 
-def sweep(client, store, tickers, trail_percent=TRAIL_PERCENT, dry_run=True):
-    """The start-of-day pass: mirror RH stops into sqlite, cover naked tickers."""
+def resolve_instrument_url(symbol):
+    """Resolve a ticker to its RH instrument URL (public endpoint, no auth)."""
+    try:
+        r = requests.get("https://api.robinhood.com/instruments/",
+                         params={"symbol": symbol.upper()}, timeout=15)
+        r.raise_for_status()
+        results = r.json().get("results") or []
+        return results[0].get("url", "") if results else ""
+    except Exception as e:  # noqa: BLE001
+        log.warning("instrument lookup failed for %s: %s", symbol, e)
+        return ""
+
+
+def account_url_from_box():
+    """Derive the RH account URL from the box token cached in sqlite."""
+    try:
+        from app.box_session import get_cached_token
+        n = (get_cached_token() or {}).get("account_number", "")
+        return f"https://api.robinhood.com/accounts/{n}/" if n else ""
+    except Exception:  # noqa: BLE001
+        return ""
+
+
+def sweep(client, store, tickers, trail_percent=TRAIL_PERCENT, dry_run=True,
+          qty_map=None, account_url="", instrument_resolver=resolve_instrument_url):
+    """The start-of-day pass: mirror RH stops into sqlite, cover naked tickers.
+
+    Live placement (dry_run=False) requires a real position quantity from
+    qty_map plus account/instrument URLs — anything unresolvable is skipped
+    and logged, never guessed.
+    """
     log.info("sweep: reading active trailing stops from RH")
     orders = client.get_stops()
     covered = {}
@@ -349,18 +378,41 @@ def sweep(client, store, tickers, trail_percent=TRAIL_PERCENT, dry_run=True):
     if pruned:
         log.info("sweep: pruned stale rows: %s", pruned)
 
-    placed, renewed = [], []
+    qty_map = {k.upper(): v for k, v in (qty_map or {}).items()}
+    placed, renewed, skipped = [], [], []
     for t in (x.upper() for x in tickers):
-        row = store.get(t)
         if t not in covered:
+            qty = qty_map.get(t)
+            instrument_url = ""
+            if not dry_run:
+                if not qty:
+                    log.warning("sweep: %s LIVE placement skipped — no position "
+                                "quantity known", t)
+                    skipped.append({"symbol": t, "reason": "no_quantity"})
+                    continue
+                instrument_url = instrument_resolver(t)
+                if not instrument_url or not account_url:
+                    log.warning("sweep: %s LIVE placement skipped — unresolved "
+                                "instrument/account URL", t)
+                    skipped.append({"symbol": t, "reason": "unresolved_urls"})
+                    continue
             log.info("sweep: %s has no active stop — placing %.0f%% trailing stop"
-                     " (dry_run=%s)", t, trail_percent, dry_run)
-            payload = build_payload(t, "sell", 1, trail_percent)
-            result = client.place_stop(payload, dry_run=dry_run)
+                     " qty=%s (dry_run=%s)", t, float(trail_percent),
+                     qty or 1, dry_run)
+            payload = build_payload(t, "sell", qty or 1, trail_percent,
+                                    account_url=account_url,
+                                    instrument_url=instrument_url)
+            try:
+                result = client.place_stop(payload, dry_run=dry_run)
+            except GuardrailViolation as e:
+                log.warning("sweep: %s placement blocked by guardrail: %s", t, e)
+                skipped.append({"symbol": t, "reason": str(e)})
+                continue
             placed.append({"symbol": t, "result": result})
-            store.upsert(t, {"id": None, "state": "dry_run" if dry_run else "submitted",
+            store.upsert(t, {"id": (result or {}).get("id"),
+                             "state": "dry_run" if dry_run else "submitted",
                              "created_at": _now_iso(), "side": "sell",
-                             "quantity": "1",
+                             "quantity": str(qty or 1),
                              "trailing_peg": {"type": "percentage",
                                               "percentage": str(trail_percent)}})
         elif _expiring_soon(store.get(t)):
@@ -368,7 +420,7 @@ def sweep(client, store, tickers, trail_percent=TRAIL_PERCENT, dry_run=True):
 
     store.set_meta("last_sweep_at", _now_iso())
     return {"active_from_rh": len(covered), "placed": placed,
-            "renewed": renewed, "pruned": pruned}
+            "renewed": renewed, "pruned": pruned, "skipped": skipped}
 
 
 def renew(client, store, symbol, dry_run=True):
