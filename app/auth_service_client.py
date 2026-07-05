@@ -168,6 +168,22 @@ class AuthServiceClient:
                    "params": params or {}}
         return self.mcp_relay(payload, session_id=session_id)
 
+    # -- auth (exempt from the destructive-action gates) --
+
+    def get_token(self):
+        """Vend the box's live RH access token.
+
+        Returns {token, token_type, expires_at, device_token, account_number}.
+        Raises OTPRequired when the box is blocked on device approval/MFA,
+        AuthServiceError otherwise (including 404 while the deployed box
+        predates the /token endpoint).
+        """
+        return self._request("GET", "/token")
+
+    def login(self):
+        """Trigger a box-side (re)login — may block on device approval."""
+        return self._request("POST", "/login")
+
     # -- status (does not raise on OTP; the OTP state IS the answer) --
 
     def auth_status(self):
