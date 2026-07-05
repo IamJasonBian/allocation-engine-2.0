@@ -1,0 +1,17 @@
+[Unit]
+Description=auth-service (authenticated command runner)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__USER__
+WorkingDirectory=__INSTALL_DIR__
+ExecStart=__INSTALL_DIR__/venv/bin/python server.py
+Restart=on-failure
+RestartSec=5
+# Light footprint for e2-micro: cap memory so a runaway command can't OOM the box.
+MemoryMax=256M
+
+[Install]
+WantedBy=multi-user.target
