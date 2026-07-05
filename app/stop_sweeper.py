@@ -310,14 +310,26 @@ def _expiring_soon(row, lead_days=EXPIRY_LEAD_DAYS):
 # sweep + queue logic
 # --------------------------------------------------------------------------- #
 
+def initial_stop_price(current_price, trail_percent, side="sell"):
+    """Initial trigger price RH requires even for a trailing stop.
+
+    Sell stop sits trail_percent BELOW the current price; from there RH
+    trails it upward. Verified live: without this RH rejects the order with
+    "Stop limit order requested, but no stop price provided."
+    """
+    pct = float(trail_percent) / 100.0
+    factor = (1 - pct) if side == "sell" else (1 + pct)
+    return round(float(current_price) * factor, 2)
+
+
 def build_payload(symbol, side, quantity, trail_percent,
-                  account_url="", instrument_url=""):
-    """trailing_peg percentage payload (matches the auth-service builder).
+                  account_url="", instrument_url="", current_price=None):
+    """Percentage trailing-stop payload (trailing_peg + initial stop_price).
 
     account/instrument URLs are required by RH for live placement; when empty
     (local dry-run) the box still logs/echoes the payload without sending.
     """
-    return {
+    payload = {
         "account": account_url,
         "instrument": instrument_url,
         "symbol": symbol,
@@ -329,6 +341,9 @@ def build_payload(symbol, side, quantity, trail_percent,
         "trailing_peg": {"type": "percentage", "percentage": str(trail_percent)},
         "ref_id": str(uuid.uuid4()),
     }
+    if current_price:
+        payload["stop_price"] = str(initial_stop_price(current_price, trail_percent, side))
+    return payload
 
 
 def _symbol_of(order):
@@ -358,13 +373,29 @@ def account_url_from_box():
         return ""
 
 
+def _placement_ok(result):
+    """A real RH placement carries an order id; a rejection carries an error."""
+    if not isinstance(result, dict):
+        return False, "non-dict response"
+    if result.get("dry_run"):
+        return True, "dry_run"
+    if result.get("id"):
+        return True, result.get("state") or "submitted"
+    # RH rejections come back (HTTP 200 from the box) as an error envelope.
+    detail = (result.get("non_field_errors") or result.get("detail")
+              or result.get("error") or result)
+    return False, str(detail)[:200]
+
+
 def sweep(client, store, tickers, trail_percent=TRAIL_PERCENT, dry_run=True,
-          qty_map=None, account_url="", instrument_resolver=resolve_instrument_url):
+          qty_map=None, price_map=None, account_url="",
+          instrument_resolver=resolve_instrument_url):
     """The start-of-day pass: mirror RH stops into sqlite, cover naked tickers.
 
-    Live placement (dry_run=False) requires a real position quantity from
-    qty_map plus account/instrument URLs — anything unresolvable is skipped
-    and logged, never guessed.
+    Live placement (dry_run=False) needs a WHOLE-share quantity (RH rejects
+    fractional trailing stops), account/instrument URLs, and a current price
+    (to set the initial stop). Anything unresolvable is skipped and logged;
+    a placement is only counted 'placed' if RH returns an order id.
     """
     log.info("sweep: reading active trailing stops from RH")
     orders = client.get_stops()
@@ -379,44 +410,60 @@ def sweep(client, store, tickers, trail_percent=TRAIL_PERCENT, dry_run=True,
         log.info("sweep: pruned stale rows: %s", pruned)
 
     qty_map = {k.upper(): v for k, v in (qty_map or {}).items()}
+    price_map = {k.upper(): v for k, v in (price_map or {}).items()}
     placed, renewed, skipped = [], [], []
     for t in (x.upper() for x in tickers):
-        if t not in covered:
-            qty = qty_map.get(t)
-            instrument_url = ""
-            if not dry_run:
-                if not qty:
-                    log.warning("sweep: %s LIVE placement skipped — no position "
-                                "quantity known", t)
-                    skipped.append({"symbol": t, "reason": "no_quantity"})
-                    continue
-                instrument_url = instrument_resolver(t)
-                if not instrument_url or not account_url:
-                    log.warning("sweep: %s LIVE placement skipped — unresolved "
-                                "instrument/account URL", t)
-                    skipped.append({"symbol": t, "reason": "unresolved_urls"})
-                    continue
-            log.info("sweep: %s has no active stop — placing %.0f%% trailing stop"
-                     " qty=%s (dry_run=%s)", t, float(trail_percent),
-                     qty or 1, dry_run)
-            payload = build_payload(t, "sell", qty or 1, trail_percent,
-                                    account_url=account_url,
-                                    instrument_url=instrument_url)
-            try:
-                result = client.place_stop(payload, dry_run=dry_run)
-            except GuardrailViolation as e:
-                log.warning("sweep: %s placement blocked by guardrail: %s", t, e)
-                skipped.append({"symbol": t, "reason": str(e)})
+        if t in covered:
+            if _expiring_soon(store.get(t)):
+                renewed.append(renew(client, store, t, dry_run=dry_run))
+            continue
+
+        instrument_url, current_price = "", price_map.get(t)
+        # RH trailing stops are whole-share only.
+        whole_qty = int(float(qty_map.get(t) or 0))
+        if not dry_run:
+            if whole_qty < 1:
+                log.warning("sweep: %s skipped — no whole-share quantity "
+                            "(have %s)", t, qty_map.get(t))
+                skipped.append({"symbol": t, "reason": "fractional_or_no_qty"})
                 continue
-            placed.append({"symbol": t, "result": result})
-            store.upsert(t, {"id": (result or {}).get("id"),
-                             "state": "dry_run" if dry_run else "submitted",
-                             "created_at": _now_iso(), "side": "sell",
-                             "quantity": str(qty or 1),
-                             "trailing_peg": {"type": "percentage",
-                                              "percentage": str(trail_percent)}})
-        elif _expiring_soon(store.get(t)):
-            renewed.append(renew(client, store, t, dry_run=dry_run))
+            if not current_price:
+                log.warning("sweep: %s skipped — no current price for stop", t)
+                skipped.append({"symbol": t, "reason": "no_price"})
+                continue
+            instrument_url = instrument_resolver(t)
+            if not instrument_url or not account_url:
+                log.warning("sweep: %s skipped — unresolved instrument/account "
+                            "URL", t)
+                skipped.append({"symbol": t, "reason": "unresolved_urls"})
+                continue
+
+        place_qty = whole_qty if not dry_run else (whole_qty or 1)
+        log.info("sweep: %s placing %.0f%% trailing stop qty=%s (dry_run=%s)",
+                 t, float(trail_percent), place_qty, dry_run)
+        payload = build_payload(t, "sell", place_qty, trail_percent,
+                                account_url=account_url,
+                                instrument_url=instrument_url,
+                                current_price=current_price)
+        try:
+            result = client.place_stop(payload, dry_run=dry_run)
+        except GuardrailViolation as e:
+            log.warning("sweep: %s blocked by guardrail: %s", t, e)
+            skipped.append({"symbol": t, "reason": str(e)})
+            continue
+
+        ok, detail = _placement_ok(result)
+        if not ok:
+            log.warning("sweep: %s REJECTED by RH: %s", t, detail)
+            skipped.append({"symbol": t, "reason": f"rh_rejected: {detail}"})
+            continue
+        placed.append({"symbol": t, "result": result})
+        store.upsert(t, {"id": (result or {}).get("id"),
+                         "state": "dry_run" if dry_run else detail,
+                         "created_at": _now_iso(), "side": "sell",
+                         "quantity": str(place_qty),
+                         "trailing_peg": {"type": "percentage",
+                                          "percentage": str(trail_percent)}})
 
     store.set_meta("last_sweep_at", _now_iso())
     return {"active_from_rh": len(covered), "placed": placed,
@@ -465,6 +512,56 @@ def check(client, store, symbol):
         row["expiring_soon"] = _expiring_soon(row)
         row.pop("raw", None)
     return row
+
+
+# --------------------------------------------------------------------------- #
+# options sweep — DRAFT (not wired into the engine loop yet)
+# --------------------------------------------------------------------------- #
+
+def sweep_options(client, store, option_positions, trail_percent=TRAIL_PERCENT,
+                  dry_run=True):
+    """DRAFT: protective-stop sweep for long option positions.
+
+    Mirrors the equity sweep's shape (cover naked positions, sqlite-first
+    queue) but options need a different order model than equity trailing
+    stops, so for now this only surveys and records intent — it never places.
+
+    option_positions: list from broker.options_positions() with at least
+        {chain_symbol, option_id/option, quantity, type ('long'/'short'), ...}
+
+    TODO(options-sweep):
+      - RH options have no `trailing_peg`; a protective exit is a stop or
+        stop-limit on the *option contract* (option_id), or a % move in the
+        underlying. Decide the instrument: stop on the option leg vs. an
+        underlying-triggered close. Confirm the payload against a live read
+        the way we did for equities (initial stop_price was the missing key).
+      - Only long positions (type == 'long', quantity > 0) get a protective
+        sell-to-close; short options need buy-to-close and different risk.
+      - Reuse client.get_stops() equivalent for options (needs an
+        auth-service /orders/option_trailing_stop or MCP tool) to detect
+        already-covered contracts before placing.
+      - Expiry: option orders don't share the 90-day GTC lifetime; key the
+        queue on option_id and reconcile against contract expiration instead.
+      - Add guardrails: only sell-to-close / buy-to-close on held contracts,
+        never opening new option exposure.
+    """
+    surveyed, todo = [], []
+    for p in option_positions or []:
+        sym = (p.get("chain_symbol") or p.get("symbol") or "").upper()
+        qty = float(p.get("quantity", 0) or 0)
+        if qty <= 0 or (p.get("type") or "long") != "long":
+            continue
+        contract = p.get("option") or p.get("option_id") or ""
+        surveyed.append({"symbol": sym, "option_id": contract, "quantity": qty})
+        # TODO(options-sweep): replace this with a real protective-order
+        # placement once the option order model above is settled.
+        todo.append(sym)
+        log.info("[opt-sweep] would protect %s x%s (contract=%s) — NOT placed "
+                 "(draft)", sym, qty, str(contract)[-12:])
+
+    log.info("[opt-sweep] DRAFT survey: %d long option positions, "
+             "placement not implemented (dry_run=%s)", len(surveyed), dry_run)
+    return {"surveyed": surveyed, "todo_place": todo, "placed": []}
 
 
 # --------------------------------------------------------------------------- #
