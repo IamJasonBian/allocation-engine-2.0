@@ -93,6 +93,11 @@ may only interact through **reads** (core-logic calling the auth-service's
 read endpoints — `/auth/status`, `/token`, `GET /orders/trailing_stop`);
 neither modifies the other's code, config, or deployment.
 
+**Robinhood authentication runs only in the auth-service box.** Nothing else
+runs a Robinhood login/authenticate flow — consumers take a vended bearer from
+the box's `GET /token` and re-vend once on `401`. The box owns login, refresh,
+and device identity.
+
 ## Architecture
 
 ### System overview

@@ -21,6 +21,13 @@ touch only core-logic code. When working on the auth-service, touch only
 - Changes to the running auth-service VM (deploy/restart/config) are their own
   task — never a side effect of core-logic work.
 
+**Robinhood authentication runs ONLY in the auth-service box.** No other
+component ever runs `robinhood.authenticate` / `rh.login()` / password+TOTP
+flows. Consumers get a live bearer from the box's `GET /token` and treat an RH
+`401` as "re-vend once, retry" — the box owns login, refresh, and device
+identity. (Legacy exception, to be migrated: the Render services' pickle flow
+documented below still logs in directly; no new code may.)
+
 ## Render Deploy
 
 Deploys are **destructive to session state** — Render's ephemeral filesystem wipes the local Robinhood pickle on every deploy.
