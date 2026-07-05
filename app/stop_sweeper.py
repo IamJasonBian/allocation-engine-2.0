@@ -34,6 +34,7 @@ import logging
 import os
 import sqlite3
 import sys
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 
@@ -49,6 +50,8 @@ BOX_TOKEN = os.getenv("RH_AUTH_SERVICE_REQUEST_TOKEN", "")
 TRAIL_PERCENT = float(os.getenv("STOP_TRAIL_PERCENT", "16"))
 GTC_LIFETIME_DAYS = 90          # RH cancels GTC orders after ~90 days
 EXPIRY_LEAD_DAYS = int(os.getenv("STOP_EXPIRY_LEAD_DAYS", "7"))
+# Pace live placements — RH throttles bursts (~429 after a handful/second).
+PLACE_DELAY_SECONDS = float(os.getenv("STOP_PLACE_DELAY_SECONDS", "1.5"))
 
 
 # --------------------------------------------------------------------------- #
@@ -439,6 +442,8 @@ def sweep(client, store, tickers, trail_percent=TRAIL_PERCENT, dry_run=True,
                 continue
 
         place_qty = whole_qty if not dry_run else (whole_qty or 1)
+        if not dry_run and (placed or skipped):
+            time.sleep(PLACE_DELAY_SECONDS)   # pace to dodge RH 429 throttling
         log.info("sweep: %s placing %.0f%% trailing stop qty=%s (dry_run=%s)",
                  t, float(trail_percent), place_qty, dry_run)
         payload = build_payload(t, "sell", place_qty, trail_percent,
