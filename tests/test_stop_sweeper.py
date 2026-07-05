@@ -235,34 +235,68 @@ def test_renew_skips_buy_side_stop_instead_of_crashing(store):
     assert c.replaced == []
 
 
-def test_live_sweep_places_with_real_qty_and_urls(store):
-    c = FakeClient()
-    out = sweep(c, store, ["AAPL"], dry_run=False,
-                qty_map={"AAPL": 42.5},
+def _live_kwargs(qty=5, price=100.0):
+    return dict(dry_run=False, trail_percent=12, qty_map={"AAPL": qty},
+                price_map={"AAPL": price},
                 account_url="https://api.robinhood.com/accounts/X/",
                 instrument_resolver=lambda s: f"https://api.robinhood.com/instruments/{s}/")
+
+
+class OrderIdClient(FakeClient):
+    """Box that returns a real RH-shaped order id (successful placement)."""
+    def place_stop(self, payload, dry_run=True):
+        validate_trailing_stop_payload(payload, live=not dry_run)
+        self.placed.append((payload, dry_run))
+        return {"id": "ord-123", "state": "queued", **payload}
+
+
+def test_live_sweep_places_whole_shares_with_stop_price(store):
+    c = OrderIdClient()
+    out = sweep(c, store, ["AAPL"], **_live_kwargs(qty=42.9, price=100.0))
     assert [p["symbol"] for p in out["placed"]] == ["AAPL"]
     payload, dry = c.placed[0]
     assert dry is False
-    assert payload["quantity"] == "42.5"
-    assert payload["account"] and payload["instrument"]
-    assert store.get("AAPL")["state"] == "submitted"
+    assert payload["quantity"] == "42"                # floored to whole shares
+    assert payload["stop_price"] == "88.0"            # 12% below 100
+    assert store.get("AAPL")["order_id"] == "ord-123"
 
 
-def test_live_sweep_skips_without_quantity(store):
-    c = FakeClient()
-    out = sweep(c, store, ["AAPL"], dry_run=False, qty_map={},
-                account_url="https://a/", instrument_resolver=lambda s: "https://i/")
+def test_live_sweep_skips_fractional_only_position(store):
+    c = OrderIdClient()
+    out = sweep(c, store, ["AAPL"], **_live_kwargs(qty=0.4))
     assert c.placed == []
-    assert out["skipped"] == [{"symbol": "AAPL", "reason": "no_quantity"}]
+    assert out["skipped"][0]["reason"] == "fractional_or_no_qty"
+
+
+def test_live_sweep_skips_without_price(store):
+    c = OrderIdClient()
+    kw = _live_kwargs(qty=5); kw["price_map"] = {}
+    out = sweep(c, store, ["AAPL"], **kw)
+    assert c.placed == []
+    assert out["skipped"][0]["reason"] == "no_price"
 
 
 def test_live_sweep_skips_unresolved_instrument(store):
-    c = FakeClient()
-    out = sweep(c, store, ["AAPL"], dry_run=False, qty_map={"AAPL": 5},
-                account_url="https://a/", instrument_resolver=lambda s: "")
+    c = OrderIdClient()
+    kw = _live_kwargs(qty=5); kw["instrument_resolver"] = lambda s: ""
+    out = sweep(c, store, ["AAPL"], **kw)
     assert c.placed == []
     assert out["skipped"][0]["reason"] == "unresolved_urls"
+
+
+def test_rh_rejection_without_id_is_not_placed(store):
+    # box returns 200 but RH rejected (no id) -> must count as skipped
+    class RejectClient(FakeClient):
+        def place_stop(self, payload, dry_run=True):
+            validate_trailing_stop_payload(payload, live=not dry_run)
+            self.placed.append((payload, dry_run))
+            return {"non_field_errors": ["Stop limit order requested, "
+                                         "but no stop price provided."]}
+    c = RejectClient()
+    out = sweep(c, store, ["AAPL"], **_live_kwargs(qty=5))
+    assert out["placed"] == []
+    assert out["skipped"][0]["reason"].startswith("rh_rejected")
+    assert store.get("AAPL") is None
 
 
 def test_dry_run_sweep_unchanged_without_urls(store):

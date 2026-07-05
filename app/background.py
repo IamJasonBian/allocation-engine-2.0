@@ -211,8 +211,15 @@ def start_engine_thread(app):
                         token=config.get("RH_AUTH_SERVICE_REQUEST_TOKEN", ""))
                 tickers = [t.strip().upper() for t in
                            config.get("STOP_TICKERS", "").split(",") if t.strip()]
-                qty_map = {p["symbol"].upper(): p.get("qty")
-                           for p in current_positions if p.get("symbol")}
+                qty_map, price_map = {}, {}
+                for p in current_positions:
+                    sym = (p.get("symbol") or "").upper()
+                    if not sym:
+                        continue
+                    qty_map[sym] = p.get("qty")
+                    q = float(p.get("qty") or 0)
+                    if q and p.get("market_value"):
+                        price_map[sym] = float(p["market_value"]) / q
                 tickers = sorted(set(tickers) | set(qty_map))
                 dry = config.get("STOP_SWEEP_DRY_RUN", True)
                 if not dry and not qty_map:
@@ -225,7 +232,7 @@ def start_engine_thread(app):
                          "(tickers=%s, trail=%.0f%%, dry_run=%s)",
                          tickers or "book-only", sw.TRAIL_PERCENT, dry)
                 out = sw.sweep(sweeper_client, sweeper_store, tickers,
-                               dry_run=dry, qty_map=qty_map,
+                               dry_run=dry, qty_map=qty_map, price_map=price_map,
                                account_url=sw.account_url_from_box())
                 log.info("[stop-sweeper] sweep done: %d active in RH book, "
                          "placed=%s, renewed=%s, pruned=%s, skipped=%s",
