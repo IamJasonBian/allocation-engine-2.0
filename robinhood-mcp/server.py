@@ -12,9 +12,9 @@ Trade safety is structural: there are no buy/sell/cancel tools at all, and the
 one write tool (place/replace trailing stop) builds its payload internally
 from scalar arguments — a caller can never supply raw order JSON.
 
-Token source (first match wins):
-  RH_ACCESS_TOKEN          — a live RH bearer (e.g. vended by the box's /token)
-  AUTH_SERVICE_URL + AUTH_SERVICE_TOKEN — fetch from the box's /token endpoint
+ALL Robinhood auth goes through the auth-service box: every token is vended
+from its GET /token endpoint (AUTH_SERVICE_URL + AUTH_SERVICE_TOKEN), and an
+RH 401 triggers one re-vend + retry — the box owns refresh/login entirely.
 """
 
 import json
@@ -40,6 +40,12 @@ _account_cache: dict[str, str] = {}
 # HTTP plumbing (module-level so tests can stub it)
 # --------------------------------------------------------------------------- #
 
+class HttpError(RuntimeError):
+    def __init__(self, code: int, message: str):
+        super().__init__(message)
+        self.code = code
+
+
 def http_json(method: str, url: str, body: dict | None = None,
               headers: dict | None = None, timeout: int = 30) -> dict:
     req = urllib.request.Request(
@@ -52,32 +58,44 @@ def http_json(method: str, url: str, body: dict | None = None,
             return json.load(r)
     except urllib.error.HTTPError as e:
         detail = e.read().decode("utf-8", "replace")[:500]
-        raise RuntimeError(f"HTTP {e.code} from {url}: {detail}") from e
+        raise HttpError(e.code, f"HTTP {e.code} from {url}: {detail}") from e
 
 
-def rh_token() -> str:
-    if _token_cache["token"]:
+def rh_token(force: bool = False) -> str:
+    """Vend the live RH bearer from the auth-service box (the only auth path)."""
+    if _token_cache["token"] and not force:
         return _token_cache["token"]
-    token = os.getenv("RH_ACCESS_TOKEN")
-    if not token:
-        base, bearer = os.getenv("AUTH_SERVICE_URL"), os.getenv("AUTH_SERVICE_TOKEN")
-        if not (base and bearer):
-            raise RuntimeError(
-                "no token: set RH_ACCESS_TOKEN, or AUTH_SERVICE_URL + AUTH_SERVICE_TOKEN")
-        token = http_json("GET", f"{base.rstrip('/')}/token",
-                          headers={"Authorization": f"Bearer {bearer}"})["token"]
-    _token_cache["token"] = token
-    return token
+    base, bearer = os.getenv("AUTH_SERVICE_URL"), os.getenv("AUTH_SERVICE_TOKEN")
+    if not (base and bearer):
+        raise RuntimeError(
+            "set AUTH_SERVICE_URL + AUTH_SERVICE_TOKEN — all RH auth goes "
+            "through the auth-service box's GET /token")
+    _token_cache["token"] = http_json(
+        "GET", f"{base.rstrip('/')}/token",
+        headers={"Authorization": f"Bearer {bearer}"})["token"]
+    return _token_cache["token"]
+
+
+def _rh_request(method: str, url: str, body: dict | None = None) -> dict:
+    try:
+        return http_json(method, url, body,
+                         headers={"Authorization": f"Bearer {rh_token()}"})
+    except HttpError as e:
+        if e.code != 401:
+            raise
+        # Token expired/revoked mid-flight: the box re-vends (it owns
+        # refresh/login); retry exactly once with the fresh bearer.
+        return http_json(method, url, body,
+                         headers={"Authorization": f"Bearer {rh_token(force=True)}"})
 
 
 def rh_get(path_or_url: str) -> dict:
     url = path_or_url if path_or_url.startswith("http") else f"{RH_BASE}{path_or_url}"
-    return http_json("GET", url, headers={"Authorization": f"Bearer {rh_token()}"})
+    return _rh_request("GET", url)
 
 
 def rh_post(path: str, body: dict) -> dict:
-    return http_json("POST", f"{RH_BASE}{path}", body,
-                     headers={"Authorization": f"Bearer {rh_token()}"})
+    return _rh_request("POST", f"{RH_BASE}{path}", body)
 
 
 def _paginate(url: str, max_items: int) -> list[dict]:

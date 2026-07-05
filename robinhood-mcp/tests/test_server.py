@@ -5,9 +5,9 @@ import os
 import subprocess
 import sys
 import unittest
+import unittest.mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-os.environ["RH_ACCESS_TOKEN"] = "test-token"
 
 import server  # noqa: E402
 
@@ -26,11 +26,12 @@ class FakeHttp:
         self.routes.append((method, url_part, response))
 
     def __call__(self, method, url, body=None, headers=None, timeout=30):
-        self.calls.append({"method": method, "url": url, "body": body,
-                           "headers": headers or {}})
+        call = {"method": method, "url": url, "body": body,
+                "headers": headers or {}}
+        self.calls.append(call)
         for m, part, resp in self.routes:
             if m == method and part in url:
-                return resp(body) if callable(resp) else resp
+                return resp(call) if callable(resp) else resp
         raise AssertionError(f"unexpected {method} {url}")
 
 
@@ -158,14 +159,79 @@ class ToolTests(unittest.TestCase):
         # substring of "/options/orders/"
         self.http.route("GET", "/options/orders/", {"results": [], "next": None})
         self.http.route("GET", "/orders/", {"results": stock, "next": None})
-        self.http.route("POST", "/db-orders", lambda body: {
-            "data": {"stock_upserted": len(body.get("orders", [])),
-                     "option_upserted": len(body.get("option_orders", []))}})
+        self.http.route("POST", "/db-orders", lambda call: {
+            "data": {"stock_upserted": len(call["body"].get("orders", [])),
+                     "option_upserted": len(call["body"].get("option_orders", []))}})
         out = server.tool_sync_trading_db()
         self.assertEqual(out["pulled"]["stock"], 150)
         self.assertEqual(out["upserted"]["stock"], 150)
         posts = [c for c in self.http.calls if "/db-orders" in c["url"]]
         self.assertEqual(len(posts), 2)  # 150 orders -> two batches of <=100
+
+
+class BoxAuthTests(unittest.TestCase):
+    """All RH auth must flow through the auth-service box's /token."""
+
+    def setUp(self):
+        self.http = FakeHttp()
+        self._orig = server.http_json
+        server.http_json = self.http
+        server._token_cache["token"] = None
+        self.env = unittest.mock.patch.dict(os.environ, {
+            "AUTH_SERVICE_URL": "https://box.test",
+            "AUTH_SERVICE_TOKEN": "exec-bearer"})
+        self.env.start()
+        self.addCleanup(self._restore)
+
+    def _restore(self):
+        server.http_json = self._orig
+        server._token_cache["token"] = None
+        self.env.stop()
+
+    def test_token_vended_from_box_and_used_on_rh(self):
+        self.http.route("GET", "box.test/token", {"token": "vended-1"})
+        self.http.route("GET", "/orders/", {"results": [], "next": None})
+        server.tool_get_trailing_stop_orders()
+        vend = self.http.calls[0]
+        self.assertIn("box.test/token", vend["url"])
+        self.assertEqual(vend["headers"]["Authorization"], "Bearer exec-bearer")
+        rh = self.http.calls[1]
+        self.assertEqual(rh["headers"]["Authorization"], "Bearer vended-1")
+
+    def test_rh_401_revends_once_and_retries(self):
+        tokens = iter(["stale", "fresh"])
+        self.http.route("GET", "box.test/token", lambda call: {"token": next(tokens)})
+
+        def orders(call):
+            if call["headers"]["Authorization"] == "Bearer stale":
+                raise server.HttpError(401, "HTTP 401 from rh")
+            return {"results": [], "next": None}
+        self.http.route("GET", "/orders/", orders)
+        out = server.tool_get_trailing_stop_orders()
+        self.assertEqual(out["count"], 0)
+        vends = [c for c in self.http.calls if "box.test/token" in c["url"]]
+        self.assertEqual(len(vends), 2)  # initial vend + forced re-vend
+
+    def test_non_401_error_is_not_retried(self):
+        self.http.route("GET", "box.test/token", {"token": "t1"})
+
+        def orders(call):
+            raise server.HttpError(503, "HTTP 503 from rh")
+        self.http.route("GET", "/orders/", orders)
+        with self.assertRaises(server.HttpError):
+            server.tool_get_trailing_stop_orders()
+        vends = [c for c in self.http.calls if "box.test/token" in c["url"]]
+        self.assertEqual(len(vends), 1)
+
+    def test_missing_env_is_a_clear_error(self):
+        self.env.stop()
+        with unittest.mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("AUTH_SERVICE_URL", None)
+            os.environ.pop("AUTH_SERVICE_TOKEN", None)
+            with self.assertRaises(RuntimeError) as ctx:
+                server.rh_token()
+        self.env.start()  # so _restore's stop() stays balanced
+        self.assertIn("AUTH_SERVICE_URL", str(ctx.exception))
 
 
 class StdioSmokeTest(unittest.TestCase):
@@ -177,8 +243,7 @@ class StdioSmokeTest(unittest.TestCase):
         ]) + "\n"
         proc = subprocess.run(
             [sys.executable, os.path.join(os.path.dirname(__file__), "..", "server.py")],
-            input=lines, capture_output=True, text=True, timeout=30,
-            env={**os.environ, "RH_ACCESS_TOKEN": "test-token"})
+            input=lines, capture_output=True, text=True, timeout=30)
         responses = [json.loads(l) for l in proc.stdout.strip().splitlines()]
         self.assertEqual(len(responses), 2)  # notification produced no response
         self.assertEqual(responses[0]["id"], 1)

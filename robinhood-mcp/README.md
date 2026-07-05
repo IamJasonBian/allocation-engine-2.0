@@ -28,18 +28,21 @@ by our own session token instead, and can be added to the full flow later
 | `replace_trailing_stop` | Replace by order id; `dry_run` default true |
 | `sync_trading_db` | Push RH order history → 5thstreetcapital Trading DB |
 
-## Auth
+## Auth — all of it goes through the auth-service box
 
-First match wins:
+Every RH token is vended from the auth-service `GET /token`; there is no
+local-token path. Set both:
 
-1. `RH_ACCESS_TOKEN` — a live RH bearer (e.g. vended by the auth-service
-   `GET /token`; from a laptop: `gcloud compute ssh` the box and curl
-   `localhost:8080/token` with the exec bearer).
-2. `AUTH_SERVICE_URL` + `AUTH_SERVICE_TOKEN` — the box fetches the token from
-   the auth-service itself (works from Render, whose IPs are allowlisted).
+- `AUTH_SERVICE_URL` — the box (`https://34-30-182-125.sslip.io` from Render,
+  whose IPs are allowlisted; from a laptop, port-forward:
+  `gcloud compute ssh allocation-engine-auth-service-prod --zone us-central1-c
+  --project route-manager-prod -- -N -L 8080:localhost:8080` then use
+  `http://127.0.0.1:8080`).
+- `AUTH_SERVICE_TOKEN` — the box's exec bearer.
 
-This is a **read-only** consumer of the auth-service (`/token`), per the
-service-boundary rule in the repo README.
+On an RH `401` the server re-vends once and retries — the box owns
+refresh/login entirely. This is a **read-only** consumer of the auth-service
+(`/token`), per the service-boundary rule in the repo README.
 
 ## Run
 
