@@ -7,6 +7,20 @@
 - Both deploy from `main` branch of `IamJasonBian/allocation-engine-2.0`
 - Auto-deploy is **off** on the worker; deploys are triggered via API
 
+## Service boundaries
+
+**When working on the core-logic (allocation-engine loop, `app/`, `main.py`),
+touch only core-logic code. When working on the auth-service, touch only
+`auth-service/`.** The two services must not touch each other outside of
+**read** interactions:
+
+- Core-logic may **call** the auth-service's read endpoints (`/auth/status`,
+  `/token`, `GET /orders/trailing_stop`) — it must not modify `auth-service/`
+  code, its VM, or its config.
+- The auth-service never calls into core-logic.
+- Changes to the running auth-service VM (deploy/restart/config) are their own
+  task — never a side effect of core-logic work.
+
 ## Render Deploy
 
 Deploys are **destructive to session state** — Render's ephemeral filesystem wipes the local Robinhood pickle on every deploy.
