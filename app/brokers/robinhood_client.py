@@ -98,9 +98,11 @@ class RobinhoodTrader(BrokerClient):
         )
         if not self.account_number and tok.get("account_number"):
             self.account_number = tok["account_number"]
+        if not self._authenticated:
+            # Only announce transitions; cache-hit re-injections stay quiet.
+            log.info("[rh] Injected box token (account=%s, expires_at=%s)",
+                     tok.get("account_number", "?"), tok.get("expires_at"))
         self._authenticated = True
-        log.info("[rh] Injected box token (account=%s, expires_at=%s)",
-                 tok.get("account_number", "?"), tok.get("expires_at"))
         return True
 
     def _login(self):

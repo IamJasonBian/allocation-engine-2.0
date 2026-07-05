@@ -343,10 +343,11 @@ def start_engine_thread(app):
                                         btc_px, shadow_index, qty=btc_pos["qty"],
                                     )
                                     log.info(
-                                        "[shadow] %s projected $%.2f (BTC $%,.2f) "
+                                        "[shadow] %s projected $%.2f (BTC $%s) "
                                         "vs close $%.2f → drift %+.2f%%",
                                         shadow_index.shadow_symbol,
-                                        shadow_pos["current_price"], btc_px,
+                                        shadow_pos["current_price"],
+                                        f"{btc_px:,.2f}",
                                         shadow_index.last_close,
                                         shadow_pos["unrealized_pl_pct"] * 100,
                                     )
