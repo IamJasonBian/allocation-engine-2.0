@@ -1,0 +1,6 @@
+# Deliberately tiny — targets an e2-micro (1 GB RAM).
+# Web layer is Python stdlib (http.server); no Flask/gunicorn.
+# Secrets use the Secret Manager REST API; no google-cloud gRPC client.
+# Config is stdlib configparser; no python-dotenv.
+requests>=2.31.0        # login flow + Secret Manager REST calls
+pyotp>=2.9.0            # optional TOTP for 2FA logins
