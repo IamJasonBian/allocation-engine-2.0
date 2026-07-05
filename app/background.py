@@ -184,6 +184,46 @@ def start_engine_thread(app):
             open_orders = []
             account = {}
 
+            # --- Trailing-stop sweeper (via auth-service) ---
+            # One sweep per day: mirror the RH trailing-stop book into the
+            # local sqlite queue, cover naked tickers with a 16% stop, renew
+            # stops near GTC expiry. Never breaks the tick; every action is
+            # logged so it is visible in Render logs.
+            sweeper_client = None
+            sweeper_store = None
+
+            def _maybe_stop_sweep(current_positions):
+                nonlocal sweeper_client, sweeper_store
+                from app import stop_sweeper as sw
+                if sweeper_store is None:
+                    sweeper_store = sw.StopStore(config.get("STOP_DB_PATH", sw.DEFAULT_DB))
+                if sweeper_store.swept_today():
+                    return
+                from zoneinfo import ZoneInfo
+                hour_et = datetime.now(ZoneInfo("America/New_York")).hour
+                if hour_et < int(config.get("STOP_SWEEP_HOUR_ET", 0)):
+                    return
+                if sweeper_client is None:
+                    sweeper_client = sw.BoxClient(
+                        base=config.get("AUTH_SERVICE_URL", ""),
+                        token=config.get("RH_AUTH_SERVICE_REQUEST_TOKEN", ""))
+                tickers = [t.strip().upper() for t in
+                           config.get("STOP_TICKERS", "").split(",") if t.strip()]
+                tickers += [p.get("symbol", "").upper() for p in current_positions
+                            if p.get("symbol")]
+                tickers = sorted(set(tickers))
+                dry = config.get("STOP_SWEEP_DRY_RUN", True)
+                log.info("[stop-sweeper] starting daily sweep "
+                         "(tickers=%s, trail=%.0f%%, dry_run=%s)",
+                         tickers or "book-only", sw.TRAIL_PERCENT, dry)
+                out = sw.sweep(sweeper_client, sweeper_store, tickers, dry_run=dry)
+                log.info("[stop-sweeper] sweep done: %d active in RH book, "
+                         "placed=%s, renewed=%s, pruned=%s",
+                         out["active_from_rh"],
+                         [p["symbol"] for p in out["placed"]] or "none",
+                         [r.get("symbol") for r in out["renewed"]] or "none",
+                         out["pruned"] or "none")
+
             import time as _time
             _engine_status["last_error"] = f"pre_loop_v3_{int(_time.time())}"
             log.info("[engine] About to enter main loop")
@@ -224,6 +264,11 @@ def start_engine_thread(app):
 
                 # --- Normal tick ---
                 try:
+                    try:
+                        _maybe_stop_sweep(positions)
+                    except Exception as sweep_err:
+                        log.exception("[stop-sweeper] sweep failed: %s", sweep_err)
+
                     if is_live:
                         log.info("Live mode: refreshing broker state")
                     else:
