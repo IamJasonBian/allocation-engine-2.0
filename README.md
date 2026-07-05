@@ -76,6 +76,28 @@ Broker defaults to `DEFAULT_BROKER` env var. Append `/alpaca` or `/robinhood` to
 | `ENGINE_BROKER` | Broker for engine reconciliation | `alpaca` |
 | `PORT` | Server port | `10000` |
 
+## Service boundaries
+
+This repo holds two independently-operated services plus a local tool:
+
+- **core-logic** — the allocation engine (`app/`, `main.py`): API + engine loop
+  on Render.
+- **auth-service/** — standalone Robinhood auth/session service on its own GCP
+  VM (see `auth-service/README.md`).
+- **robinhood-mcp/** — local MCP server exposing our Robinhood logic as tools
+  (see `robinhood-mcp/README.md`).
+
+**Rule: work on one service touches only that service.** Core-logic work stays
+in core-logic; auth-service work stays in `auth-service/`. At runtime the two
+may only interact through **reads** (core-logic calling the auth-service's
+read endpoints — `/auth/status`, `/token`, `GET /orders/trailing_stop`);
+neither modifies the other's code, config, or deployment.
+
+**Robinhood authentication runs only in the auth-service box.** Nothing else
+runs a Robinhood login/authenticate flow — consumers take a vended bearer from
+the box's `GET /token` and re-vend once on `401`. The box owns login, refresh,
+and device identity.
+
 ## Architecture
 
 ### System overview

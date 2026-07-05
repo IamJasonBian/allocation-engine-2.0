@@ -119,6 +119,7 @@ All POSTs and order reads require `Authorization: Bearer <exec-token>`.
 |--------|------------------------------------|-------------------------------------------|
 | GET    | `/health`                          | liveness                                  |
 | GET    | `/auth/status`                     | auth state + error codes (for alerting)   |
+| GET    | `/token`                           | vend the live RH access token (Bearer)    |
 | POST   | `/login`                           | force a real (re)authentication           |
 | POST   | `/command`                         | generic authenticated intake for callers  |
 | GET    | `/orders/trailing_stop`            | active percentage trailing-stop orders    |
@@ -129,9 +130,9 @@ All POSTs and order reads require `Authorization: Bearer <exec-token>`.
 
 `/exec/mcp` forwards a JSON-RPC payload to the **official Robinhood MCP**
 (`https://agent.robinhood.com/mcp/trading`, HTTP transport) and relays the status
-+ codes. It attaches the MCP OAuth token from `[mcp] token` (or `MCP_TOKEN_SECRET`)
-— provisioned via the agentic-account OAuth flow, separate from the password
-session. Body: `{"payload": <json-rpc object>, "session_id": "<optional>"}`.
++ codes. It attaches the MCP token from `[mcp] token` (or `MCP_TOKEN_SECRET`); if neither
+is set it **falls back to the live RH access token** vended by `/token`. Body:
+`{"payload": <json-rpc object>, "session_id": "<optional>"}`.
 
 ```bash
 curl -s localhost:8080/auth/status -H "Authorization: Bearer <exec-token>"

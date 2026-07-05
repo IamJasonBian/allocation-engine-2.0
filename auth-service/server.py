@@ -22,6 +22,7 @@ import logging
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import config
+import guardrails
 import mcp_client
 import robinhood
 import session as session_mgr
@@ -53,7 +54,13 @@ def _exec_token() -> str:
 def _mcp_token() -> str:
     if config.MCP_TOKEN_SECRET:
         return get_secret(config.MCP_TOKEN_SECRET, config.GCP_PROJECT_ID)
-    return config.MCP_TOKEN
+    if config.MCP_TOKEN:
+        return config.MCP_TOKEN
+    # Fall back to the live RH bearer from our device-authenticated session.
+    result = session_mgr.get_session(config.DEFAULT_PROFILE)
+    if result.status == "OK" and result.session is not None:
+        return result.session.access_token
+    return ""
 
 
 def _ensure_session(profile_id: str):
@@ -104,6 +111,10 @@ class Handler(BaseHTTPRequestHandler):
             return body["profile"]
         return config.DEFAULT_PROFILE
 
+    def _guardrail_block(self, reason: str) -> None:
+        log.warning("GUARDRAIL BLOCKED %s %s: %s", self.command, self.path, reason)
+        self._send(403, {"error_code": "GUARDRAIL_BLOCKED", "detail": reason})
+
     def log_message(self, fmt, *args):
         log.info("%s - %s", self.address_string(), fmt % args)
 
@@ -116,6 +127,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, session_mgr.status(config.DEFAULT_PROFILE))
         elif self.path.rstrip("/") == "/orders/trailing_stop":
             self._handle_read_orders()
+        elif self.path.rstrip("/") == "/token":
+            self._handle_token()
         else:
             self._send(404, {"error": "not found"})
 
@@ -181,6 +194,10 @@ class Handler(BaseHTTPRequestHandler):
         if not isinstance(payload, dict):
             self._send(400, {"error": "missing 'payload' object"})
             return
+        reason = guardrails.check_trailing_stop_payload(payload)
+        if reason:
+            self._guardrail_block(reason)
+            return
         sess, err = _ensure_session(self._profile(body))
         if err:
             self._send(409, err)
@@ -205,6 +222,10 @@ class Handler(BaseHTTPRequestHandler):
         payload = body.get("payload")
         if not isinstance(payload, dict) or not body.get("order_id"):
             self._send(400, {"error": "need 'order_id' and 'payload' object"})
+            return
+        reason = guardrails.check_trailing_stop_payload(payload)
+        if reason:
+            self._guardrail_block(reason)
             return
         sess, err = _ensure_session(self._profile(body))
         if err:
@@ -245,6 +266,30 @@ class Handler(BaseHTTPRequestHandler):
             "account_number": sess.account_number,
         })
 
+    def _handle_token(self):
+        # Vend the live RH access token (Bearer) — for callers and for MCP_TOKEN.
+        # Behind our bearer since it hands out a live credential. get_session
+        # reuses the cached token / silently refreshes; never forces a push.
+        if not self._authorized():
+            self._send(401, {"error": "unauthorized"})
+            return
+        result = session_mgr.get_session(config.DEFAULT_PROFILE)
+        if result.status != "OK" or result.session is None:
+            self._send(409, {
+                "error": "not authenticated",
+                "status": result.status,
+                "error_code": result.error_code,
+            })
+            return
+        s = result.session
+        self._send(200, {
+            "token": s.access_token,
+            "token_type": s.token_type,
+            "expires_at": s.expires_at,
+            "device_token": s.device_token,
+            "account_number": s.account_number,
+        })
+
     def _handle_mcp(self):
         # Relay a JSON-RPC call to the official Robinhood MCP — the "mcp exec"
         # option alongside the normal shell /exec. Caller authenticates with our
@@ -263,6 +308,10 @@ class Handler(BaseHTTPRequestHandler):
             payload = body  # caller sent the JSON-RPC object directly
         if not isinstance(payload, dict):
             self._send(400, {"error": "missing JSON-RPC 'payload'"})
+            return
+        reason = guardrails.check_mcp_payload(payload)
+        if reason:
+            self._guardrail_block(reason)
             return
         result = mcp_client.relay(payload, token=_mcp_token(),
                                   session_id=body.get("session_id"))
@@ -285,6 +334,10 @@ class Handler(BaseHTTPRequestHandler):
         command = body.get("command")
         if not command:
             self._send(400, {"error": "missing 'command'"})
+            return
+        reason = guardrails.check_exec_command(command)
+        if reason:
+            self._guardrail_block(reason)
             return
         try:
             self._send(200, run_command(command, cwd=body.get("cwd")))

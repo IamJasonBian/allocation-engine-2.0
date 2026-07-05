@@ -57,6 +57,9 @@ EXEC_REQUIRE_AUTH = os.getenv(
 MCP_URL = os.getenv("MCP_URL", _get("mcp", "url", "https://agent.robinhood.com/mcp/trading"))
 MCP_TOKEN = os.getenv("MCP_TOKEN", _get("mcp", "token"))
 MCP_TOKEN_SECRET = os.getenv("MCP_TOKEN_SECRET", _get("mcp", "token_secret"))
+# Comma-separated tool names exempt from the destructive-verb guardrail
+# (see guardrails.py). Empty = only trailing-stop tools may mutate.
+MCP_ALLOWED_TOOLS = os.getenv("MCP_ALLOWED_TOOLS", _get("mcp", "allowed_tools"))
 
 # --- Server ---
 PORT = int(os.getenv("PORT", _get("server", "port", "8080")))

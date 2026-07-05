@@ -7,6 +7,27 @@
 - Both deploy from `main` branch of `IamJasonBian/allocation-engine-2.0`
 - Auto-deploy is **off** on the worker; deploys are triggered via API
 
+## Service boundaries
+
+**When working on the core-logic (allocation-engine loop, `app/`, `main.py`),
+touch only core-logic code. When working on the auth-service, touch only
+`auth-service/`.** The two services must not touch each other outside of
+**read** interactions:
+
+- Core-logic may **call** the auth-service's read endpoints (`/auth/status`,
+  `/token`, `GET /orders/trailing_stop`) — it must not modify `auth-service/`
+  code, its VM, or its config.
+- The auth-service never calls into core-logic.
+- Changes to the running auth-service VM (deploy/restart/config) are their own
+  task — never a side effect of core-logic work.
+
+**Robinhood authentication runs ONLY in the auth-service box.** No other
+component ever runs `robinhood.authenticate` / `rh.login()` / password+TOTP
+flows. Consumers get a live bearer from the box's `GET /token` and treat an RH
+`401` as "re-vend once, retry" — the box owns login, refresh, and device
+identity. (Legacy exception, to be migrated: the Render services' pickle flow
+documented below still logs in directly; no new code may.)
+
 ## Render Deploy
 
 Deploys are **destructive to session state** — Render's ephemeral filesystem wipes the local Robinhood pickle on every deploy.
