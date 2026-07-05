@@ -22,6 +22,7 @@ import logging
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import config
+import mcp_client
 import robinhood
 import session as session_mgr
 from gcp_secrets import get_secret
@@ -47,6 +48,12 @@ def _exec_token() -> str:
     if config.EXEC_TOKEN_SECRET:
         return get_secret(config.EXEC_TOKEN_SECRET, config.GCP_PROJECT_ID)
     return config.EXEC_TOKEN
+
+
+def _mcp_token() -> str:
+    if config.MCP_TOKEN_SECRET:
+        return get_secret(config.MCP_TOKEN_SECRET, config.GCP_PROJECT_ID)
+    return config.MCP_TOKEN
 
 
 def _ensure_session(profile_id: str):
@@ -122,6 +129,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_replace()
         elif route == "/command":
             self._handle_command()
+        elif route == "/exec/mcp":
+            self._handle_mcp()
         elif route == "/exec":
             self._handle_exec()
         else:
@@ -235,6 +244,29 @@ class Handler(BaseHTTPRequestHandler):
             "authenticated": True,
             "account_number": sess.account_number,
         })
+
+    def _handle_mcp(self):
+        # Relay a JSON-RPC call to the official Robinhood MCP — the "mcp exec"
+        # option alongside the normal shell /exec. Caller authenticates with our
+        # bearer token; the MCP's OAuth token is attached server-side. Does not
+        # need our RH password session (the MCP has its own OAuth).
+        if not self._authorized():
+            self._send(401, {"error": "unauthorized"})
+            return
+        try:
+            body = self._read_json()
+        except json.JSONDecodeError:
+            self._send(400, {"error": "invalid JSON body"})
+            return
+        payload = body.get("payload")
+        if payload is None and body.get("method"):
+            payload = body  # caller sent the JSON-RPC object directly
+        if not isinstance(payload, dict):
+            self._send(400, {"error": "missing JSON-RPC 'payload'"})
+            return
+        result = mcp_client.relay(payload, token=_mcp_token(),
+                                  session_id=body.get("session_id"))
+        self._send(200, result)
 
     def _handle_exec(self):
         if not self._authorized():

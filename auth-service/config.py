@@ -51,6 +51,13 @@ EXEC_REQUIRE_AUTH = os.getenv(
     "EXEC_REQUIRE_AUTH", _get("exec", "require_auth", "true")
 ).lower() == "true"
 
+# --- Robinhood MCP (official hosted agentic-trading server) ---
+# HTTP-transport MCP endpoint; OAuth Bearer required. Token is provisioned via
+# the agentic-account OAuth flow (separate from our password session).
+MCP_URL = os.getenv("MCP_URL", _get("mcp", "url", "https://agent.robinhood.com/mcp/trading"))
+MCP_TOKEN = os.getenv("MCP_TOKEN", _get("mcp", "token"))
+MCP_TOKEN_SECRET = os.getenv("MCP_TOKEN_SECRET", _get("mcp", "token_secret"))
+
 # --- Server ---
 PORT = int(os.getenv("PORT", _get("server", "port", "8080")))
 DEBUG = os.getenv("FLASK_DEBUG", _get("server", "debug", "false")).lower() == "true"

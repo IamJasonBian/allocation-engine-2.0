@@ -124,13 +124,41 @@ All POSTs and order reads require `Authorization: Bearer <exec-token>`.
 | GET    | `/orders/trailing_stop`            | active percentage trailing-stop orders    |
 | POST   | `/orders/trailing_stop`            | relay a place payload (`dry_run` default) |
 | POST   | `/orders/trailing_stop/replace`    | relay a replace payload (`dry_run` default)|
-| POST   | `/exec`                            | run an external command                   |
+| POST   | `/exec`                            | run an external command (shell)           |
+| POST   | `/exec/mcp`                        | relay a JSON-RPC call to the Robinhood MCP |
+
+`/exec/mcp` forwards a JSON-RPC payload to the **official Robinhood MCP**
+(`https://agent.robinhood.com/mcp/trading`, HTTP transport) and relays the status
++ codes. It attaches the MCP OAuth token from `[mcp] token` (or `MCP_TOKEN_SECRET`)
+— provisioned via the agentic-account OAuth flow, separate from the password
+session. Body: `{"payload": <json-rpc object>, "session_id": "<optional>"}`.
 
 ```bash
 curl -s localhost:8080/auth/status -H "Authorization: Bearer <exec-token>"
 ```
 
 ---
+
+## Making changes (preferred workflow)
+
+**SSH in and check first.** The VM is the source of truth for what's deployed —
+before changing anything, SSH in and inspect the current state (running service,
+config, what's already on disk). Don't assume; check.
+
+Change code with minimal disruption:
+
+1. **SSH first, check:** `systemctl status auth-service`, read the files, confirm
+   what's actually running.
+2. **Stage the change:** edit on the VM (or edit locally and `scp` up). Editing
+   files does **not** affect the running process — the server keeps serving the
+   old code until it's restarted, so changes land safely without disturbing it.
+3. **Test standalone:** `./venv/bin/python -c '...'` (or run `dryrun.py` /
+   `reauth_verify.py`) to exercise the new code path without touching the live
+   server.
+4. **Activate when ready:** `sudo systemctl restart auth-service`.
+
+Commit to git afterward, treating the VM's files as the source of truth (pull
+them down and diff before committing).
 
 ## Operations
 
