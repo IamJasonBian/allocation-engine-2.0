@@ -7,6 +7,7 @@ import logging
 
 from app.brokers.base import BrokerClient
 from app.enums import OrderSide, RiskEventType
+from app.market_calendar import is_tradeable
 from app.risk.events import RiskEvent
 from app.risk.observer import RiskSubject
 from app.risk.rebalancer_observer import RebalancerObserver
@@ -330,24 +331,108 @@ class AllocationEngine:
         )
         return to_submit, stale_ids
 
+    def _now_et(self):
+        """Current time in US/Eastern (zoneinfo, falling back to pytz)."""
+        from datetime import datetime
+        try:
+            from zoneinfo import ZoneInfo
+            return datetime.now(ZoneInfo("America/New_York"))
+        except Exception:  # pragma: no cover - exotic envs without tzdata
+            import pytz
+            return datetime.now(pytz.timezone("America/New_York"))
+
+    def _option_session_buffers(self, open_buffer_min, close_buffer_min):
+        """Resolve open/close buffers from explicit args, else app config, else defaults."""
+        if open_buffer_min is not None and close_buffer_min is not None:
+            return open_buffer_min, close_buffer_min
+        ob, cb = 2, 5
+        try:
+            from flask import current_app
+            cfg = current_app.config
+            ob = cfg.get("IBKR_OPEN_BUFFER_MIN", ob)
+            cb = cfg.get("IBKR_CLOSE_BUFFER_MIN", cb)
+        except Exception:
+            pass
+        return (
+            open_buffer_min if open_buffer_min is not None else ob,
+            close_buffer_min if close_buffer_min is not None else cb,
+        )
+
     def _execute_option_orders(
-        self, orders: list[dict], cancel_ids: list[str]
+        self,
+        orders: list[dict],
+        cancel_ids: list[str],
+        *,
+        now_et=None,
+        open_buffer_min=None,
+        close_buffer_min=None,
     ):
-        """Log option order actions. Execution not yet implemented — always dry-run."""
+        """Submit option orders, gated to the safe RTH window.
+
+        Cancellation is logged-only (consistent with the equity ``_execute``).
+        For live submission the trading window is enforced via
+        :func:`market_calendar.is_tradeable` — outside RTH (or inside the
+        open/close buffers, on weekends/holidays/half-days) nothing is submitted,
+        which also avoids churning DAY orders near the close. Optional per-order
+        fields (``peg_delta``, ``cancel_if_underlying_above/below``) are passed
+        through to the broker untouched.
+        """
         if cancel_ids:
             log.info("[OPTIONS] Found %d stale option order(s): %s", len(cancel_ids), cancel_ids)
 
+        if not orders:
+            return []
+
+        # Session gate (live only — dry-run still logs for visibility).
+        if not self.dry_run:
+            ob, cb = self._option_session_buffers(open_buffer_min, close_buffer_min)
+            now = now_et or self._now_et()
+            allowed, reason = is_tradeable(now, open_buffer_min=ob, close_buffer_min=cb)
+            if not allowed:
+                log.info("[OPTIONS] submission skipped — %s", reason)
+                return []
+
+        cap = getattr(self, "max_option_order_qty", None) or self.max_order_qty
+        results = []
         for order in orders:
-            log.info(
-                "[OPTIONS DRY RUN] Would submit: %s %s %s %.2f %s qty=%g @ %s",
-                order.get("side", "?"),
-                order.get("chain_symbol", "?"),
-                order.get("option_type", "?"),
-                float(order.get("strike", 0)),
-                order.get("expiration", "?"),
-                float(order.get("quantity", 0)),
-                f"${order['limit_price']:,.2f}" if order.get("limit_price") else "MKT",
-            )
+            qty = float(order.get("quantity", 0))
+            if qty > cap:
+                log.warning(
+                    "Option order capped: %s %s qty %g -> %d",
+                    order.get("side", "?"), order.get("chain_symbol", "?"), qty, cap,
+                )
+                order["quantity"] = cap
+
+            if self.dry_run:
+                log.info(
+                    "[OPTIONS DRY RUN] Would submit: %s %s %s %.2f %s qty=%g @ %s",
+                    order.get("side", "?"),
+                    order.get("chain_symbol", "?"),
+                    order.get("option_type", "?"),
+                    float(order.get("strike", 0)),
+                    order.get("expiration", "?"),
+                    float(order.get("quantity", 0)),
+                    f"${order['limit_price']:,.2f}" if order.get("limit_price") else "MKT",
+                )
+            elif hasattr(self.trader, "submit_option_order"):
+                result = self.trader.submit_option_order(order)
+                log.info(
+                    "[OPTIONS] Submitted %s %s %s %.2f %s qty=%g -> %s",
+                    order.get("side", "?"),
+                    order.get("chain_symbol", "?"),
+                    order.get("option_type", "?"),
+                    float(order.get("strike", 0)),
+                    order.get("expiration", "?"),
+                    float(order.get("quantity", 0)),
+                    result,
+                )
+                results.append(result)
+            else:
+                log.warning(
+                    "[OPTIONS] broker %s has no submit_option_order — skipping",
+                    type(self.trader).__name__,
+                )
+        return results
 
     # -- equity execution ----------------------------------------------------
 
