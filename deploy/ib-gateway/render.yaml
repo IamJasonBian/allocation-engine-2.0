@@ -1,0 +1,39 @@
+# Deploy IB Gateway as a SEPARATE private Render service.
+#
+# The worker (allocation-engine-2.0) and api (allocation-engine-api) reach it
+# over Render PRIVATE networking — never expose the API port publicly.
+#   IBKR_HOST=ib-gateway   (the service `name` below)
+#   IBKR_PORT=4002 (paper) / 4001 (live)
+#
+# `pserv` (private service) has no public URL and is only reachable from other
+# services in the same Render account/region. This is the correct type for a
+# broker gateway holding live credentials.
+#
+# This file is standalone for the gateway. Merge the env vars into the root
+# render.yaml only if you prefer a single blueprint; keeping it separate avoids
+# coupling gateway redeploys to the app.
+services:
+  - type: pserv
+    name: ib-gateway
+    runtime: image
+    image:
+      url: ghcr.io/gnzsnz/ib-gateway:latest
+    region: ohio            # match the worker/api region for private networking
+    plan: starter
+    envVars:
+      - key: TWS_USERID
+        sync: false
+      - key: TWS_PASSWORD
+        sync: false
+      - key: TRADING_MODE
+        value: paper        # flip to "live" only after paper validation
+      - key: READ_ONLY_API
+        value: "no"
+      - key: TWS_SETTINGS_PATH
+        value: /home/ibgateway/Jts
+      - key: AUTO_RESTART_TIME
+        value: "23:45"
+      - key: TZ
+        value: America/New_York
+      - key: BIND_ADDRESS
+        value: 0.0.0.0
