@@ -208,6 +208,7 @@ class RobinhoodTrader(BrokerClient):
         qty = float(order["quantity"])
         otype = order.get("order_type", OrderType.MARKET).lower()
         limit_px = order.get("limit_price")
+        market_hours = order.get("market_hours", "regular_hours")
 
         try:
             if otype == OrderType.LIMIT and limit_px:
@@ -215,11 +216,13 @@ class RobinhoodTrader(BrokerClient):
                     symbol, qty, side,
                     limitPrice=float(limit_px),
                     timeInForce="gtc", jsonify=True,
+                    market_hours=market_hours,
                 )
             else:
                 result = rh.orders.order(
                     symbol, qty, side,
                     timeInForce="gtc", jsonify=True,
+                    market_hours=market_hours,
                 )
 
             if result and result.get("id"):

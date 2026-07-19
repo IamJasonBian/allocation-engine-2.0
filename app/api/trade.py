@@ -19,6 +19,9 @@ def place_order(broker_name=None):
         order_type: str   (optional) "market"|"limit"|"stop"|"stop_limit", default "market"
         limit_price: float (optional) required for limit/stop_limit
         stop_price:  float (optional) required for stop/stop_limit
+        market_hours: str (optional) "regular_hours"|"extended_hours"|"all_day_hours",
+                          default "regular_hours"; all_day_hours = 24 Hour Market
+                          (limit orders only, whole shares only)
         dry_run:     bool  (optional) override global dry_run setting
     """
     broker_name = broker_name or current_app.config["DEFAULT_BROKER"]
@@ -52,11 +55,19 @@ def place_order(broker_name=None):
     order_type = body.get("order_type", "market").lower()
     limit_price = body.get("limit_price")
     stop_price = body.get("stop_price")
+    market_hours = body.get("market_hours", "regular_hours").lower()
 
     if order_type in (OrderType.LIMIT, OrderType.STOP_LIMIT) and limit_price is None:
         return jsonify({"error": "limit_price required for limit/stop_limit orders"}), 400
     if order_type in (OrderType.STOP, OrderType.STOP_LIMIT) and stop_price is None:
         return jsonify({"error": "stop_price required for stop/stop_limit orders"}), 400
+    if market_hours not in ("regular_hours", "extended_hours", "all_day_hours"):
+        return jsonify({"error": "market_hours must be regular_hours, extended_hours, or all_day_hours"}), 400
+    if market_hours == "all_day_hours":
+        if order_type != OrderType.LIMIT:
+            return jsonify({"error": "all_day_hours requires a limit order"}), 400
+        if quantity != int(quantity):
+            return jsonify({"error": "all_day_hours requires whole shares"}), 400
 
     # --- check dry_run ---
     dry_run = body.get("dry_run", body.get("dryRun", current_app.config.get("DRY_RUN", True)))
@@ -68,6 +79,7 @@ def place_order(broker_name=None):
         "order_type": order_type,
         "limit_price": limit_price,
         "stop_price": stop_price,
+        "market_hours": market_hours,
     }
 
     if dry_run:
