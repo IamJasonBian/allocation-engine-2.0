@@ -1,6 +1,6 @@
 # Allocation Engine 2.0
 
-Flask API service for portfolio monitoring and trade execution across **Robinhood** and **Alpaca** brokers. Deploys on Render via gunicorn.
+Flask API service for portfolio monitoring and trade execution across **Robinhood**, **Alpaca**, and **IBKR** brokers. Deploys on Render via gunicorn.
 
 ## How it works
 
@@ -54,8 +54,26 @@ python main.py --broker alpaca run
 | GET | `/api/portfolio[/<broker>]` | Account + positions combined |
 | GET | `/api/engine/status` | Background engine loop status |
 | POST | `/api/engine/tick` | Manually trigger reconciliation |
+| POST | `/api/trade/order[/<broker>]` | Place an order (market/limit/stop/stop_limit) |
+| POST | `/api/trade/buy[/<broker>]` | Convenience: place a BUY order |
+| POST | `/api/trade/sell[/<broker>]` | Convenience: place a SELL order |
+| POST/DELETE | `/api/trade/cancel/<order_id>[/<broker>]` | Cancel a specific order |
+| POST/DELETE | `/api/trade/cancel-all[/<broker>]` | Cancel all open orders |
+| GET | `/api/transfer/bank-accounts/<broker>` | Linked bank accounts for ACH transfer |
+| POST | `/api/transfer/deposit/<broker>` | Deposit from linked bank into the broker |
+| POST | `/api/transfer/withdraw/<broker>` | Withdraw from the broker to linked bank |
+| GET | `/api/transfer/history/<broker>` | Past ACH transfers |
+| POST | `/api/transfer/between` | Move funds between Robinhood and IBKR (two ACH legs) |
 
-Broker defaults to `DEFAULT_BROKER` env var. Append `/alpaca` or `/robinhood` to target a specific broker.
+Broker defaults to `DEFAULT_BROKER` env var. Append `/alpaca`, `/robinhood`, or `/ibkr` to target a specific broker.
+
+Trade and transfer endpoints respect `DRY_RUN` (or a per-request `dry_run` body field) — orders/transfers are validated
+and echoed back but not submitted unless `dry_run=false`.
+
+**IBKR funding note:** IBKR's Client Portal Web API doesn't expose ACH deposit/withdraw initiation for retail
+accounts, so `/api/transfer/*/ibkr` returns `501` — move IBKR-side funds via the Client Portal web/mobile app.
+Robinhood's side is fully functional. `/api/transfer/between` always does the Robinhood leg for real and reports
+the IBKR leg as unsupported until IBKR exposes that capability.
 
 ## Environment Variables
 
@@ -69,6 +87,9 @@ Broker defaults to `DEFAULT_BROKER` env var. Append `/alpaca` or `/robinhood` to
 | `ALPACA_API_KEY` | Alpaca API key | required for Alpaca |
 | `ALPACA_SECRET_KEY` | Alpaca secret key | required for Alpaca |
 | `ALPACA_PAPER` | Use Alpaca paper trading | `true` |
+| `IBKR_GATEWAY_URL` | IBKR Client Portal Gateway base URL | `https://localhost:5000/v1/api` |
+| `IBKR_ACCOUNT_ID` | Pin a specific IBKR account | first account reported by the gateway |
+| `IBKR_VERIFY_SSL` | Verify the gateway's TLS cert | `false` |
 | `RUNTIME_SERVICE_URL` | Runtime service base URL | `https://route-runtime-service.netlify.app/api` |
 | `POLL_INTERVAL_SECONDS` | Engine loop interval | `30` |
 | `DRY_RUN` | Log orders without submitting | `true` |
@@ -120,9 +141,11 @@ graph TD
 
     BROKER --> RH[RobinhoodTrader<br/><i>robin-stocks + pyotp</i>]
     BROKER --> ALP[AlpacaTrader<br/><i>alpaca-py</i>]
+    BROKER --> IBK[IBKRTrader<br/><i>REST vs CP Gateway</i>]
 
     RH -->|REST| RH_API[Robinhood API]
     ALP -->|REST| ALP_API[Alpaca API]
+    IBK -->|REST, local| IBK_GW[IBKR CP Gateway<br/><i>must already be logged in</i>]
 
     SCHEMAS[Pydantic Schemas<br/><i>deploy-time contract checks</i>] -.->|validates| FLASK
 ```
@@ -195,5 +218,9 @@ graph TD
 
     BREG --> ALP[alpaca_client.py]
     BREG --> RHC[robinhood_client.py]
-    ALP & RHC -.->|implements| BASE
+    BREG --> IBKC[ibkr_client.py]
+    ALP & RHC & IBKC -.->|implements| BASE
+
+    API --> TRF[transfer.py<br/><i>deposit / withdraw / between</i>]
+    TRF --> BREG
 ```

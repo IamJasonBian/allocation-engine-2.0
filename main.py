@@ -95,7 +95,7 @@ def serve():
 def main():
     parser = argparse.ArgumentParser(description="Allocation Engine 2.0")
     parser.add_argument("--broker", default=Config.ENGINE_BROKER,
-                        choices=["alpaca", "robinhood"],
+                        choices=["alpaca", "robinhood", "ibkr"],
                         help="Broker to use (default: ENGINE_BROKER env var)")
     sub = parser.add_subparsers(dest="command")
 

@@ -45,6 +45,15 @@ class Config:
     # -- Robinhood session persistence --
     RH_RETRY_HOUR_ET = int(os.getenv("RH_RETRY_HOUR_ET", "11"))
 
+    # -- IBKR (Client Portal Gateway) --
+    # A CP Gateway process must already be running and logged in (interactive
+    # browser login, out-of-band — see app/brokers/ibkr_client.py). This is
+    # just where we point at it.
+    IBKR_GATEWAY_URL = os.getenv("IBKR_GATEWAY_URL", "https://localhost:5000/v1/api")
+    IBKR_ACCOUNT_ID = os.getenv("IBKR_ACCOUNT_ID", "")
+    IBKR_VERIFY_SSL = os.getenv("IBKR_VERIFY_SSL", "false").lower() == "true"
+    IBKR_REQUEST_TIMEOUT = int(os.getenv("IBKR_REQUEST_TIMEOUT", "15"))
+
     @classmethod
     def rh_credentials(cls) -> tuple[str, str]:
         """Return (email, password) for the active Robinhood account."""
