@@ -39,3 +39,24 @@ class BrokerClient(ABC):
     def cancel_all(self) -> None:
         """Cancel all open orders."""
         pass
+
+    # -- funding: linked-bank deposit/withdraw (optional) --------------------
+    # Not every broker supports ACH transfer initiation via API; the default
+    # implementations below raise so callers get a clean, catchable error
+    # instead of an AttributeError. Brokers that do support it override these.
+
+    def linked_bank_accounts(self) -> list[dict]:
+        """Return linked bank accounts available for ACH transfer."""
+        raise NotImplementedError(f"{type(self).__name__} does not support linked bank accounts")
+
+    def deposit(self, amount: float, **kwargs) -> dict | None:
+        """Deposit funds from a linked bank account into the broker."""
+        raise NotImplementedError(f"{type(self).__name__} does not support deposits")
+
+    def withdraw(self, amount: float, **kwargs) -> dict | None:
+        """Withdraw funds from the broker to a linked bank account."""
+        raise NotImplementedError(f"{type(self).__name__} does not support withdrawals")
+
+    def transfer_history(self, **kwargs) -> list[dict]:
+        """Return past bank transfers (deposits and withdrawals)."""
+        raise NotImplementedError(f"{type(self).__name__} does not support transfer history")

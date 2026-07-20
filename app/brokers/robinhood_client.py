@@ -538,6 +538,61 @@ class RobinhoodTrader(BrokerClient):
                 break
         return result
 
+    # -- funding: linked-bank ACH deposit/withdraw ---------------------------
+
+    def linked_bank_accounts(self) -> list[dict]:
+        """List bank accounts linked for ACH transfer."""
+        self._ensure_auth()
+        raw = rh.account.get_linked_bank_accounts() or []
+        return [
+            {
+                "id": b.get("id"),
+                "bank_name": b.get("bank_name") or b.get("name"),
+                "account_type": b.get("type"),
+                "verified": b.get("verified"),
+            }
+            for b in raw if isinstance(b, dict)
+        ]
+
+    def deposit(self, amount: float, ach_relationship: str = "", **kwargs) -> dict | None:
+        """Deposit funds from a linked bank account into Robinhood via ACH."""
+        if not ach_relationship:
+            raise ValueError("ach_relationship is required for Robinhood deposits")
+        self._ensure_auth()
+        result = rh.account.deposit_funds_to_robinhood_account(ach_relationship, amount)
+        if result and result.get("id"):
+            log.info("RH deposit initiated: $%s -> %s", amount, result["id"])
+            return {"id": result["id"], "amount": float(amount), "state": result.get("state")}
+        log.error("RH deposit failed for $%s: %s", amount, result)
+        return None
+
+    def withdraw(self, amount: float, ach_relationship: str = "", **kwargs) -> dict | None:
+        """Withdraw funds from Robinhood to a linked bank account via ACH."""
+        if not ach_relationship:
+            raise ValueError("ach_relationship is required for Robinhood withdrawals")
+        self._ensure_auth()
+        result = rh.account.withdrawl_funds_to_bank_account(ach_relationship, amount)
+        if result and result.get("id"):
+            log.info("RH withdrawal initiated: $%s -> %s", amount, result["id"])
+            return {"id": result["id"], "amount": float(amount), "state": result.get("state")}
+        log.error("RH withdrawal failed for $%s: %s", amount, result)
+        return None
+
+    def transfer_history(self, direction: str | None = None, **kwargs) -> list[dict]:
+        """Return past ACH transfers (direction: 'deposit', 'withdraw', or None for both)."""
+        self._ensure_auth()
+        raw = rh.account.get_bank_transfers(direction=direction) or []
+        return [
+            {
+                "id": t.get("id"),
+                "amount": float(t.get("amount", 0) or 0),
+                "direction": t.get("direction"),
+                "state": t.get("state"),
+                "created_at": t.get("created_at"),
+            }
+            for t in raw if isinstance(t, dict)
+        ]
+
     # -- auth status --------------------------------------------------------
 
     def auth_status(self) -> dict:
