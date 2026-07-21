@@ -45,6 +45,21 @@ class Config:
     # -- Robinhood session persistence --
     RH_RETRY_HOUR_ET = int(os.getenv("RH_RETRY_HOUR_ET", "11"))
 
+    # -- IBKR (Client Portal Web API) --
+    # clientportal.gw must already be running + authenticated (browser login)
+    # on a box we control (Tailscale / GCP); this is just where we reach it.
+    IBKR_BASE_URL = os.getenv("IBKR_BASE_URL", "")
+    IBKR_ACCOUNT_ID = os.getenv("IBKR_ACCOUNT_ID", "")
+    IBKR_VERIFY_SSL = os.getenv("IBKR_VERIFY_SSL", "false").lower() == "true"
+
+    # -- Money movement (deposit / transfer between broker accounts) --
+    # Linked bank relationship to use for Robinhood ACH deposit/withdraw.
+    RH_ACH_RELATIONSHIP_ID = os.getenv("RH_ACH_RELATIONSHIP_ID", "")
+    # Separate gate from the general engine DRY_RUN — transfers move real
+    # money and stay simulated until explicitly turned off AND armed=true
+    # is passed on the request itself.
+    TRANSFERS_DRY_RUN = os.getenv("TRANSFERS_DRY_RUN", "true").lower() == "true"
+
     @classmethod
     def rh_credentials(cls) -> tuple[str, str]:
         """Return (email, password) for the active Robinhood account."""

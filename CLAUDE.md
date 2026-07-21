@@ -83,6 +83,44 @@ If you deploy first, the service downloads the old/stale pickle from Netlify and
 - `GET /api/auth/status/robinhood` — broker-specific status
 - `GET /api/health` — general service health
 
+## IBKR Surface & Cross-Broker Transfers
+
+`app/brokers/ibkr_client.py` implements the same `BrokerClient` interface as
+Alpaca/Robinhood — `/api/account/ibkr`, `/api/positions/ibkr`,
+`/api/orders/ibkr`, and `/api/trade/{order,buy,sell,cancel}/ibkr` work the
+same way they do for the other brokers.
+
+- **Connection**: IBKR's Client Portal Web API (REST), not TWS/`ib_insync`.
+  It talks to a `clientportal.gw` gateway process reachable via
+  `IBKR_BASE_URL` (Tailscale or a GCP box) — that gateway's own
+  browser-based login/2FA and session refresh is infra we manage out of
+  band, not something this client can do headlessly. Sessions idle-timeout
+  quickly, so every call tickles the gateway (`/tickle`) first.
+- **Order confirmations**: CPAPI often returns one or more risk-warning
+  "replies" before an order is actually accepted. `submit_order()`
+  auto-confirms them (logging each message) since this runs unattended.
+- **No funding API**: IBKR does not expose a retail deposit/withdraw
+  endpoint via CPAPI — `deposit()`/`withdraw()` raise `NotImplementedError`
+  on purpose rather than faking success. Funding IBKR still requires the
+  Client Portal UI.
+
+**Transfers** (`app/api/transfer.py`) move money between broker accounts as
+two independent ACH legs — there is no real broker-to-broker transfer API:
+- `POST /api/transfer/deposit/<broker>` / `.../withdraw/<broker>` — single
+  leg against that broker's own linked bank account.
+- `POST /api/transfer` — withdraws from `from_broker`, then deposits to
+  `to_broker`. **Not atomic**: if the deposit leg fails after a successful
+  withdrawal, the response says so explicitly (`leg: "deposit"`, a
+  `warning` with the withdrawal id) instead of retrying or rolling back.
+- Gated by `TRANSFERS_DRY_RUN` (default `true`, separate from the engine's
+  general `DRY_RUN`) **and** an explicit `armed: true` in the request body
+  — both must be satisfied before real money moves.
+- Robinhood's ACH transfer endpoint isn't wrapped by `robin_stocks`;
+  `RobinhoodTrader.deposit()`/`withdraw()` call it directly through the
+  same box-vended session `submit_order()` already uses (`RH_ACH_RELATIONSHIP_ID`
+  selects the linked bank) — no new login path, consistent with the
+  auth-service boundary above.
+
 ## Render CLI
 
 ```bash

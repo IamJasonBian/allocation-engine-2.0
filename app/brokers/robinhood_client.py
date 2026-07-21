@@ -60,12 +60,14 @@ class RobinhoodTrader(BrokerClient):
         totp_secret: str = "",
         pickle_name: str = "",
         account_number: str = "",
+        ach_relationship_id: str = "",
     ):
         # email is kept for status reporting; password/totp/pickle are legacy
         # arguments accepted (and ignored) so get_broker() stays unchanged —
         # authentication lives exclusively in the auth-service box.
         self.email = email
         self.account_number = account_number
+        self.ach_relationship_id = ach_relationship_id
         self._authenticated = False
 
         global _init_phase
@@ -537,6 +539,51 @@ class RobinhoodTrader(BrokerClient):
             if len(result) >= limit:
                 break
         return result
+
+    # -- funding (ACH deposit / withdraw) ------------------------------------
+    # Robinhood's ACH transfer endpoint isn't wrapped by robin_stocks — this
+    # calls it directly through the same authenticated session (box-vended
+    # token) that submit_order() already uses. No login/auth happens here.
+
+    def get_linked_bank_accounts(self) -> list[dict]:
+        """List ACH-linked bank relationships for this account."""
+        self._ensure_auth()
+        data = rh.helper.request_get(
+            "https://api.robinhood.com/ach/relationships/", dataType="results"
+        )
+        return data or []
+
+    def _ach_transfer(self, amount: float, direction: str) -> dict | None:
+        self._ensure_auth()
+        if not self.ach_relationship_id:
+            raise ValueError("RH_ACH_RELATIONSHIP_ID is not configured")
+        payload = {
+            "ach_relationship": (
+                f"https://api.robinhood.com/ach/relationships/{self.ach_relationship_id}/"
+            ),
+            "amount": f"{amount:.2f}",
+            "direction": direction,
+        }
+        try:
+            result = rh.helper.request_post(
+                "https://api.robinhood.com/ach/transfers/", payload
+            )
+            if result and result.get("id"):
+                log.info("RH ACH %s submitted: $%.2f -> %s", direction, amount, result["id"])
+                return {"id": result["id"], "state": result.get("state"), "amount": amount}
+            log.error("RH ACH %s failed, no id in response: %s", direction, result)
+            return None
+        except Exception as e:
+            log.error("RH ACH %s error for $%.2f: %s", direction, amount, e)
+            return None
+
+    def deposit(self, amount: float) -> dict | None:
+        """Deposit funds from the linked bank into Robinhood."""
+        return self._ach_transfer(amount, "deposit")
+
+    def withdraw(self, amount: float) -> dict | None:
+        """Withdraw funds from Robinhood to the linked bank."""
+        return self._ach_transfer(amount, "withdraw")
 
     # -- auth status --------------------------------------------------------
 

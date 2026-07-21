@@ -14,9 +14,11 @@ def register_blueprints(app):
     from app.api.events import bp as events_bp
     from app.api.robinhood_proxy import bp as robinhood_proxy_bp
     from app.api.claude_auth import bp as claude_auth_bp
+    from app.api.transfer import bp as transfer_bp
 
     for blueprint in [health_bp, account_bp, positions_bp, orders_bp,
                       portfolio_bp, engine_bp, trade_bp, quote_bp,
                       history_bp, options_bp, auth_bp, snapshot_bp,
-                      events_bp, robinhood_proxy_bp, claude_auth_bp]:
+                      events_bp, robinhood_proxy_bp, claude_auth_bp,
+                      transfer_bp]:
         app.register_blueprint(blueprint, url_prefix="/api")
