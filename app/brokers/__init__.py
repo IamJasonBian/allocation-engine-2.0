@@ -30,6 +30,14 @@ def get_broker(name: str) -> BrokerClient:
             totp_secret=config.get("RH_TOTP_SECRET", ""),
             pickle_name=config.get("RH_PICKLE_NAME", "taipei_session"),
             account_number=config.get("RH_AUTOMATED_ACCOUNT_NUMBER", ""),
+            ach_relationship_id=config.get("RH_ACH_RELATIONSHIP_ID", ""),
+        )
+    elif name == "ibkr":
+        from app.brokers.ibkr_client import IBKRTrader
+        client = IBKRTrader(
+            base_url=config["IBKR_BASE_URL"],
+            account_id=config["IBKR_ACCOUNT_ID"],
+            verify_ssl=config.get("IBKR_VERIFY_SSL", False),
         )
     else:
         raise ValueError(f"Unknown broker: {name}")
