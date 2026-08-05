@@ -25,8 +25,27 @@ touch only core-logic code. When working on the auth-service, touch only
 component ever runs `robinhood.authenticate` / `rh.login()` / password+TOTP
 flows. Consumers get a live bearer from the box's `GET /token` and treat an RH
 `401` as "re-vend once, retry" — the box owns login, refresh, and device
-identity. (Legacy exception, to be migrated: the Render services' pickle flow
-documented below still logs in directly; no new code may.)
+identity.
+
+### auth-service box — where it lives
+
+| | |
+|---|---|
+| Owner | **cloud@optimchain.org** — owns this GCP account |
+| Instance | `allocation-engine-auth-service-prod` |
+| Zone / project | `us-central1-c` / `route-manager-prod` |
+| Public URL | `https://34-30-182-125.sslip.io` (Caddy → `localhost:8080`) |
+| Install dir | `~/auth-service` (venv at `./venv`, config `env.prod`) |
+| Ingress | GCP firewall allows **Render egress IPs only** — Netlify and laptops time out (`UND_ERR_CONNECT_TIMEOUT`); use a `gcloud compute ssh` port-forward |
+
+```bash
+gcloud compute ssh allocation-engine-auth-service-prod \
+  --zone us-central1-c --project route-manager-prod
+```
+
+Credentials live in GCP Secret Manager; `env.prod` holds only the project id
+and secret *names*. Reaching Secret Manager needs the instance service account,
+so anything touching the box runs as the owner above.
 
 ## Render Deploy
 
