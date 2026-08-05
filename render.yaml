@@ -28,6 +28,11 @@ services:
         sync: false
       - key: RH_AUTH_SERVICE_REQUEST_TOKEN
         sync: false
+      # Gates every mutating /api/* route and the /api/robinhood/* relay.
+      # Those reach the broker with our own credentials, so they stay closed
+      # until this is set.
+      - key: RH_PROXY_TOKEN
+        sync: false
       # Trading DB write path (orders + positions)
       - key: TRADING_DB_URL
         sync: false
@@ -104,6 +109,11 @@ services:
       - key: AUTH_SERVICE_URL
         sync: false
       - key: RH_AUTH_SERVICE_REQUEST_TOKEN
+        sync: false
+      # Gates every mutating /api/* route and the /api/robinhood/* relay.
+      # Those reach the broker with our own credentials, so they stay closed
+      # until this is set.
+      - key: RH_PROXY_TOKEN
         sync: false
       # Trading DB write path (orders + positions)
       - key: TRADING_DB_URL

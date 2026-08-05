@@ -44,6 +44,7 @@ log = logging.getLogger("stop_sweeper")
 
 DEFAULT_DB = os.getenv("STOP_DB_PATH", os.path.join(os.path.dirname(__file__), "..", "data", "stops.sqlite3"))
 PROXY_BASE = os.getenv("RH_PROXY_BASE", "https://allocation-engine-api.onrender.com/api/robinhood")
+PROXY_TOKEN = os.getenv("RH_PROXY_TOKEN", "")
 BOX_BASE = os.getenv("AUTH_SERVICE_URL", "")
 BOX_TOKEN = os.getenv("RH_AUTH_SERVICE_REQUEST_TOKEN", "")
 
@@ -136,14 +137,24 @@ def validate_mcp_call(payload):
 # --------------------------------------------------------------------------- #
 
 class ProxyClient:
-    """Talk to RH through the deployed Render proxy (works off-network)."""
+    """Talk to RH through the deployed Render proxy (works off-network).
 
-    def __init__(self, base=PROXY_BASE, timeout=45):
+    The proxy relays to the box with its own bearer, so it is gated on
+    RH_PROXY_TOKEN — set it here too or every call comes back 401.
+    """
+
+    def __init__(self, base=PROXY_BASE, token=PROXY_TOKEN, timeout=45):
+        if not token:
+            raise SystemExit(
+                "RH_PROXY_TOKEN not set — the Render proxy requires it. "
+                "Use --via box to talk to the auth-service directly instead.")
         self.base = base.rstrip("/")
+        self.headers = {"Authorization": f"Bearer {token}"}
         self.timeout = timeout
 
     def get_stops(self):
-        r = requests.get(f"{self.base}/trailing-stop", timeout=self.timeout)
+        r = requests.get(f"{self.base}/trailing-stop",
+                         headers=self.headers, timeout=self.timeout)
         r.raise_for_status()
         return r.json().get("orders", [])
 
@@ -151,7 +162,7 @@ class ProxyClient:
         validate_trailing_stop_payload(payload, live=not dry_run)
         r = requests.post(f"{self.base}/trailing-stop",
                           json={"payload": payload, "dry_run": dry_run},
-                          timeout=self.timeout)
+                          headers=self.headers, timeout=self.timeout)
         r.raise_for_status()
         return r.json()
 
@@ -162,7 +173,7 @@ class ProxyClient:
     def mcp_call(self, payload):
         validate_mcp_call(payload)
         r = requests.post(f"{self.base}/mcp", json={"payload": payload},
-                          timeout=self.timeout)
+                          headers=self.headers, timeout=self.timeout)
         r.raise_for_status()
         return r.json()
 

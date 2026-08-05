@@ -2,6 +2,12 @@
 
 - GET/POST /api/robinhood/trailing-stop  — allow-listed direct calls (RH session)
 - POST     /api/robinhood/mcp            — JSON-RPC passthrough to Robinhood MCP
+
+Every route here is gated on ``RH_PROXY_TOKEN`` — including the GETs, since
+reading the order book leaks account activity. These endpoints relay to the
+box using *our* bearer and the caller chooses ``dry_run``, so an ungated route
+lets anyone on the internet trade the account. The gate lives in
+``app/security.py`` so it covers the mutating routes elsewhere too.
 """
 
 from flask import Blueprint, jsonify, request, current_app
