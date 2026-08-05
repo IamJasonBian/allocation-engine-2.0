@@ -21,36 +21,12 @@ class Config:
     ALPACA_PAPER = os.getenv("ALPACA_PAPER", "true").lower() == "true"
 
     # -- Robinhood --
-    # Account selection: "main" or "automated"
-    RH_ACTIVE_ACCOUNT = os.getenv("RH_ACTIVE_ACCOUNT", "main")
-
-    # Main account credentials
+    # Credentials, TOTP and device identity live in the auth-service box only;
+    # this service never logs in. Email is kept for status reporting and the
+    # account number for selecting the automated account.
     RH_MAIN_EMAIL = os.getenv("RH_MAIN_EMAIL", "")
-    RH_MAIN_PASSWORD = os.getenv("RH_MAIN_PASSWORD", "")
-
-    # Automated trading account credentials
-    RH_AUTO_EMAIL = os.getenv("RH_AUTO_EMAIL", "")
-    RH_AUTO_PASSWORD = os.getenv("RH_AUTO_PASSWORD", "")
-
     RH_AUTOMATED_ACCOUNT_NUMBER = os.getenv("RH_AUTOMATED_ACCOUNT_NUMBER", "")
-    RH_TOTP_SECRET = os.getenv("RH_TOTP_SECRET", "")
-    # Static device token — approved by Robinhood for this account.
-    # Stored in Netlify env vars and Render env vars.
-    # Only change this if Robinhood revokes the device server-side.
-    RH_DEVICE_TOKEN = os.getenv(
-        "RH_DEVICE_TOKEN", "8508c7fc-a1f3-bc44-b23e-0f28b6d0ecdb"
-    )
-    RH_PICKLE_NAME = os.getenv("RH_PICKLE_NAME", "taipei_session")
-
-    # -- Robinhood session persistence --
     RH_RETRY_HOUR_ET = int(os.getenv("RH_RETRY_HOUR_ET", "11"))
-
-    @classmethod
-    def rh_credentials(cls) -> tuple[str, str]:
-        """Return (email, password) for the active Robinhood account."""
-        if cls.RH_ACTIVE_ACCOUNT == "automated":
-            return cls.RH_AUTO_EMAIL, cls.RH_AUTO_PASSWORD
-        return cls.RH_MAIN_EMAIL, cls.RH_MAIN_PASSWORD
 
     # -- Auth-service (Robinhood session on the external box) --
     # Base URL must be https — the request token is sent as a Bearer header.

@@ -11,14 +11,6 @@ services:
         sync: false
       - key: DEFAULT_BROKER
         sync: false
-      - key: RH_USER
-        sync: false
-      - key: RH_PASS
-        sync: false
-      - key: RH_TOTP_SECRET
-        sync: false
-      - key: RH_DEVICE_TOKEN
-        sync: false
       - key: ALPACA_API_KEY
         sync: false
       - key: ALPACA_SECRET_KEY
@@ -30,6 +22,16 @@ services:
       - key: NETLIFY_API_TOKEN
         sync: false
       - key: NETLIFY_SITE_ID
+        sync: false
+      # Robinhood auth + reads route through the auth-service box
+      - key: AUTH_SERVICE_URL
+        sync: false
+      - key: RH_AUTH_SERVICE_REQUEST_TOKEN
+        sync: false
+      # Trading DB write path (orders + positions)
+      - key: TRADING_DB_URL
+        sync: false
+      - key: TRADING_DB_TOKEN
         sync: false
       - key: SLACK_WEBHOOK_URL
         sync: false
@@ -86,14 +88,6 @@ services:
         sync: false
       - key: DEFAULT_BROKER
         sync: false
-      - key: RH_USER
-        sync: false
-      - key: RH_PASS
-        sync: false
-      - key: RH_TOTP_SECRET
-        sync: false
-      - key: RH_DEVICE_TOKEN
-        sync: false
       - key: ALPACA_API_KEY
         sync: false
       - key: ALPACA_SECRET_KEY
@@ -105,6 +99,16 @@ services:
       - key: NETLIFY_API_TOKEN
         sync: false
       - key: NETLIFY_SITE_ID
+        sync: false
+      # Robinhood auth + reads route through the auth-service box
+      - key: AUTH_SERVICE_URL
+        sync: false
+      - key: RH_AUTH_SERVICE_REQUEST_TOKEN
+        sync: false
+      # Trading DB write path (orders + positions)
+      - key: TRADING_DB_URL
+        sync: false
+      - key: TRADING_DB_TOKEN
         sync: false
       - key: SLACK_WEBHOOK_URL
         sync: false

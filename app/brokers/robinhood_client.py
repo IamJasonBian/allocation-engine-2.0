@@ -53,17 +53,9 @@ def seconds_until_hour_et(hour: int = 11) -> float:
 
 
 class RobinhoodTrader(BrokerClient):
-    def __init__(
-        self,
-        email: str = "",
-        password: str = "",
-        totp_secret: str = "",
-        pickle_name: str = "",
-        account_number: str = "",
-    ):
-        # email is kept for status reporting; password/totp/pickle are legacy
-        # arguments accepted (and ignored) so get_broker() stays unchanged —
-        # authentication lives exclusively in the auth-service box.
+    def __init__(self, email: str = "", account_number: str = ""):
+        # email is kept for status reporting only — authentication lives
+        # exclusively in the auth-service box.
         self.email = email
         self.account_number = account_number
         self._authenticated = False

@@ -25,58 +25,68 @@ touch only core-logic code. When working on the auth-service, touch only
 component ever runs `robinhood.authenticate` / `rh.login()` / password+TOTP
 flows. Consumers get a live bearer from the box's `GET /token` and treat an RH
 `401` as "re-vend once, retry" — the box owns login, refresh, and device
-identity. (Legacy exception, to be migrated: the Render services' pickle flow
-documented below still logs in directly; no new code may.)
+identity.
+
+### auth-service box — where it lives
+
+| | |
+|---|---|
+| Owner | **cloud@optimchain.org** — owns this GCP account |
+| Instance | `allocation-engine-auth-service-prod` |
+| Zone / project | `us-central1-c` / `route-manager-prod` |
+| Public URL | `https://34-30-182-125.sslip.io` (Caddy → `localhost:8080`) |
+| Install dir | `~/auth-service` (venv at `./venv`, config `env.prod`) |
+| Ingress | GCP firewall allows **Render egress IPs only** — Netlify and laptops time out (`UND_ERR_CONNECT_TIMEOUT`); use a `gcloud compute ssh` port-forward |
+
+```bash
+gcloud compute ssh allocation-engine-auth-service-prod \
+  --zone us-central1-c --project route-manager-prod
+```
+
+Credentials live in GCP Secret Manager; `env.prod` holds only the project id
+and secret *names*. Reaching Secret Manager needs the instance service account,
+so anything touching the box runs as the owner above.
 
 ## Render Deploy
 
-Deploys are **destructive to session state** — Render's ephemeral filesystem wipes the local Robinhood pickle on every deploy.
+Deploys are safe for session state: this service holds no Robinhood
+credentials and never logs in. On boot it fetches an access token from the
+auth-service box (`GET /token`, cached in sqlite by `app/box_session.py`), so
+an ephemeral filesystem costs at most one token re-fetch.
 
-### Pickle restore priority (on boot)
-1. Local pickle on disk (gone after deploy)
-2. `RH_PICKLE_B64` env var (base64-encoded) — **removed as of 2026-04-06**, was causing stale session issues
-3. Download from **Netlify Blobs** (durable external storage)
-4. Seed stub with `RH_DEVICE_TOKEN` (triggers fresh login)
+The pickle/device-token/TOTP flow that used to live here — `pickle_store.py`,
+`scripts/refresh_pickle.py`, `refresh_pickle_watch.py`, `RH_PICKLE_*`,
+`RH_DEVICE_TOKEN`, `RH_TOTP_SECRET` — was removed once the box took over
+authentication. Nothing in this repo may reintroduce a direct RH login.
 
-### Deploy checklist
-1. **First** run `python scripts/refresh_pickle.py` locally to upload a fresh pickle to Netlify Blobs
-2. **Then** deploy — the service will pull the fresh pickle from Netlify on boot
-3. After deploy, check logs: `render logs -r <service-id> --limit 30 -o text --direction backward`
+After deploy, check logs:
+`render logs -r <service-id> --limit 30 -o text --direction backward`
 
-If you deploy first, the service downloads the old/stale pickle from Netlify and fails.
-**Always regenerate the pickle before a fresh deploy.**
+## Where the dashboard's data comes from
 
-### Token lifetime and self-healing
-- Robinhood access tokens last ~24 hours
-- Within that window, code-only deploys are safe — Render pulls the still-valid pickle from Netlify
-- After the token expires, `_ensure_auth()` detects it and `_login()` fires with credentials + TOTP from env vars
-- `_seed_device_token()` ensures the correct device token is in the pickle before login, so `_login()` should self-heal without a device challenge as long as the device is trusted
-- If Robinhood revokes device trust (rare), `refresh_pickle.py` must be re-run locally
+The engine is the **only** component that can reach the auth-service box: the
+box's GCP firewall allows Render egress IPs and nothing else. Netlify functions
+time out against it (`UND_ERR_CONNECT_TIMEOUT`) — that is why
+`snapshot-refresh.cjs` in `allocation-manager` cannot serve as a replacement
+producer without a firewall change, which is an auth-service task.
 
-## Robinhood Reauth Workflow
+So the engine reads Robinhood and writes everything the dashboard needs into
+the **Trading DB** (Postgres, behind the 5thstreetcapital Netlify functions):
 
-### `scripts/refresh_pickle.py`
-- Generates session pickle with the static device token and uploads to Netlify Blobs
-- Uses a temp directory — does not modify local session state
-- Reads `RH_USER`, `RH_PASS`, `RH_TOTP_SECRET` from env vars (falls back to interactive prompts)
-- Must be run locally (requires TTY if env vars are not set)
+| What | Written by | Read by |
+|---|---|---|
+| stock + option orders | `trading_db.post_orders` | `db-orders` |
+| positions, options, account | `trading_db.post_positions` | `db-positions`, `order-book-snapshot` |
+| bot activity | `trading_db.post_bot_activity` | `db-bot-activity` |
 
-### Device token
-- The static device token (`8508c7fc-...`) in `Config.RH_DEVICE_TOKEN` is the approved device identity
-- `_login()` calls `_seed_device_token()` to ensure the pickle always has this token before calling `rh.login()`
-- If the pickle has a **different** device token, Robinhood triggers a device challenge
-- `refresh_pickle.py` also seeds this token so the uploaded pickle matches Render's identity
+Both writes run on the same ungated cadence (`TRADING_DB_SYNC_SECONDS`,
+default 900s). **They are deliberately not gated on `DRY_RUN`** — a dry-run
+engine still reads the real book, and the dashboard should reflect it.
+Gating the old Netlify Blobs "engine snapshot" on `is_live` is exactly what
+froze positions while orders stayed current.
 
-### Device challenge mode
-- If `rh.login()` times out (30s), Robinhood is requiring device approval via email
-- Engine enters device challenge mode and sleeps until 11 AM ET (configurable)
-- Check device challenge status: `GET /api/auth/status`
-
-### 429 rate limit storm (robin_stocks bug)
-- When a device challenge is triggered, `robin_stocks` polls `get_prompts_status` in a `while True` loop with no timeout
-- Our 30s login timeout kills the thread, but the damage is done — Robinhood 429s cascade
-- **Prevention:** ensure the pickle always has the correct static device token before login (handled by `_seed_device_token()`). If the device is trusted, the verification workflow is never triggered
-- This cannot be fixed without patching robin_stocks itself
+`post_positions` is a whole-book replace: symbols absent from the payload are
+deleted downstream, so a closed position disappears rather than lingering.
 
 ### Auth status endpoint
 - `GET /api/auth/status` — returns `authenticated`, `device_challenge_pending`, `email`
