@@ -4,6 +4,9 @@ POST {TRADING_DB_URL}/db-orders        — idempotent upsert keyed on order_id;
                                          accepts the engine-blob dump shape
                                          (open_orders / recent_orders /
                                          open_option_orders / recent_option_orders)
+POST {TRADING_DB_URL}/db-positions     — whole-book replace of the position
+                                         set (stock + option) plus the account
+                                         summary
 POST {TRADING_DB_URL}/db-bot-activity  — append-only events, de-duped on
                                          {order_id}:{status}
 
@@ -58,6 +61,35 @@ def post_orders(open_orders=None, recent_orders=None,
     if not body:
         return None
     return _post("/db-orders", body)
+
+
+def post_positions(positions=None, option_positions=None, account=None):
+    """Replace the stored position book with the engine's current view.
+
+    This is a whole-book replace, not a merge: the Trading DB drops any symbol
+    absent from the payload, so a closed position disappears instead of
+    lingering as a stale row. Callers must pass the complete book.
+
+    Args:
+        positions: Stock positions from BrokerClient.positions().
+        option_positions: Option positions from BrokerClient.options_positions().
+        account: Account summary from BrokerClient.account().
+
+    Returns:
+        The parsed response envelope, or None when the call failed or there
+        was nothing to send.
+    """
+    # An empty book is a meaningful payload — it clears every stale row — so
+    # only a call with nothing at all is treated as "nothing to send".
+    if positions is None and option_positions is None and account is None:
+        return None
+    body = {
+        "positions": [dict(p) for p in (positions or [])],
+        "option_positions": [dict(o) for o in (option_positions or [])],
+    }
+    if account:
+        body["account"] = dict(account)
+    return _post("/db-positions", body)
 
 
 def post_bot_activity(events):

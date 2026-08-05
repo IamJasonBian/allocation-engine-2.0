@@ -32,6 +32,37 @@ def test_post_orders_skips_when_empty():
         p.assert_not_called()
 
 
+def test_post_positions_whole_book_shape():
+    with mock.patch.object(tdb.requests, "post", return_value=_ok_response()) as p:
+        tdb.post_positions(
+            positions=[{"symbol": "AAPL", "qty": 3}],
+            option_positions=[{"chain_symbol": "IWN", "strike": 20}],
+            account={"equity": 100.0},
+        )
+        assert p.call_args.args[0].endswith("/db-positions")
+        assert p.call_args.kwargs["json"] == {
+            "positions": [{"symbol": "AAPL", "qty": 3}],
+            "option_positions": [{"chain_symbol": "IWN", "strike": 20}],
+            "account": {"equity": 100.0},
+        }
+
+
+def test_post_positions_sends_empty_book_to_clear_closed_names():
+    # An empty book is meaningful: it tells the DB to drop every stale row.
+    # It must post even with no account attached.
+    with mock.patch.object(tdb.requests, "post", return_value=_ok_response()) as p:
+        tdb.post_positions(positions=[], option_positions=[])
+        assert p.call_args.args[0].endswith("/db-positions")
+        assert p.call_args.kwargs["json"] == {"positions": [],
+                                              "option_positions": []}
+
+
+def test_post_positions_skips_when_nothing_to_send():
+    with mock.patch.object(tdb.requests, "post") as p:
+        assert tdb.post_positions() is None
+        p.assert_not_called()
+
+
 def test_post_bot_activity_shape():
     with mock.patch.object(tdb.requests, "post", return_value=_ok_response()) as p:
         tdb.post_bot_activity([{"order_id": "x", "type": "TRAILING_STOP_ORDER",
