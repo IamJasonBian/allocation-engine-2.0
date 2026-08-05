@@ -4,10 +4,10 @@ Writes timestamp-keyed snapshots to two stores:
   - option-positions-history/{ISO-timestamp}
   - option-orders-history/{ISO-timestamp}
 
-Unlike `blob_store.py` (which writes a single `latest` + timestamped copy in the
-equity-first `order-book` store), this module is options-only and history-only:
-every tick's option state is written to its own keyed blob so the series is
-reconstructable later. Listing is done via the existing `vend-blobs` Netlify
+This module is options-only and history-only: every tick's option state is
+written to its own keyed blob so the series is reconstructable later. Current
+option positions (as opposed to this history) live in the Trading DB — see
+`app/trading_db.py`. Listing is done via the existing `vend-blobs` Netlify
 function, matching the `options-chain` / `market-quotes` pattern.
 
 Order snapshots are deduplicated against the previous tick's hash to avoid

@@ -22,13 +22,10 @@ def get_broker(name: str) -> BrokerClient:
         )
     elif name == "robinhood":
         from app.brokers.robinhood_client import RobinhoodTrader
-        from app.config import Config
-        email, password = Config.rh_credentials()
+        # No credentials here — the auth-service box owns the Robinhood
+        # session and vends the access token (see app.box_session).
         client = RobinhoodTrader(
-            email=email,
-            password=password,
-            totp_secret=config.get("RH_TOTP_SECRET", ""),
-            pickle_name=config.get("RH_PICKLE_NAME", "taipei_session"),
+            email=config.get("RH_MAIN_EMAIL", ""),
             account_number=config.get("RH_AUTOMATED_ACCOUNT_NUMBER", ""),
         )
     else:

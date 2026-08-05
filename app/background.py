@@ -148,8 +148,6 @@ def start_engine_thread(app):
     from app.engine import AllocationEngine
     from app.runtime_client import RuntimeClient
     from app.redis_store import sync_to_redis
-    from app.blob_store import sync_to_blob
-    from app.state_log_store import sync_state_log
     from app.s3_store import sync_order_events
     from app.option_history_store import (
         put_position_snapshot as put_option_position_snapshot,
@@ -197,8 +195,8 @@ def start_engine_thread(app):
             _engine_status["dry_run"] = config["DRY_RUN"]
             interval = config["POLL_INTERVAL_SECONDS"]
             is_live = not config["DRY_RUN"]
-            blob_interval = 15 * 60  # 15 minutes
-            last_blob_sync = 0.0
+            s3_interval = 15 * 60  # 15 minutes
+            last_s3_sync = 0.0
             db_sync_interval = config.get("TRADING_DB_SYNC_SECONDS", 900)
             last_db_sync = 0.0
             retry_hour = config.get("RH_RETRY_HOUR_ET", 11)
@@ -513,9 +511,9 @@ def start_engine_thread(app):
 
                     # --- Trading DB write path (orders + positions) ---
                     # Not gated on is_live: dry-run engines still read the
-                    # real book and the frontend should reflect it. The blob
-                    # snapshot below IS gated, which is why its positions go
-                    # stale — this path is what replaces it.
+                    # real book and the frontend should reflect it. This is
+                    # the only positions path — the Netlify "engine snapshot"
+                    # blob it replaced was gated on is_live and went stale.
                     if (now_mono - last_db_sync) >= db_sync_interval:
                         try:
                             from app.trading_db import post_orders
@@ -554,27 +552,7 @@ def start_engine_thread(app):
 
                         last_db_sync = now_mono
 
-                    if is_live and (now_mono - last_blob_sync) >= blob_interval:
-                        try:
-                            sync_to_blob(
-                                positions, open_orders, account,
-                                options_positions=options_positions,
-                                option_orders=options_open_orders,
-                            )
-                            last_blob_sync = now_mono
-                        except Exception:
-                            log.exception("Blob sync error")
-
-                        # Sync state-log snapshot
-                        try:
-                            sync_state_log(
-                                positions, open_orders, account,
-                                options_positions=options_positions,
-                                order_events=all_order_events,
-                            )
-                        except Exception:
-                            log.exception("State-log sync error")
-
+                    if is_live and (now_mono - last_s3_sync) >= s3_interval:
                         # Sync order events to S3
                         try:
                             sync_order_events(
@@ -583,6 +561,7 @@ def start_engine_thread(app):
                                 options_positions=options_positions,
                                 account=account,
                             )
+                            last_s3_sync = now_mono
                         except Exception:
                             log.exception("S3 sync error")
 
