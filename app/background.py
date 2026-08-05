@@ -97,6 +97,41 @@ def _option_order_to_event(o: dict) -> OrderEvent:
     )
 
 
+EQUITY_HISTORY_LIMIT = int(os.getenv("EQUITY_HISTORY_LIMIT", "200"))
+
+
+def _equity_order_history(broker, limit: int = EQUITY_HISTORY_LIMIT) -> list[dict]:
+    """Recent filled/completed equity orders, shaped for the Trading DB.
+
+    ``order_history()`` names the average fill price ``price``, but the
+    Trading DB reads ``average_price`` and treats ``price`` only as a
+    limit-price fallback — so a straight passthrough would null out the fill
+    price and P&L would silently fall back to the limit. Copy it across.
+
+    Never raises: a history fetch failing must not cost us the rest of the
+    sync.
+
+    Args:
+        broker: The active BrokerClient.
+        limit: Maximum orders to fetch.
+
+    Returns:
+        Order dicts, or an empty list when the broker can't provide them.
+    """
+    if not hasattr(broker, "order_history"):
+        return []
+    try:
+        orders = broker.order_history(limit=limit) or []
+    except Exception:
+        log.exception("Failed to fetch equity order history")
+        return []
+
+    for o in orders:
+        if o.get("average_price") is None and o.get("price") is not None:
+            o["average_price"] = o["price"]
+    return orders
+
+
 def book_looks_unreadable(positions, options_positions, account) -> bool:
     """True when the broker read looks failed rather than genuinely flat.
 
@@ -515,10 +550,15 @@ def start_engine_thread(app):
                     # the only positions path — the Netlify "engine snapshot"
                     # blob it replaced was gated on is_live and went stale.
                     if (now_mono - last_db_sync) >= db_sync_interval:
+                        # Filled equity orders come from order_history(); the
+                        # open book alone would never grow the record, since
+                        # an order stops being "open" the moment it fills.
+                        recent_orders = _equity_order_history(broker)
                         try:
                             from app.trading_db import post_orders
                             res = post_orders(
                                 open_orders=open_orders,
+                                recent_orders=recent_orders,
                                 recent_option_orders=options_open_orders,
                             )
                             if res:
