@@ -97,6 +97,32 @@ def _option_order_to_event(o: dict) -> OrderEvent:
     )
 
 
+def book_looks_unreadable(positions, options_positions, account) -> bool:
+    """True when the broker read looks failed rather than genuinely flat.
+
+    ``RobinhoodTrader.account()`` degrades an empty profile/portfolio response
+    to zeros instead of raising, so a rejected session reads as a real but
+    empty account. Publishing that would prune the whole position book
+    downstream (``post_positions`` is a whole-book replace), so we treat
+    "nothing anywhere, including zero cash" as no data and skip the sync.
+
+    A genuinely emptied account still shows cash or buying power, so it does
+    not trip this and will clear normally.
+
+    Args:
+        positions: Stock positions from BrokerClient.positions().
+        options_positions: Option positions from the broker.
+        account: Account summary from BrokerClient.account().
+
+    Returns:
+        True when the read should be treated as unavailable.
+    """
+    if positions or options_positions:
+        return False
+    fields = ("equity", "cash", "buying_power", "portfolio_value")
+    return all(not float((account or {}).get(f) or 0) for f in fields)
+
+
 _engine_thread = None
 _engine_status = {
     "running": False,
@@ -503,18 +529,28 @@ def start_engine_thread(app):
                         except Exception:
                             log.exception("[trading-db] order sync error")
 
-                        try:
-                            from app.trading_db import post_positions
-                            res = post_positions(
-                                positions=positions,
-                                option_positions=options_positions,
-                                account=account,
-                            )
-                            if res:
-                                log.info("[trading-db] positions synced: %s",
-                                         res.get("data"))
-                        except Exception:
-                            log.exception("[trading-db] position sync error")
+                        # Never publish a book that looks like a failed read —
+                        # post_positions is a whole-book replace, so that
+                        # would prune every row the dashboard renders.
+                        if book_looks_unreadable(positions, options_positions,
+                                                 account):
+                            log.warning(
+                                "[trading-db] skipping position sync — broker "
+                                "returned no positions and a zeroed account "
+                                "(treating as a failed read, not a flat book)")
+                        else:
+                            try:
+                                from app.trading_db import post_positions
+                                res = post_positions(
+                                    positions=positions,
+                                    option_positions=options_positions,
+                                    account=account,
+                                )
+                                if res:
+                                    log.info("[trading-db] positions synced: %s",
+                                             res.get("data"))
+                            except Exception:
+                                log.exception("[trading-db] position sync error")
 
                         last_db_sync = now_mono
 
