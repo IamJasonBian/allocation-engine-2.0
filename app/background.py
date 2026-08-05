@@ -485,9 +485,11 @@ def start_engine_thread(app):
 
                     now_mono = time.monotonic()
 
-                    # --- Trading DB write path (stock + option orders) ---
+                    # --- Trading DB write path (orders + positions) ---
                     # Not gated on is_live: dry-run engines still read the
-                    # real book and the frontend should reflect it.
+                    # real book and the frontend should reflect it. The blob
+                    # snapshot below IS gated, which is why its positions go
+                    # stale — this path is what replaces it.
                     if (now_mono - last_db_sync) >= db_sync_interval:
                         try:
                             from app.trading_db import post_orders
@@ -498,9 +500,23 @@ def start_engine_thread(app):
                             if res:
                                 log.info("[trading-db] orders synced: %s",
                                          res.get("data"))
-                            last_db_sync = now_mono
                         except Exception:
                             log.exception("[trading-db] order sync error")
+
+                        try:
+                            from app.trading_db import post_positions
+                            res = post_positions(
+                                positions=positions,
+                                option_positions=options_positions,
+                                account=account,
+                            )
+                            if res:
+                                log.info("[trading-db] positions synced: %s",
+                                         res.get("data"))
+                        except Exception:
+                            log.exception("[trading-db] position sync error")
+
+                        last_db_sync = now_mono
 
                     if is_live and (now_mono - last_blob_sync) >= blob_interval:
                         try:
