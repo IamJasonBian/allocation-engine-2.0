@@ -17,6 +17,7 @@ Three timeouts, mirroring the sketch:
 
 import json
 import logging
+import os
 import threading
 import time
 import uuid
@@ -34,6 +35,51 @@ log = logging.getLogger("session")
 CALLER_TIMEOUT = 200
 LOGIN_HTTP_TIMEOUT = 10
 APPROVAL_DEADLINE = 180
+
+# How often the cached token is checked against Robinhood rather than the
+# clock. `expires_at` only says when the token *would* lapse; it says nothing
+# about a server-side revocation. On 2026-08-04 Robinhood revoked the session
+# ~18h before its stated expiry and every consumer 401'd for a day while
+# /auth/status kept reporting authenticated — the clock check can't see that.
+# Verifying costs one GET /user/, so do it periodically, not per vend.
+VERIFY_INTERVAL = int(os.getenv("TOKEN_VERIFY_INTERVAL", "300"))
+
+_verify_lock = threading.Lock()
+# profile_id -> (access_token, monotonic_ts, ok)
+_verified: dict[str, tuple[str, float, bool]] = {}
+
+
+def _verify_cached(profile_id: str, session) -> bool:
+    """Is `session` still good at Robinhood? Throttled per profile+token.
+
+    A negative result is never cached: once a token fails we want the next
+    caller to re-drive auth rather than wait out the interval.
+    """
+    if session is None or not session.access_token:
+        return False
+    now = time.monotonic()
+    with _verify_lock:
+        prev = _verified.get(profile_id)
+        if (prev and prev[0] == session.access_token
+                and prev[2] and now - prev[1] < VERIFY_INTERVAL):
+            return True
+
+    ok = robinhood.check_token_valid(session, verify=True)
+    with _verify_lock:
+        if ok:
+            _verified[profile_id] = (session.access_token, now, True)
+        else:
+            _verified.pop(profile_id, None)
+    if not ok:
+        log.warning("cached token for %s rejected by Robinhood despite "
+                    "expires_at=%s — forcing re-auth",
+                    profile_id, getattr(session, "expires_at", None))
+    return ok
+
+
+def _forget_verification(profile_id: str) -> None:
+    with _verify_lock:
+        _verified.pop(profile_id, None)
 
 _STATE_DIR = Path(config.STATE_DIR)
 _lock = threading.Lock()
@@ -154,8 +200,12 @@ def get_session(profile_id: str = "rh.auth", force: bool = False) -> AuthResult:
     """
     if not force:
         cached = load(profile_id)
-        if robinhood.check_token_valid(cached):
+        # Clock first (cheap), then Robinhood itself (throttled). A token can
+        # be locally unexpired and still revoked server-side.
+        if robinhood.check_token_valid(cached) and _verify_cached(profile_id, cached):
             return AuthResult("OK", session=cached)
+    else:
+        _forget_verification(profile_id)
 
     with _lock:
         task = _inflight.get(profile_id)
@@ -187,13 +237,23 @@ def get_session(profile_id: str = "rh.auth", force: bool = False) -> AuthResult:
         return AuthResult("ERROR", error_code="AUTH_EXCEPTION", detail=str(e))
 
 
-def status(profile_id: str = "rh.auth") -> dict:
-    """Auth status for callers / alerting — never triggers a login."""
+def status(profile_id: str = "rh.auth", verify: bool = True) -> dict:
+    """Auth status for callers / alerting — never triggers a login.
+
+    ``authenticated`` means Robinhood still accepts the token, not merely that
+    the clock hasn't passed ``expires_at``. Reporting the clock is what let a
+    revoked session look healthy for a day. ``token_verified`` distinguishes a
+    confirmed-good token from one we only know is unexpired.
+    """
     session = load(profile_id)
-    valid = robinhood.check_token_valid(session)
+    unexpired = robinhood.check_token_valid(session)
+    verified = _verify_cached(profile_id, session) if (verify and unexpired) else None
     return {
         "profile": profile_id,
-        "authenticated": valid,
+        "authenticated": unexpired if verified is None else verified,
+        "token_unexpired": unexpired,
+        "token_verified": verified,
+        "verify_interval": VERIFY_INTERVAL,
         "expires_at": session.expires_at if session else None,
         "account_number": session.account_number if session else None,
     }
