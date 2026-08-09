@@ -117,6 +117,75 @@ class IBKRTrader(BrokerClient):
             })
         return out
 
+    def portfolio_detail(self) -> list[dict]:
+        """Portfolio rows with contract detail preserved (options included).
+
+        positions() flattens to the cross-broker shape and drops option
+        fields; the wheel-lanes view needs sec_type/right/strike/expiry to
+        tell a short put from a covered call, so this keeps them.
+        """
+        ib = self._connect()
+        out = []
+        for item in ib.portfolio():
+            contract = item.contract
+            sec_type = getattr(contract, "secType", None)
+            out.append({
+                "symbol": contract.symbol,
+                "sec_type": sec_type,
+                "right": getattr(contract, "right", None) if sec_type == "OPT" else None,
+                "strike": float(contract.strike) if sec_type == "OPT" else None,
+                "expiry": getattr(contract, "lastTradeDateOrContractMonth", None)
+                          if sec_type == "OPT" else None,
+                "qty": float(item.position),
+                "avg_cost": float(item.averageCost),
+                "market_value": float(item.marketValue),
+                "unrealized_pl": float(item.unrealizedPNL),
+            })
+        return out
+
+    def session_trades(self) -> list[dict]:
+        """Every order this API session has seen (open and terminal), for the
+        order funnel. Scope is the session: IBKR replays only this clientId's
+        orders on connect, so counts reset when the socket does.
+        """
+        ib = self._connect()
+        out = []
+        for trade in ib.trades():
+            order = trade.order
+            status = trade.orderStatus
+            is_limit = order.orderType in ("LMT", "STP LMT")
+            out.append({
+                "id": str(order.orderId),
+                "symbol": trade.contract.symbol,
+                "sec_type": getattr(trade.contract, "secType", None),
+                "side": order.action.lower(),
+                "qty": float(order.totalQuantity),
+                "order_type": _IB_TYPE_MAP.get(order.orderType, order.orderType.lower()),
+                "limit_price": float(order.lmtPrice) if is_limit else None,
+                "status": status.status,
+                "filled_qty": float(status.filled),
+                "avg_fill_price": float(status.avgFillPrice) or None,
+            })
+        return out
+
+    def executions(self) -> list[dict]:
+        """Today's fills (reqExecutions covers the day, not just this session)."""
+        ib = self._connect()
+        out = []
+        for fill in ib.reqExecutions():
+            ex = fill.execution
+            out.append({
+                "exec_id": ex.execId,
+                "order_id": str(ex.orderId),
+                "symbol": fill.contract.symbol,
+                "sec_type": getattr(fill.contract, "secType", None),
+                "side": "buy" if ex.side == "BOT" else "sell",
+                "qty": float(ex.shares),
+                "price": float(ex.price),
+                "time": str(ex.time),
+            })
+        return out
+
     def open_orders(self) -> list[dict]:
         ib = self._connect()
         out = []

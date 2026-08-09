@@ -46,6 +46,8 @@ class FakeIB:
         self._summary = []
         self._portfolio = []
         self._open_trades = []
+        self._trades = []
+        self._executions = []
 
     def isConnected(self):
         return self.connected
@@ -61,6 +63,12 @@ class FakeIB:
 
     def openTrades(self):
         return self._open_trades
+
+    def trades(self):
+        return self._trades
+
+    def reqExecutions(self):
+        return self._executions
 
     def qualifyContracts(self, contract):
         return [contract]
@@ -221,3 +229,70 @@ def test_registry_creates_ibkr_from_config(fake_ib):
     assert isinstance(client, IBKRTrader)
     assert client.client_id == 9
     brokers.clear_broker("ibkr")
+
+
+def test_portfolio_detail_keeps_option_fields(trader, fake_ib):
+    fake_ib._portfolio = [
+        SimpleNamespace(
+            contract=SimpleNamespace(symbol="AMD", secType="STK"),
+            position=100.0, marketValue=9700.0, averageCost=95.0,
+            unrealizedPNL=200.0,
+        ),
+        SimpleNamespace(
+            contract=SimpleNamespace(
+                symbol="AMD", secType="OPT", right="C", strike=105.0,
+                lastTradeDateOrContractMonth="20260918",
+            ),
+            position=-1.0, marketValue=-120.0, averageCost=180.0,
+            unrealizedPNL=60.0,
+        ),
+    ]
+    stk, opt = trader.portfolio_detail()
+    assert stk["sec_type"] == "STK"
+    assert stk["right"] is None and stk["strike"] is None and stk["expiry"] is None
+    assert opt == {
+        "symbol": "AMD", "sec_type": "OPT", "right": "C", "strike": 105.0,
+        "expiry": "20260918", "qty": -1.0, "avg_cost": 180.0,
+        "market_value": -120.0, "unrealized_pl": 60.0,
+    }
+
+
+def test_session_trades_maps_status_and_limit(trader, fake_ib):
+    fake_ib._trades = [
+        SimpleNamespace(
+            contract=SimpleNamespace(symbol="SPY", secType="OPT"),
+            order=SimpleNamespace(orderId=11, action="SELL", totalQuantity=1.0,
+                                  orderType="LMT", lmtPrice=1.25),
+            orderStatus=SimpleNamespace(status="Filled", filled=1.0,
+                                        avgFillPrice=1.27),
+        ),
+        SimpleNamespace(
+            contract=SimpleNamespace(symbol="IWN", secType="STK"),
+            order=SimpleNamespace(orderId=12, action="BUY", totalQuantity=5.0,
+                                  orderType="MKT"),
+            orderStatus=SimpleNamespace(status="Submitted", filled=0.0,
+                                        avgFillPrice=0.0),
+        ),
+    ]
+    filled, working = trader.session_trades()
+    assert filled["status"] == "Filled"
+    assert filled["limit_price"] == 1.25
+    assert filled["avg_fill_price"] == 1.27
+    assert working["limit_price"] is None
+    assert working["avg_fill_price"] is None
+    assert working["order_type"] == OrderType.MARKET
+
+
+def test_executions_maps_side_codes(trader, fake_ib):
+    fake_ib._executions = [
+        SimpleNamespace(
+            contract=SimpleNamespace(symbol="AMD", secType="STK"),
+            execution=SimpleNamespace(execId="e1", orderId=11, side="SLD",
+                                      shares=100.0, price=96.1,
+                                      time="2026-08-09 14:30:00"),
+        ),
+    ]
+    (ex,) = trader.executions()
+    assert ex["side"] == "sell"
+    assert ex["order_id"] == "11"
+    assert ex["price"] == 96.1
