@@ -48,7 +48,8 @@
       "eas": {
         "projectId": "REPLACE_WITH_EAS_PROJECT_ID_AFTER_RUNNING_eas_init"
       },
-      "dashboardUrl": "https://allocation-engine-dashboard.netlify.app"
+      "dashboardUrl": "https://allocation-engine-dashboard.netlify.app",
+      "dashboardToken": ""
     }
   }
 }

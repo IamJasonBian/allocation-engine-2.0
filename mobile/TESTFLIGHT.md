@@ -11,10 +11,14 @@ same EAS profiles, same privacy-manifest block.
   `AuthKey_*.p8` / fastlane / Team ID exists anywhere on disk. There are no
   reusable Apple credentials to inherit — the checklist below is the same one
   Branchwing stopped at.
-- "CDK auth" ≈ **Clerk auth**: Branchwing carries `@clerk/expo@^3.2.5` and the
-  reflight api-server has `clerkProxyMiddleware.ts`. Nothing AWS-CDK exists in
-  any project here. The dashboard is public-read today, so the shell ships
-  without auth; when a private surface appears, port Branchwing's Clerk flow.
+- **Auth is this repo's own request-token scheme** — the same one the
+  deployed stack already runs (`auth-service/gen_token.py` mints
+  `secrets.token_urlsafe(32)`; the box requires `Authorization: Bearer …`;
+  Render carries it as `RH_AUTH_SERVICE_REQUEST_TOKEN`). The dashboard reuses
+  it: the render-logs function requires `Bearer DASHBOARD_REQUEST_TOKEN`
+  (Netlify env, fail closed), the page accepts `?token=…` once and moves it to
+  localStorage, and this shell injects it from `app.json → extra.dashboardToken`.
+  Portfolio reads stay public Trading DB functions, matching the live site.
 
 ## One-time interactive steps (must be you — Apple 2FA)
 

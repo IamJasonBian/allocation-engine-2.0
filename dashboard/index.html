@@ -296,14 +296,26 @@
   }
 
   // ── Render service logs (via the Netlify function; key never in the page) ──
+  // Auth follows the repo's request-token scheme (auth-service/gen_token.py):
+  // pass ?token=… once — it moves to localStorage and off the URL.
   const FNS = new URLSearchParams(location.search).get("fns")
            || (location.origin.startsWith("http") ? location.origin : "") + "/.netlify/functions";
+  const qs = new URLSearchParams(location.search);
+  if (qs.get("token")) {
+    localStorage.setItem("dash.request_token", qs.get("token"));
+    qs.delete("token");
+    history.replaceState(null, "", location.pathname + (qs.size ? "?" + qs : ""));
+  }
+  const TOKEN = localStorage.getItem("dash.request_token") || "";
   let logService = "worker";
 
   async function loadLogs() {
     const box = $("rlogs");
     try {
-      const r = await fetch(`${FNS}/render-logs?service=${logService}&limit=40`);
+      const r = await fetch(`${FNS}/render-logs?service=${logService}&limit=40`, {
+        headers: TOKEN ? { Authorization: `Bearer ${TOKEN}` } : {},
+      });
+      if (r.status === 401) throw new Error("unauthorized — open once with ?token=<request token>");
       if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.status);
       const d = await r.json();
       $("rtabs").innerHTML = (d.services || ["api", "worker", "feed"]).map(s =>

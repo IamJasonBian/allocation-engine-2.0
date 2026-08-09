@@ -7,6 +7,10 @@
 //   RENDER_SERVICE_IDS  optional "label:srv-id,label:srv-id" — defaults to the
 //                       three services in CLAUDE.md
 //
+// Inbound auth mirrors auth-service/gen_token.py: callers send
+// `Authorization: Bearer <DASHBOARD_REQUEST_TOKEN>`. Fail closed — no token
+// configured means no logs, same rule as the box's EXEC_TOKEN.
+//
 // GET /.netlify/functions/render-logs?service=<label>&limit=40
 
 const DEFAULT_SERVICES = {
@@ -39,6 +43,18 @@ function label(entry, name) {
 
 export default async (req) => {
   if (req.method === "OPTIONS") return new Response("", { headers: CORS });
+
+  const required = process.env.DASHBOARD_REQUEST_TOKEN;
+  if (!required) {
+    return Response.json(
+      { error: "DASHBOARD_REQUEST_TOKEN not configured" },
+      { status: 503, headers: CORS },
+    );
+  }
+  const sent = (req.headers.get("authorization") || "").replace(/^Bearer\s+/i, "");
+  if (sent !== required) {
+    return Response.json({ error: "unauthorized" }, { status: 401, headers: CORS });
+  }
 
   const key = process.env.RENDER_API_KEY;
   const owner = process.env.RENDER_OWNER_ID;

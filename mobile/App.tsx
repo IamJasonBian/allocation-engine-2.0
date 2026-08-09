@@ -3,9 +3,10 @@
  *
  * A WebView over the deployed Netlify dashboard: one codebase, the app always
  * shows what the web shows. The URL comes from app.json `extra.dashboardUrl`.
- * Auth: none yet — the dashboard reads public Trading DB functions. When it
- * grows a private surface, `@clerk/expo` is the piece to port from Branchwing
- * (reflight/artifacts/branchwing), which already carries the session flow.
+ * Auth: the repo's request-token scheme (auth-service/gen_token.py). Set
+ * `extra.dashboardToken` and the shell opens the page with ?token=… once;
+ * the page moves it into localStorage and sends it as a Bearer header to
+ * the render-logs function. Portfolio reads stay public Trading DB calls.
  */
 
 import Constants from "expo-constants";
@@ -14,9 +15,11 @@ import React, { useRef, useState } from "react";
 import { ActivityIndicator, Pressable, SafeAreaView, StyleSheet, Text, View } from "react-native";
 import { WebView } from "react-native-webview";
 
-const DASHBOARD_URL: string =
+const BASE_URL: string =
   Constants.expoConfig?.extra?.dashboardUrl ??
   "https://allocation-engine-dashboard.netlify.app";
+const TOKEN: string = Constants.expoConfig?.extra?.dashboardToken ?? "";
+const DASHBOARD_URL = TOKEN ? `${BASE_URL}/?token=${encodeURIComponent(TOKEN)}` : BASE_URL;
 
 export default function App() {
   const webref = useRef<WebView>(null);
