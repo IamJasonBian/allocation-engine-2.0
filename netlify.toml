@@ -1,0 +1,9 @@
+# Netlify deploy of the dashboard: static page + the render-logs function.
+# The Render services themselves keep deploying from main via Render — this
+# site only publishes dashboard/ and proxies their logs.
+[build]
+  publish = "dashboard"
+  command = ""
+
+[functions]
+  directory = "netlify/functions"

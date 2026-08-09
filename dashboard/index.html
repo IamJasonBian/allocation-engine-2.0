@@ -100,10 +100,24 @@
   .ev{display:flex;gap:12px;align-items:center;font-size:.72rem;
       padding:.5rem .8rem;border-bottom:1px solid var(--rule)}
   .ev:last-child{border-bottom:none}
+  .ev .d{width:118px;flex-shrink:0;color:var(--ink-45);font-size:.66rem}
   .ev .t{width:190px;color:var(--ink-60);font-size:.6rem;letter-spacing:.12em;text-transform:uppercase}
   .ev .s{width:84px;font-weight:700;color:var(--ink)}
   .ev .m{color:var(--ink-60);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
   .err{color:var(--hw-accent);font-size:.78rem}
+
+  /* Render logs — terminal strip on the blue ground, like the stat strip */
+  .logs{border:1px solid var(--fg-40);padding:18px 20px}
+  .rtabs{display:inline-flex;gap:6px}
+  .rtab{font-family:var(--mono);font-size:.62rem;letter-spacing:.1em;text-transform:uppercase;
+        background:none;border:1px solid var(--fg-40);color:var(--fg-60);
+        padding:.15rem .6rem;cursor:pointer}
+  .rtab.on{background:var(--hw-accent);border-color:var(--hw-accent);color:var(--hw-bg)}
+  .lnbox{max-height:340px;overflow-y:auto;font-size:.7rem;line-height:1.55}
+  .ln{display:flex;gap:12px;white-space:nowrap}
+  .ln .lt{color:var(--fg-40);flex-shrink:0}
+  .ln .lm{color:var(--fg-60);overflow:hidden;text-overflow:ellipsis}
+  .ln.lnerr .lm{color:var(--hw-accent)}
 
   ::-webkit-scrollbar{width:8px;height:8px}
   ::-webkit-scrollbar-track{background:transparent}
@@ -155,6 +169,13 @@
   <div class="wrap">
     <div class="eyebrow">Bot activity</div>
     <div class="feed" id="activity"></div>
+  </div>
+
+  <div class="logs">
+    <div class="eyebrow" style="display:flex;gap:10px;align-items:center;margin-bottom:12px">
+      Render logs <span id="rtabs" class="rtabs"></span>
+    </div>
+    <div class="lnbox" id="rlogs"><div class="ln"><span class="lm">loading…</span></div></div>
   </div>
 </div>
 <div id="tip"></div>
@@ -260,9 +281,12 @@
     }).join("");
   }
 
+  const stamp = iso => iso ? `${iso.slice(0, 10)} ${iso.slice(11, 16)}` : "—";
+
   function renderActivity(events) {
     $("activity").innerHTML = events.slice(0, 20).map(e => `
       <div class="ev">
+        <span class="d">${esc(stamp(e.created_at))}</span>
         <span class="t">${esc(e.event_type ?? "")}</span>
         <span class="s">${esc(e.status ?? "")}</span>
         <span class="m">${esc(e.symbol ?? "")} ${e.quantity ? "×" + e.quantity : ""}
@@ -270,6 +294,35 @@
         ${e.dry_run ? '<span class="tag">dry run</span>' : ""}
       </div>`).join("");
   }
+
+  // ── Render service logs (via the Netlify function; key never in the page) ──
+  const FNS = new URLSearchParams(location.search).get("fns")
+           || (location.origin.startsWith("http") ? location.origin : "") + "/.netlify/functions";
+  let logService = "worker";
+
+  async function loadLogs() {
+    const box = $("rlogs");
+    try {
+      const r = await fetch(`${FNS}/render-logs?service=${logService}&limit=40`);
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.status);
+      const d = await r.json();
+      $("rtabs").innerHTML = (d.services || ["api", "worker", "feed"]).map(s =>
+        `<button class="rtab${s === logService ? " on" : ""}" data-s="${esc(s)}">${esc(s)}</button>`
+      ).join("");
+      box.innerHTML = (d.logs || []).map(l => `
+        <div class="ln${l.level === "error" ? " lnerr" : ""}">
+          <span class="lt">${esc(stamp(l.timestamp))}</span>
+          <span class="lm">${esc(l.message)}</span>
+        </div>`).join("") || '<div class="ln"><span class="lm">no log lines returned</span></div>';
+    } catch (e) {
+      box.innerHTML = `<div class="ln"><span class="lm">render logs unavailable (${esc(e.message)}) — ` +
+        `serve via Netlify or pass ?fns=&lt;functions base&gt;</span></div>`;
+    }
+  }
+  document.addEventListener("click", e => {
+    const b = e.target.closest(".rtab");
+    if (b) { logService = b.dataset.s; loadLogs(); }
+  });
 
   async function load() {
     try {
@@ -300,7 +353,9 @@
   }
 
   load();
+  loadLogs();
   setInterval(load, 60000);
+  setInterval(loadLogs, 60000);
 </script>
 </body>
 </html>
