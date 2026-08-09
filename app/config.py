@@ -50,6 +50,9 @@ class Config:
     STOP_SWEEP_DRY_RUN = os.getenv("STOP_SWEEP_DRY_RUN", "true").lower() == "true"
     # Earliest ET hour for the daily sweep (0 = first tick of the day).
     STOP_SWEEP_HOUR_ET = int(os.getenv("STOP_SWEEP_HOUR_ET", "0"))
+    # Vol-scaled trail percentages (docs/TRAILING_STOP_WATERFALL.md).
+    # Off = flat STOP_TRAIL_PERCENT, byte-for-byte today's behavior.
+    STOP_VOL_SCALED = os.getenv("STOP_VOL_SCALED", "false").lower() == "true"
     STOP_DB_PATH = os.getenv(
         "STOP_DB_PATH",
         os.path.join(os.path.dirname(__file__), "..", "data", "stops.sqlite3"),

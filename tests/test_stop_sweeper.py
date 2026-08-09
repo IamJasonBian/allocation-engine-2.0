@@ -313,3 +313,73 @@ def test_prune_removes_rows_gone_from_rh(store):
     out = sweep(c, store, ["AAPL"])
     assert out["pruned"] == ["IWN"]
     assert store.get("IWN") is None
+
+
+# --------------------------------------------------------------------------- #
+# vol-scaled trail percentages (compute_trail_percents)
+# --------------------------------------------------------------------------- #
+
+def _weighted_avg(mvs, trails):
+    total = sum(mvs.values())
+    return sum(mvs[s] / total * trails[s] for s in mvs)
+
+
+def test_trail_invariant_holds_exactly_without_quantize():
+    mvs = {"AAPL": 5000, "TSLA": 3000, "KO": 2000}
+    sigmas = {"AAPL": 0.25, "TSLA": 0.45, "KO": 0.12}
+    trails = sw.compute_trail_percents(mvs, sigmas, quantum=0)
+    assert abs(_weighted_avg(mvs, trails) - sw.TRAIL_PERCENT) < 1e-9
+    assert trails["TSLA"] > trails["AAPL"] > trails["KO"]
+
+
+def test_trail_clamps_and_renormalizes_within_tolerance():
+    mvs = {"MEME": 1000, "BOND": 9000}
+    sigmas = {"MEME": 2.0, "BOND": 0.05}   # extreme spread forces both clamps
+    trails = sw.compute_trail_percents(mvs, sigmas, quantum=0)
+    assert all(sw.TRAIL_FLOOR <= t <= sw.TRAIL_CAP for t in trails.values())
+    assert abs(_weighted_avg(mvs, trails) - sw.TRAIL_PERCENT) <= 0.1
+
+
+def test_trail_single_symbol_gets_flat_budget():
+    trails = sw.compute_trail_percents({"AAPL": 1000}, {"AAPL": 0.3})
+    assert trails == {"AAPL": sw.TRAIL_PERCENT}
+
+
+def test_trail_degenerate_sigma_falls_back_flat():
+    mvs = {"AAPL": 5000, "NOSIG": 5000, "ZEROSIG": 1000}
+    sigmas = {"AAPL": 0.3, "ZEROSIG": 0.0}
+    trails = sw.compute_trail_percents(mvs, sigmas, quantum=0)
+    assert trails["NOSIG"] == sw.TRAIL_PERCENT
+    assert trails["ZEROSIG"] == sw.TRAIL_PERCENT
+    # AAPL is the whole scaled pool -> its own weighted mean -> flat too
+    assert abs(trails["AAPL"] - sw.TRAIL_PERCENT) < 1e-9
+
+
+def test_trail_empty_sigmas_is_flat_16_compatible():
+    mvs = {"AAPL": 5000, "IWN": 3000}
+    trails = sw.compute_trail_percents(mvs, {})
+    assert trails == {"AAPL": sw.TRAIL_PERCENT, "IWN": sw.TRAIL_PERCENT}
+
+
+def test_trail_quantizes_to_half_percent_steps():
+    mvs = {"AAPL": 5000, "TSLA": 3000, "KO": 2000}
+    sigmas = {"AAPL": 0.25, "TSLA": 0.45, "KO": 0.12}
+    trails = sw.compute_trail_percents(mvs, sigmas)
+    for t in trails.values():
+        assert abs(t / sw.TRAIL_QUANTUM - round(t / sw.TRAIL_QUANTUM)) < 1e-9
+
+
+def test_sweep_uses_trail_map_per_symbol(store):
+    c = FakeClient()
+    sweep(c, store, ["AAPL", "IWN"],
+          trail_map={"AAPL": 12.5, "IWN": 20.0})
+    pegs = {p["symbol"]: float(p["trailing_peg"]["percentage"])
+            for p, _ in c.placed}
+    assert pegs == {"AAPL": 12.5, "IWN": 20.0}
+
+
+def test_sweep_without_trail_map_stays_flat(store):
+    c = FakeClient()
+    sweep(c, store, ["AAPL"])
+    payload, _ = c.placed[0]
+    assert float(payload["trailing_peg"]["percentage"]) == sw.TRAIL_PERCENT

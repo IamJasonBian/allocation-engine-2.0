@@ -107,3 +107,46 @@ each on top of the IBKR broker client.
   replace path. No schema rollback needed.
 
 *Exit:* one renewal cycle live with the invariant holding; plan closed.
+
+## Gaps — ticker service vs this plan (checked 2026-08-09)
+
+Findings from checking the market-data-service (Scala → Redis `market-quotes`)
+against the trailing-stop implementation. These block or shape Phase 1's
+σ-source decision:
+
+- [ ] **No σ source exists today.** The ticker service publishes bid/ask/mid
+  quotes only — no OHLC, no daily closes. Its `market-quotes:history` list
+  holds ~8 hours (3s polls, LTRIM 10000), so a 20-day close-to-close σ cannot
+  be computed from Redis. Either commit to IBKR daily bars via the gateway, or
+  add a daily-close rollup to the Scala service (it already speaks Alpaca —
+  a bars poller writing ~20 closes/symbol to a `market-closes` key is small).
+- [ ] **Downstream mirrors are empty/stale.** The runtime service's
+  `/api/market-data` serves a stale snapshot (`ticker_metrics: {}`, May 2026)
+  and the Netlify Blobs `market-quotes` archive store lists zero blobs. Fix or
+  retire before naming either as the σ source.
+- [ ] **Sweeper prices bypass the ticker service.** `sweep()` sets the initial
+  `stop_price` from position-implied price (`market_value / qty`), which can
+  be a stale RH mark; live quotes in Redis go unused. Decide whether stops
+  should price off the ticker service mid when fresh.
+- [ ] **Universe mismatch is silent.** Sweep universe is
+  `STOP_TICKERS ∪ book`; the quote poller has its own symbol list. Symbols
+  the σ source doesn't cover fall back to flat 16% — the fallback log line
+  must make these visible during the Phase-4 soak.
+- [ ] **Estimator discipline.** If σ is ever computed from intraday mids
+  instead of daily closes, spread jitter inflates σ for thin names — stay on
+  closes (the payload's `spread_bps` can gate outliers if needed).
+- [ ] **Replace-path deadband not yet wired.** `compute_trail_percents()` and
+  the `trail_map` sweep parameter are in (see below), but the ≥1% replace
+  deadband only matters once live stops are re-trailed on σ change — wire it
+  with the σ fetch in Phase 3.
+
+### Status note
+
+`compute_trail_percents(market_values, sigmas)` landed as the Phase-2 pure
+function in `stop_sweeper.py`: budget invariant with worst-violator-first
+clamp/renormalize, 0.5% quantize, flat-budget fallback per degenerate symbol.
+`sweep()` accepts a per-symbol `trail_map`, and the background loop builds one
+behind `STOP_VOL_SCALED` (default off = flat 16%, byte-for-byte). With no σ
+source wired, the flag-on path also degrades to flat 16% per symbol, logged —
+so the implementation is 16%-compatible in every configuration until a σ
+source from the gaps above is chosen.
