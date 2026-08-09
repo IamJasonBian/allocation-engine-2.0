@@ -1,0 +1,223 @@
+"""Tests for the IBKR broker client — mapping logic against a fake ib_insync.
+
+No gateway, no network: a stub ib_insync module is injected into sys.modules
+so the client's dict-mapping (the part this repo owns) is what's under test.
+"""
+
+import sys
+import types
+from types import SimpleNamespace
+
+import pytest
+
+from app.enums import OrderSide, OrderType
+
+
+def _fake_ib_insync(ib):
+    """Build a module-shaped stub whose IB() returns the given fake."""
+    mod = types.ModuleType("ib_insync")
+    mod.IB = lambda: ib
+    mod.Stock = lambda symbol, exchange, currency: SimpleNamespace(
+        symbol=symbol, exchange=exchange, currency=currency
+    )
+    for name, fields in {
+        "MarketOrder": ("action", "totalQuantity"),
+        "LimitOrder": ("action", "totalQuantity", "lmtPrice"),
+        "StopOrder": ("action", "totalQuantity", "auxPrice"),
+        "StopLimitOrder": ("action", "totalQuantity", "lmtPrice", "auxPrice"),
+    }.items():
+        def make(name=name, fields=fields):
+            def ctor(*args):
+                ns = SimpleNamespace(orderType=name, tif=None)
+                for f, v in zip(fields, args):
+                    setattr(ns, f, v)
+                return ns
+            return ctor
+        setattr(mod, name, make())
+    return mod
+
+
+class FakeIB:
+    def __init__(self):
+        self.connected = False
+        self.placed = []          # (contract, order) pairs
+        self.cancelled = []
+        self.global_cancels = 0
+        self._summary = []
+        self._portfolio = []
+        self._open_trades = []
+
+    def isConnected(self):
+        return self.connected
+
+    def connect(self, host, port, clientId):
+        self.connected = True
+
+    def accountSummary(self):
+        return self._summary
+
+    def portfolio(self):
+        return self._portfolio
+
+    def openTrades(self):
+        return self._open_trades
+
+    def qualifyContracts(self, contract):
+        return [contract]
+
+    def placeOrder(self, contract, order):
+        self.placed.append((contract, order))
+        return SimpleNamespace(
+            order=SimpleNamespace(orderId=101),
+            orderStatus=SimpleNamespace(status="Submitted"),
+        )
+
+    def cancelOrder(self, order):
+        self.cancelled.append(order.orderId)
+
+    def reqGlobalCancel(self):
+        self.global_cancels += 1
+
+
+@pytest.fixture
+def fake_ib(monkeypatch):
+    ib = FakeIB()
+    monkeypatch.setitem(sys.modules, "ib_insync", _fake_ib_insync(ib))
+    return ib
+
+
+@pytest.fixture
+def trader(fake_ib):
+    from app.brokers.ibkr_client import IBKRTrader
+
+    return IBKRTrader(host="127.0.0.1", port=4002, client_id=1, paper=True)
+
+
+def test_account_maps_summary_tags(trader, fake_ib):
+    fake_ib._summary = [
+        SimpleNamespace(tag="NetLiquidation", value="10000.5"),
+        SimpleNamespace(tag="TotalCashValue", value="2500"),
+        SimpleNamespace(tag="BuyingPower", value="5000"),
+    ]
+    acct = trader.account()
+    assert acct == {
+        "equity": 10000.5,
+        "cash": 2500.0,
+        "buying_power": 5000.0,
+        "portfolio_value": 10000.5,
+    }
+
+
+def test_account_missing_tags_read_as_zero(trader, fake_ib):
+    fake_ib._summary = []
+    assert trader.account()["equity"] == 0.0
+
+
+def test_positions_standardized_keys(trader, fake_ib):
+    fake_ib._portfolio = [
+        SimpleNamespace(
+            contract=SimpleNamespace(symbol="IWN"),
+            position=10.0, marketValue=1200.0, averageCost=100.0,
+            unrealizedPNL=200.0,
+        )
+    ]
+    (pos,) = trader.positions()
+    assert pos["symbol"] == "IWN"
+    assert pos["qty"] == 10.0
+    assert pos["side"] == "long"
+    assert pos["avg_entry"] == 100.0
+    assert pos["unrealized_pl"] == 200.0
+    assert pos["unrealized_pl_pct"] == pytest.approx(0.2)
+
+
+def test_open_orders_maps_ib_order_types(trader, fake_ib):
+    fake_ib._open_trades = [
+        SimpleNamespace(
+            contract=SimpleNamespace(symbol="CRWD"),
+            order=SimpleNamespace(
+                orderId=7, action="BUY", totalQuantity=2.0,
+                orderType="STP LMT", lmtPrice=350.0, auxPrice=349.0,
+            ),
+            orderStatus=SimpleNamespace(status="PreSubmitted"),
+        )
+    ]
+    (o,) = trader.open_orders()
+    assert o["id"] == "7"
+    assert o["side"] == "buy"
+    assert o["type"] == OrderType.STOP_LIMIT
+    assert o["limit_price"] == 350.0
+    assert o["stop_price"] == 349.0
+
+
+def test_submit_limit_order(trader, fake_ib):
+    result = trader.submit_order({
+        "symbol": "IWN",
+        "side": OrderSide.BUY,
+        "quantity": 3,
+        "order_type": OrderType.LIMIT,
+        "limit_price": 123.45,
+    })
+    assert result == {"id": "101", "symbol": "IWN", "status": "Submitted"}
+    (contract, order), = fake_ib.placed
+    assert contract.symbol == "IWN"
+    assert order.action == "BUY"
+    assert order.lmtPrice == 123.45
+    assert order.tif == "GTC"
+
+
+def test_submit_defaults_to_market(trader, fake_ib):
+    trader.submit_order({"symbol": "SPY", "side": OrderSide.SELL, "quantity": 1})
+    (_, order), = fake_ib.placed
+    assert order.orderType == "MarketOrder"
+    assert order.action == "SELL"
+
+
+def test_submit_failure_returns_none(trader, fake_ib, monkeypatch):
+    monkeypatch.setattr(fake_ib, "placeOrder",
+                        lambda c, o: (_ for _ in ()).throw(RuntimeError("rejected")))
+    assert trader.submit_order({"symbol": "SPY", "side": OrderSide.BUY, "quantity": 1}) is None
+
+
+def test_cancel_order_matches_by_id(trader, fake_ib):
+    fake_ib._open_trades = [
+        SimpleNamespace(order=SimpleNamespace(orderId=7),
+                        contract=SimpleNamespace(symbol="X"),
+                        orderStatus=SimpleNamespace(status="Submitted")),
+    ]
+    trader.cancel_order("7")
+    assert fake_ib.cancelled == [7]
+
+
+def test_cancel_all_uses_global_cancel(trader, fake_ib):
+    trader.cancel_all()
+    assert fake_ib.global_cancels == 1
+
+
+def test_connect_error_names_the_gateway(fake_ib, monkeypatch):
+    from app.brokers.ibkr_client import IBKRTrader
+
+    def boom(host, port, clientId):
+        raise OSError("connection refused")
+
+    monkeypatch.setattr(fake_ib, "connect", boom)
+    trader = IBKRTrader(host="127.0.0.1", port=4002, client_id=1)
+    with pytest.raises(ConnectionError, match="IB Gateway"):
+        trader.account()
+
+
+def test_registry_creates_ibkr_from_config(fake_ib):
+    from flask import Flask
+
+    import app.brokers as brokers
+    from app.brokers.ibkr_client import IBKRTrader
+
+    flask_app = Flask(__name__)
+    flask_app.config.update(
+        IBKR_HOST="127.0.0.1", IBKR_PORT=4002, IBKR_CLIENT_ID=9, IBKR_PAPER=True
+    )
+    brokers.clear_broker("ibkr")
+    with flask_app.app_context():
+        client = brokers.get_broker("ibkr")
+    assert isinstance(client, IBKRTrader)
+    assert client.client_id == 9
+    brokers.clear_broker("ibkr")

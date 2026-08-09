@@ -20,6 +20,15 @@ class Config:
     ALPACA_SECRET_KEY = os.getenv("ALPACA_SECRET_KEY", "")
     ALPACA_PAPER = os.getenv("ALPACA_PAPER", "true").lower() == "true"
 
+    # -- IBKR --
+    # The gateway socket is unauthenticated, so IBKR_HOST must only ever be
+    # localhost or an SSH-tunnel endpoint — never a public address. See
+    # docs/IBKR_GATEWAY.md for where the gateway process runs.
+    IBKR_HOST = os.getenv("IBKR_HOST", "127.0.0.1")
+    IBKR_PORT = int(os.getenv("IBKR_PORT", "4002"))  # gateway paper; 4001 live
+    IBKR_CLIENT_ID = int(os.getenv("IBKR_CLIENT_ID", "1"))
+    IBKR_PAPER = os.getenv("IBKR_PAPER", "true").lower() == "true"
+
     # -- Robinhood --
     # Credentials, TOTP and device identity live in the auth-service box only;
     # this service never logs in. Email is kept for status reporting and the

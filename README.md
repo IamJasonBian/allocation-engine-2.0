@@ -1,6 +1,6 @@
 # Allocation Engine 2.0
 
-Flask API service for portfolio monitoring and trade execution across **Robinhood** and **Alpaca** brokers. Deploys on Render via gunicorn.
+Flask API service for portfolio monitoring and trade execution across **Robinhood**, **Alpaca** and **IBKR** brokers. Deploys on Render via gunicorn; the IBKR leg runs co-located with its gateway instead — see [docs/IBKR_GATEWAY.md](docs/IBKR_GATEWAY.md).
 
 ## How it works
 

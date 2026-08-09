@@ -6,7 +6,7 @@ _broker_cache: dict[str, BrokerClient] = {}
 
 
 def get_broker(name: str) -> BrokerClient:
-    """Get or create a broker client by name ('alpaca' or 'robinhood')."""
+    """Get or create a broker client by name ('alpaca', 'robinhood' or 'ibkr')."""
     if name in _broker_cache:
         return _broker_cache[name]
 
@@ -27,6 +27,16 @@ def get_broker(name: str) -> BrokerClient:
         client = RobinhoodTrader(
             email=config.get("RH_MAIN_EMAIL", ""),
             account_number=config.get("RH_AUTOMATED_ACCOUNT_NUMBER", ""),
+        )
+    elif name == "ibkr":
+        from app.brokers.ibkr_client import IBKRTrader
+        # No credentials here either — the gateway box owns the IBKR session;
+        # this client only dials its socket (see docs/IBKR_GATEWAY.md).
+        client = IBKRTrader(
+            host=config["IBKR_HOST"],
+            port=config["IBKR_PORT"],
+            client_id=config["IBKR_CLIENT_ID"],
+            paper=config["IBKR_PAPER"],
         )
     else:
         raise ValueError(f"Unknown broker: {name}")
