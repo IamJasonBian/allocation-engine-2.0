@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Allocation dashboard</title>
+<style>
+  /* Shell tokens mimic the Postings Design System; the gain/loss pair
+     (#25a89e / #d94f66) is validated for CVD separation + contrast on this
+     surface — see docs/IBKR_GATEWAY.md's sibling work. Sign is always printed,
+     never color-alone. */
+  :root{
+    --bg:#08080d; --bg2:#0e0e16; --panel:#12121d; --line:rgba(255,255,255,.08);
+    --muted:#9a9aad; --text:#e8e8f2;
+    --accent:#7c6cff; --accent2:#3fd2c7;
+    --gain:#25a89e; --loss:#d94f66;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);
+       font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+  .shell{max-width:1060px;margin:0 auto;padding:28px 20px 60px}
+  .cap{font-size:.75rem;letter-spacing:.1em;text-transform:uppercase;color:var(--muted)}
+  header{display:flex;align-items:baseline;gap:14px;margin-bottom:22px;flex-wrap:wrap}
+  header .who{margin-left:auto;font-size:.72rem;color:var(--muted)}
+  header .who b{color:var(--accent2);font-weight:600}
+  .wrap{background:var(--panel);border:1px solid var(--line);border-radius:16px;
+        padding:22px;margin-bottom:18px}
+  .wrap .cap{margin-bottom:14px}
+
+  /* Stat tiles — hero numbers */
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px;margin-bottom:18px}
+  .stat{background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:16px 20px}
+  .stat .k{font-size:.72rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+  .stat .v{font-size:1.55rem;font-weight:650;margin-top:6px;font-variant-numeric:tabular-nums}
+  .stat .s{font-size:.72rem;color:var(--muted);margin-top:4px}
+
+  /* Diverging P&L bars */
+  .plrow{display:grid;grid-template-columns:110px 1fr 110px;align-items:center;
+         gap:10px;height:22px;font-size:.75rem}
+  .plrow .sym{color:var(--muted);text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .plrow .sym b{color:var(--text);font-weight:600}
+  .plrow .val{font-variant-numeric:tabular-nums;color:var(--text)}
+  .track{position:relative;height:100%;cursor:default}
+  .track .zero{position:absolute;left:50%;top:0;bottom:0;width:1px;background:var(--line)}
+  .track .bar{position:absolute;top:5px;height:10px}
+  .bar.gain{background:var(--gain);border-radius:0 4px 4px 0;left:50%}
+  .bar.loss{background:var(--loss);border-radius:4px 0 0 4px;right:50%}
+  .plrow:hover .bar{filter:brightness(1.25)}
+  #tip{position:fixed;pointer-events:none;display:none;z-index:10;
+       background:var(--bg2);border:1px solid var(--line);border-radius:8px;
+       padding:8px 10px;font-size:.72rem;color:var(--text);max-width:260px}
+  #tip .m{color:var(--muted)}
+
+  /* Tables */
+  table{width:100%;border-collapse:collapse;font-size:.78rem;font-variant-numeric:tabular-nums}
+  th{font-size:.68rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);
+     font-weight:500;text-align:right;padding:6px 10px;border-bottom:1px solid var(--line)}
+  th:first-child,td:first-child{text-align:left}
+  td{padding:6px 10px;border-bottom:1px solid var(--line);text-align:right;color:var(--text)}
+  tr:last-child td{border-bottom:none}
+  td.gain{color:var(--gain)} td.loss{color:var(--loss)}
+  .tag{display:inline-block;font-size:.65rem;letter-spacing:.05em;padding:.1rem .5rem;
+       border:1px solid var(--line);border-radius:999px;color:var(--accent);margin-left:6px}
+  .scroll{overflow-x:auto}
+
+  /* Chips (orders, legs, activity) */
+  .chips{display:flex;flex-wrap:wrap;gap:10px}
+  .mchip{white-space:nowrap;font-size:.75rem;padding:.35rem .85rem;border:1px solid var(--line);
+         border-radius:999px;color:var(--muted);background:var(--panel)}
+  .mchip b{color:var(--accent2);font-weight:600}
+  .mchip i{color:var(--accent);font-style:normal}
+  .feed{display:flex;flex-direction:column;gap:6px}
+  .ev{display:flex;gap:10px;align-items:center;font-size:.76rem;border:1px solid var(--line);
+      border-radius:10px;padding:.4rem .8rem;background:rgba(255,255,255,.02)}
+  .ev .t{width:170px;color:var(--muted);font-size:.68rem;letter-spacing:.05em;text-transform:uppercase}
+  .ev .s{width:70px;font-weight:600;color:var(--accent2)}
+  .ev .m{color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .cols{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  @media (max-width:820px){.cols{grid-template-columns:1fr}}
+  .err{color:var(--loss);font-size:.78rem}
+</style>
+</head>
+<body data-palette="#25a89e,#d94f66">
+<div class="shell">
+  <header>
+    <span class="cap" style="font-size:.85rem">Allocation dashboard</span>
+    <span class="cap" style="color:var(--accent)">5thstreetcapital replica</span>
+    <span class="who" id="asof">loading…</span>
+  </header>
+
+  <div class="stats" id="stats"></div>
+
+  <div class="wrap">
+    <div class="cap">Unrealized P&amp;L by position · gain <span style="color:var(--gain)">＋teal</span> / loss <span style="color:var(--loss)">−rose</span> around zero</div>
+    <div id="pl"></div>
+  </div>
+
+  <div class="wrap">
+    <div class="cap">Positions</div>
+    <div class="scroll"><table id="positions"></table></div>
+  </div>
+
+  <div class="cols">
+    <div class="wrap">
+      <div class="cap">Open option orders</div>
+      <div class="chips" id="optorders"></div>
+    </div>
+    <div class="wrap">
+      <div class="cap">Option positions</div>
+      <div class="chips" id="options"></div>
+    </div>
+  </div>
+
+  <div class="cols">
+    <div class="wrap">
+      <div class="cap">Recent equity orders</div>
+      <div class="scroll"><table id="recent-eq"></table></div>
+    </div>
+    <div class="wrap">
+      <div class="cap">Recent option orders</div>
+      <div class="scroll"><table id="recent-opt"></table></div>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <div class="cap">Bot activity</div>
+    <div class="feed" id="activity"></div>
+  </div>
+</div>
+<div id="tip"></div>
+
+<script>
+  // Same Trading DB read functions the live dashboard consumes (CORS: *).
+  // Override with ?db=<base> to point at a different functions host.
+  const DB = new URLSearchParams(location.search).get("db")
+          || "https://5thstreetcapital.org/.netlify/functions";
+  const $ = id => document.getElementById(id);
+  const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+  const usd = n => (n < 0 ? "−$" : "$") + Math.abs(n).toLocaleString(undefined,
+                   {minimumFractionDigits: 2, maximumFractionDigits: 2});
+  const signed = n => (n >= 0 ? "+" : "−") + "$" + Math.abs(n).toLocaleString(undefined,
+                   {minimumFractionDigits: 2, maximumFractionDigits: 2});
+  const pct = n => (n >= 0 ? "+" : "−") + Math.abs(n).toFixed(2) + "%";
+
+  function tile(k, v, s) {
+    return `<div class="stat"><div class="k">${k}</div><div class="v">${v}</div><div class="s">${s || ""}</div></div>`;
+  }
+
+  function tooltip(html, x, y) {
+    const t = $("tip");
+    if (!html) { t.style.display = "none"; return; }
+    t.innerHTML = html; t.style.display = "block";
+    t.style.left = Math.min(x + 14, innerWidth - 280) + "px";
+    t.style.top = (y + 14) + "px";
+  }
+
+  function renderPL(positions) {
+    const rows = positions
+      .filter(p => typeof p.profit_loss === "number")
+      .sort((a, b) => b.profit_loss - a.profit_loss);
+    const max = Math.max(1, ...rows.map(p => Math.abs(p.profit_loss)));
+    $("pl").innerHTML = rows.map(p => {
+      const w = Math.max(0.5, Math.abs(p.profit_loss) / max * 50);
+      const cls = p.profit_loss >= 0 ? "gain" : "loss";
+      const shadow = p.asset_type === "shadow_equity" ? " ∿" : "";
+      return `<div class="plrow" data-tip="<b>${esc(p.symbol)}</b><br>
+          ${signed(p.profit_loss)} (${pct(p.profit_loss_pct ?? 0)})<br>
+          <span class='m'>qty ${esc(p.quantity)} · avg ${usd(p.avg_buy_price ?? 0)} · now ${usd(p.current_price ?? 0)}</span>">
+        <span class="sym"><b>${esc(p.symbol)}</b>${shadow}</span>
+        <span class="track"><span class="zero"></span><span class="bar ${cls}" style="width:${w}%"></span></span>
+        <span class="val">${signed(p.profit_loss)}</span>
+      </div>`;
+    }).join("");
+    $("pl").addEventListener("mousemove", e => {
+      const row = e.target.closest(".plrow");
+      tooltip(row ? row.dataset.tip : null, e.clientX, e.clientY);
+    });
+    $("pl").addEventListener("mouseleave", () => tooltip(null));
+  }
+
+  function renderPositions(positions) {
+    const head = `<tr><th>symbol</th><th>qty</th><th>avg</th><th>now</th><th>equity</th><th>p&amp;l</th><th>p&amp;l %</th></tr>`;
+    $("positions").innerHTML = head + positions
+      .slice().sort((a, b) => (b.equity ?? 0) - (a.equity ?? 0))
+      .map(p => `<tr>
+        <td>${esc(p.symbol)}${p.asset_type === "shadow_equity" ? '<span class="tag">shadow</span>' : ""}</td>
+        <td>${Number(p.quantity).toLocaleString(undefined, {maximumFractionDigits: 6})}</td>
+        <td>${usd(p.avg_buy_price ?? 0)}</td>
+        <td>${usd(p.current_price ?? 0)}</td>
+        <td>${usd(p.equity ?? 0)}</td>
+        <td class="${p.profit_loss >= 0 ? "gain" : "loss"}">${signed(p.profit_loss ?? 0)}</td>
+        <td class="${p.profit_loss >= 0 ? "gain" : "loss"}">${pct(p.profit_loss_pct ?? 0)}</td>
+      </tr>`).join("");
+  }
+
+  function legChip(l) {
+    return `${l.side} ${l.option_type ?? ""} ${l.strike_price ? "$" + l.strike_price : ""}`.trim();
+  }
+
+  function renderOptionOrders(orders) {
+    $("optorders").innerHTML = orders.length ? orders.map(o => `
+      <span class="mchip">"${esc(o.opening_strategy ?? o.closing_strategy ?? "order")}"
+        <i>${esc(o.chain_symbol)}</i> ×${esc(o.quantity)} @ $${esc(o.price)}
+        <b>→ ${esc(o.state)}</b>${(o.legs || []).length ? " · " + o.legs.map(legChip).map(esc).join(" / ") : ""}</span>`).join("")
+      : '<span class="mchip">none open</span>';
+  }
+
+  function renderOptions(options) {
+    $("options").innerHTML = options.length ? options.map(o => `
+      <span class="mchip">"${esc(o.chain_symbol ?? o.symbol)}"
+        ${esc(o.option_type ?? "")} ${o.strike_price ? "$" + esc(o.strike_price) : ""}
+        ${esc(o.expiration_date ?? "")} ×${esc(o.quantity ?? "")}
+        <b>→ ${esc(o.type ?? o.state ?? "held")}</b></span>`).join("")
+      : '<span class="mchip">none held</span>';
+  }
+
+  function renderRecent(id, rows, kind) {
+    const head = kind === "eq"
+      ? `<tr><th>symbol</th><th>side</th><th>qty</th><th>price</th><th>state</th><th>when</th></tr>`
+      : `<tr><th>symbol</th><th>strategy</th><th>qty</th><th>premium</th><th>state</th><th>when</th></tr>`;
+    $(id).innerHTML = head + rows.slice(0, 12).map(o => {
+      const when = (o.updated_at ?? o.created_at ?? "").slice(0, 10);
+      return kind === "eq"
+        ? `<tr><td>${esc(o.symbol)}</td><td>${esc(o.side ?? "")}</td>
+             <td>${esc(o.quantity ?? "")}</td><td>${o.average_price ? usd(+o.average_price) : (o.price ? usd(+o.price) : "—")}</td>
+             <td>${esc(o.state ?? "")}</td><td>${esc(when)}</td></tr>`
+        : `<tr><td>${esc(o.chain_symbol ?? o.symbol)}</td><td>${esc(o.opening_strategy ?? o.closing_strategy ?? "")}</td>
+             <td>${esc(o.quantity ?? "")}</td><td>${o.processed_premium ? usd(+o.processed_premium) : "—"}</td>
+             <td>${esc(o.state ?? "")}</td><td>${esc(when)}</td></tr>`;
+    }).join("");
+  }
+
+  function renderActivity(events) {
+    $("activity").innerHTML = events.slice(0, 20).map(e => `
+      <div class="ev">
+        <span class="t">${esc(e.event_type ?? "")}</span>
+        <span class="s">${esc(e.status ?? "")}</span>
+        <span class="m">${esc(e.symbol ?? "")} ${e.quantity ? "×" + e.quantity : ""}
+          ${e.price ? "@ " + usd(+e.price) : ""} ${esc(e.message ?? "")}</span>
+        ${e.dry_run ? '<span class="tag">dry run</span>' : ""}
+      </div>`).join("");
+  }
+
+  async function load() {
+    try {
+      const [snap, act] = await Promise.all([
+        fetch(`${DB}/order-book-snapshot`).then(r => r.json()),
+        fetch(`${DB}/db-bot-activity`).then(r => r.json()),
+      ]);
+      const p = snap.portfolio || {};
+      const cash = p.cash || {};
+      $("stats").innerHTML =
+        tile("Equity", usd(p.equity ?? 0)) +
+        tile("Market value", usd(p.market_value ?? 0)) +
+        tile("Cash", usd(cash.cash ?? 0), "tradeable") +
+        tile("Buying power", usd(cash.buying_power ?? 0));
+      renderPL(p.positions || []);
+      renderPositions(p.positions || []);
+      renderOptionOrders(p.open_option_orders || []);
+      renderOptions(p.options || []);
+      renderRecent("recent-eq", snap.recent_orders || [], "eq");
+      renderRecent("recent-opt", snap.recent_option_orders || [], "opt");
+      renderActivity((act.data || {}).events || []);
+      $("asof").innerHTML =
+        `orders <b>${esc((snap.orders_as_of || "").slice(0, 16))}</b> · ` +
+        `positions <b>${esc((snap.positions_as_of || "").slice(0, 16))}</b> · source ${esc(snap.orders_source || "db")}`;
+    } catch (e) {
+      $("asof").innerHTML = `<span class="err">load failed: ${esc(e.message)}</span>`;
+    }
+  }
+
+  load();
+  setInterval(load, 60000);
+</script>
+</body>
+</html>

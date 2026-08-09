@@ -20,3 +20,7 @@ def register_blueprints(app):
                       history_bp, options_bp, auth_bp, snapshot_bp,
                       events_bp, robinhood_proxy_bp, claude_auth_bp]:
         app.register_blueprint(blueprint, url_prefix="/api")
+
+    # Dashboard page lives at /dashboard (not under /api).
+    from app.api.dashboard import bp as dashboard_bp
+    app.register_blueprint(dashboard_bp)
