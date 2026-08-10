@@ -17,6 +17,22 @@ from app.auth_service_client import (
 bp = Blueprint("robinhood_proxy", __name__)
 
 
+def _require_token():
+    """Gate order-mutation routes with a Bearer token (fail closed).
+
+    Mirrors the render-logs netlify function: an unset token means the route
+    refuses to run (503) rather than running wide open. Returns an error
+    (response, status) tuple to short-circuit, or None when authorized.
+    """
+    required = current_app.config.get("DASHBOARD_REQUEST_TOKEN")
+    if not required:
+        return jsonify({"error": "DASHBOARD_REQUEST_TOKEN not configured"}), 503
+    sent = (request.headers.get("Authorization") or "").removeprefix("Bearer ").strip()
+    if sent != required:
+        return jsonify({"error": "unauthorized"}), 401
+    return None
+
+
 def _handle(fn):
     """Run an auth-service call and map its errors to HTTP responses."""
     try:
@@ -75,6 +91,9 @@ def place_trailing_stop():
 @bp.route("/robinhood/orders/<order_id>", methods=["GET"])
 def get_order(order_id):
     """Look up a single order by id (raw Robinhood order dict)."""
+    denied = _require_token()
+    if denied:
+        return denied
     client = AuthServiceClient()
     return _handle(lambda: client.get_order(order_id))
 
@@ -87,6 +106,9 @@ def replace_order(order_id):
     ``build_replace_payload``); RH returns a new order whose ``replaces`` points
     at this one.
     """
+    denied = _require_token()
+    if denied:
+        return denied
     body = request.get_json(silent=True) or {}
     dry_run = body.get("dry_run", current_app.config.get("DRY_RUN", True))
     payload = body.get("payload")
@@ -99,6 +121,9 @@ def replace_order(order_id):
 @bp.route("/robinhood/orders/<order_id>/cancel", methods=["POST"])
 def cancel_order(order_id):
     """Cancel a single order by id. Body: {dry_run?}."""
+    denied = _require_token()
+    if denied:
+        return denied
     body = request.get_json(silent=True) or {}
     dry_run = body.get("dry_run", current_app.config.get("DRY_RUN", True))
     client = AuthServiceClient()

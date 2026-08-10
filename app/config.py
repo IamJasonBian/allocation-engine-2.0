@@ -42,6 +42,10 @@ class Config:
     AUTH_SERVICE_URL = os.getenv("AUTH_SERVICE_URL", "")
     RH_AUTH_SERVICE_REQUEST_TOKEN = os.getenv("RH_AUTH_SERVICE_REQUEST_TOKEN", "")
     AUTH_SERVICE_TIMEOUT = int(os.getenv("AUTH_SERVICE_TIMEOUT", "30"))
+    # Bearer token gating the order-mutation routes (replace/cancel/lookup),
+    # same scheme as the render-logs netlify function. Fail closed: unset means
+    # those routes refuse to run.
+    DASHBOARD_REQUEST_TOKEN = os.getenv("DASHBOARD_REQUEST_TOKEN", "")
 
     # -- Trailing-stop sweeper (runs in the background engine loop) --
     # Universe beyond current positions; comma-separated symbols.

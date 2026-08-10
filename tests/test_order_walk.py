@@ -10,7 +10,15 @@ import pytest
 from flask import Flask
 
 from app.api import register_blueprints
-from app.auth_service_client import build_replace_payload, walk_order
+from app.auth_service_client import (
+    AuthServiceError,
+    AuthServiceClient,
+    build_replace_payload,
+    walk_order,
+)
+
+TOKEN = "test-token"
+AUTH = {"Authorization": f"Bearer {TOKEN}"}
 
 
 def base_order(price=191.28, oid="ord-0"):
@@ -74,6 +82,16 @@ def test_build_replace_payload_keeps_price_when_omitted():
     assert p["price"] == "191.28"
 
 
+def test_build_replace_payload_reuses_ref_id_on_retry():
+    o = base_order(191.28)
+    # same intent retried -> same idempotency key (RH dedups, no stacking)
+    a = build_replace_payload(o, price=192.0, ref_id="fixed-key")
+    b = build_replace_payload(o, price=192.0, ref_id="fixed-key")
+    assert a["ref_id"] == b["ref_id"] == "fixed-key"
+    # new intent -> fresh key
+    assert build_replace_payload(o)["ref_id"] != build_replace_payload(o)["ref_id"]
+
+
 # -- walk_order --------------------------------------------------------------
 
 def test_walk_converges_and_chains_replacement_ids():
@@ -125,29 +143,70 @@ def api(monkeypatch):
     app = Flask(__name__)
     register_blueprints(app)
     app.config["DRY_RUN"] = True
+    app.config["DASHBOARD_REQUEST_TOKEN"] = TOKEN
     monkeypatch.setattr("app.api.robinhood_proxy.AuthServiceClient",
                         lambda *a, **k: FakeClient())
     return app.test_client()
 
 
 def test_get_order_route(api):
-    r = api.get("/api/robinhood/orders/abc")
+    r = api.get("/api/robinhood/orders/abc", headers=AUTH)
     assert r.status_code == 200 and r.get_json()["id"] == "abc"
 
 
 def test_replace_route_requires_payload(api):
-    r = api.post("/api/robinhood/orders/abc/replace", json={})
+    r = api.post("/api/robinhood/orders/abc/replace", json={}, headers=AUTH)
     assert r.status_code == 400
 
 
 def test_replace_route_relays_payload(api):
     r = api.post("/api/robinhood/orders/abc/replace",
-                 json={"payload": {"price": "192.00"}, "dry_run": True})
+                 json={"payload": {"price": "192.00"}, "dry_run": True},
+                 headers=AUTH)
     body = r.get_json()
     assert r.status_code == 200 and body["replaces"] == "abc"
     assert body["price"] == "192.00"
 
 
 def test_cancel_route(api):
-    r = api.post("/api/robinhood/orders/abc/cancel", json={"dry_run": True})
+    r = api.post("/api/robinhood/orders/abc/cancel", json={"dry_run": True},
+                 headers=AUTH)
     assert r.status_code == 200 and r.get_json()["cancelled"] == "abc"
+
+
+# -- token gate (fail closed) ------------------------------------------------
+
+def test_routes_reject_without_token(api):
+    assert api.get("/api/robinhood/orders/abc").status_code == 401
+    assert api.post("/api/robinhood/orders/abc/replace",
+                    json={"payload": {}}).status_code == 401
+    assert api.post("/api/robinhood/orders/abc/cancel", json={}).status_code == 401
+
+
+def test_routes_fail_closed_when_token_unconfigured(monkeypatch):
+    app = Flask(__name__)
+    register_blueprints(app)
+    app.config["DASHBOARD_REQUEST_TOKEN"] = ""      # unset -> refuse
+    monkeypatch.setattr("app.api.robinhood_proxy.AuthServiceClient",
+                        lambda *a, **k: FakeClient())
+    c = app.test_client()
+    assert c.get("/api/robinhood/orders/abc", headers=AUTH).status_code == 503
+
+
+# -- idempotent cancel -------------------------------------------------------
+
+def test_cancel_order_is_idempotent_on_already_gone():
+    class GoneBox(AuthServiceClient):
+        def _request(self, *a, **k):
+            raise AuthServiceError("auth-service POST /orders/x/cancel "
+                                   "returned 404: {'detail': 'not found'}")
+    out = GoneBox(base_url="https://x", token="t").cancel_order("x", dry_run=False)
+    assert out == {"cancelled": "x", "already_gone": True}
+
+
+def test_cancel_order_reraises_other_errors():
+    class BrokenBox(AuthServiceClient):
+        def _request(self, *a, **k):
+            raise AuthServiceError("auth-service returned 502: upstream boom")
+    with pytest.raises(AuthServiceError):
+        BrokenBox(base_url="https://x", token="t").cancel_order("x", dry_run=False)

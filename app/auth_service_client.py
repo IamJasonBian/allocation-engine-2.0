@@ -68,19 +68,25 @@ def build_trailing_stop_payload(*, account_url, instrument_url, symbol, side,
     return payload
 
 
-def build_replace_payload(order, *, price=None, quantity=None):
+def build_replace_payload(order, *, price=None, quantity=None, ref_id=None):
     """Build an order-replace payload from a looked-up order dict.
 
     Robinhood amends an order by POSTing a full order body to
-    ``/orders/{id}/replace/`` with a NEW ``ref_id`` — there is no HTTP PATCH.
-    This copies the immutable fields off the existing order and overrides only
-    price/quantity, minting a fresh ref_id so RH does not reject the change as
-    a duplicate.
+    ``/orders/{id}/replace/`` with a ``ref_id`` — there is no HTTP PATCH. This
+    copies the immutable fields off the existing order and overrides only
+    price/quantity.
+
+    The ``ref_id`` is Robinhood's idempotency key (end-to-end argument: the
+    endpoint, not the transport, is what dedups). Each *distinct* intent needs a
+    fresh id — but a *retry of the same intent* must reuse it, or RH creates a
+    duplicate order (the stacking failure mode). Pass ``ref_id`` to reuse one on
+    retry; omit it to mint a new one for a new intent.
 
     Args:
         order: raw Robinhood order dict (from a lookup or a place response).
         price: new limit price; omitted keeps the order's current price.
         quantity: new quantity; omitted keeps the order's current quantity.
+        ref_id: idempotency key to reuse on retry; omitted mints a fresh one.
 
     Returns:
         A replace payload ready for ``replace_order``.
@@ -93,7 +99,7 @@ def build_replace_payload(order, *, price=None, quantity=None):
         "time_in_force": order["time_in_force"],
         "trigger": order["trigger"],
         "quantity": str(quantity if quantity is not None else order["quantity"]),
-        "ref_id": str(uuid.uuid4()),
+        "ref_id": ref_id or str(uuid.uuid4()),
     }
     if order.get("symbol"):
         payload["symbol"] = order["symbol"]
@@ -251,9 +257,23 @@ class AuthServiceClient:
                               "dry_run": dry_run})
 
     def cancel_order(self, order_id, dry_run=True):
-        """Cancel a single order by id."""
-        return self._request("POST", f"/orders/{order_id}/cancel",
-                             {"dry_run": dry_run})
+        """Cancel a single order by id — idempotent.
+
+        Cancel is naturally idempotent: an order that is already gone (cancelled
+        or filled) is a success, not an error, so a retried cancel converges
+        instead of raising. A 404 / "not found" / "already" response is treated
+        as an already-cancelled success.
+        """
+        try:
+            return self._request("POST", f"/orders/{order_id}/cancel",
+                                 {"dry_run": dry_run})
+        except AuthServiceError as e:
+            msg = str(e).lower()
+            if "404" in msg or "not found" in msg or "already" in msg:
+                log.info("cancel_order: %s already gone — idempotent success",
+                         order_id)
+                return {"cancelled": order_id, "already_gone": True}
+            raise
 
     # -- MCP passthrough (official Robinhood MCP, via POST /exec/mcp) --
 
