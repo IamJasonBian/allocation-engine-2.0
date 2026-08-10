@@ -107,13 +107,17 @@
   .err{color:var(--hw-accent);font-size:.78rem}
 
   /* Render logs — terminal strip on the blue ground, like the stat strip */
-  .logs{border:1px solid var(--fg-40);padding:18px 20px}
+  .logs{border:1px solid var(--fg-40);padding:18px 20px;margin-bottom:24px}
+  /* Ticker sparklines in the positions table */
+  td.spark{padding:2px 10px}
+  .sparkline{display:block}
+  .sparkline .chg{font-size:9px;font-family:var(--mono)}
   .rtabs{display:inline-flex;gap:6px}
   .rtab{font-family:var(--mono);font-size:.62rem;letter-spacing:.1em;text-transform:uppercase;
         background:none;border:1px solid var(--fg-40);color:var(--fg-60);
         padding:.15rem .6rem;cursor:pointer}
   .rtab.on{background:var(--hw-accent);border-color:var(--hw-accent);color:var(--hw-bg)}
-  .lnbox{max-height:340px;overflow-y:auto;font-size:.7rem;line-height:1.55}
+  .lnbox{max-height:230px;overflow-y:auto;font-size:.7rem;line-height:1.55}
   .ln{display:flex;gap:12px;white-space:nowrap}
   .ln .lt{color:var(--fg-40);flex-shrink:0}
   .ln .lm{color:var(--fg-60);overflow:hidden;text-overflow:ellipsis}
@@ -131,6 +135,13 @@
     <span class="eyebrow">5thstreetcapital replica</span>
     <span class="who" id="asof">loading…</span>
   </header>
+
+  <div class="logs">
+    <div class="eyebrow" style="display:flex;gap:10px;align-items:center;margin-bottom:12px">
+      Render logs <span id="rtabs" class="rtabs"></span>
+    </div>
+    <div class="lnbox" id="rlogs"><div class="ln"><span class="lm">loading…</span></div></div>
+  </div>
 
   <div class="stats" id="stats"></div>
 
@@ -169,13 +180,6 @@
   <div class="wrap">
     <div class="eyebrow">Bot activity</div>
     <div class="feed" id="activity"></div>
-  </div>
-
-  <div class="logs">
-    <div class="eyebrow" style="display:flex;gap:10px;align-items:center;margin-bottom:12px">
-      Render logs <span id="rtabs" class="rtabs"></span>
-    </div>
-    <div class="lnbox" id="rlogs"><div class="ln"><span class="lm">loading…</span></div></div>
   </div>
 </div>
 <div id="tip"></div>
@@ -230,11 +234,12 @@
   }
 
   function renderPositions(positions) {
-    const head = `<tr><th>symbol</th><th>qty</th><th>avg</th><th>now</th><th>equity</th><th>p&amp;l</th><th>p&amp;l %</th></tr>`;
+    const head = `<tr><th>symbol</th><th>1mo</th><th>qty</th><th>avg</th><th>now</th><th>equity</th><th>p&amp;l</th><th>p&amp;l %</th></tr>`;
     $("positions").innerHTML = head + positions
       .slice().sort((a, b) => (b.equity ?? 0) - (a.equity ?? 0))
       .map(p => `<tr>
         <td>${esc(p.symbol)}${p.asset_type === "shadow_equity" ? '<span class="tag">shadow</span>' : ""}</td>
+        <td class="spark" data-sym="${esc(p.symbol)}"></td>
         <td>${Number(p.quantity).toLocaleString(undefined, {maximumFractionDigits: 6})}</td>
         <td>${usd(p.avg_buy_price ?? 0)}</td>
         <td>${usd(p.current_price ?? 0)}</td>
@@ -242,6 +247,40 @@
         <td class="${p.profit_loss >= 0 ? "gain" : "loss"}">${signed(p.profit_loss ?? 0)}</td>
         <td class="${p.profit_loss >= 0 ? "gain" : "loss"}">${pct(p.profit_loss_pct ?? 0)}</td>
       </tr>`).join("");
+  }
+
+  // ── Ticker sparklines: 1mo daily closes per asset (price-history function) ──
+  function sparkSVG(closes, changePct) {
+    const W = 72, H = 20, n = closes.length;
+    const lo = Math.min(...closes), hi = Math.max(...closes);
+    const span = hi - lo || 1;
+    const x = i => (i / (n - 1)) * (W - 2) + 1;
+    const y = v => H - 2 - ((v - lo) / span) * (H - 4);
+    const points = closes.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
+    const color = changePct >= 0 ? "var(--gain)" : "var(--loss)";
+    // Sign is printed beside the line — direction is never color-alone.
+    return `<svg class="sparkline" width="${W + 46}" height="${H}" role="img"
+        aria-label="1 month ${changePct >= 0 ? "up" : "down"} ${Math.abs(changePct)}%">
+      <title>1mo ${changePct >= 0 ? "+" : "−"}${Math.abs(changePct)}%</title>
+      <polyline points="${points}" fill="none" stroke="${color}" stroke-width="1.6"
+        stroke-linejoin="round" stroke-linecap="round"/>
+      <circle cx="${x(n - 1).toFixed(1)}" cy="${y(closes[n - 1]).toFixed(1)}" r="1.8" fill="${color}"/>
+      <text class="chg" x="${W + 4}" y="${H - 6}" fill="${color}">${changePct >= 0 ? "+" : "−"}${Math.abs(changePct)}%</text>
+    </svg>`;
+  }
+
+  async function loadSparks(symbols) {
+    if (!symbols.length) return;
+    try {
+      const r = await fetch(`${FNS}/price-history?symbols=${encodeURIComponent(symbols.join(","))}&range=1mo`);
+      if (!r.ok) return; // sparks are decoration — the table stands alone
+      const d = await r.json();
+      document.querySelectorAll("td.spark").forEach(cell => {
+        const s = d.series[cell.dataset.sym];
+        cell.innerHTML = s ? sparkSVG(s.closes, s.change_pct)
+                           : '<span style="color:var(--rule-2)">—</span>';
+      });
+    } catch { /* leave cells empty */ }
   }
 
   function legChip(l) {
@@ -351,6 +390,7 @@
         tile("Buying power", usd(cash.buying_power ?? 0));
       renderPL(p.positions || []);
       renderPositions(p.positions || []);
+      loadSparks((p.positions || []).map(x => x.symbol));
       renderOptionOrders(p.open_option_orders || []);
       renderOptions(p.options || []);
       renderRecent("recent-eq", snap.recent_orders || [], "eq");
