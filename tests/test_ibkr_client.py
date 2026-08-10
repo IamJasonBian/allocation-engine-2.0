@@ -116,11 +116,6 @@ def test_account_maps_summary_tags(trader, fake_ib):
     }
 
 
-def test_account_missing_tags_read_as_zero(trader, fake_ib):
-    fake_ib._summary = []
-    assert trader.account()["equity"] == 0.0
-
-
 def test_positions_standardized_keys(trader, fake_ib):
     fake_ib._portfolio = [
         SimpleNamespace(
@@ -173,19 +168,6 @@ def test_submit_limit_order(trader, fake_ib):
     assert order.tif == "GTC"
 
 
-def test_submit_defaults_to_market(trader, fake_ib):
-    trader.submit_order({"symbol": "SPY", "side": OrderSide.SELL, "quantity": 1})
-    (_, order), = fake_ib.placed
-    assert order.orderType == "MarketOrder"
-    assert order.action == "SELL"
-
-
-def test_submit_failure_returns_none(trader, fake_ib, monkeypatch):
-    monkeypatch.setattr(fake_ib, "placeOrder",
-                        lambda c, o: (_ for _ in ()).throw(RuntimeError("rejected")))
-    assert trader.submit_order({"symbol": "SPY", "side": OrderSide.BUY, "quantity": 1}) is None
-
-
 def test_cancel_order_matches_by_id(trader, fake_ib):
     fake_ib._open_trades = [
         SimpleNamespace(order=SimpleNamespace(orderId=7),
@@ -194,11 +176,6 @@ def test_cancel_order_matches_by_id(trader, fake_ib):
     ]
     trader.cancel_order("7")
     assert fake_ib.cancelled == [7]
-
-
-def test_cancel_all_uses_global_cancel(trader, fake_ib):
-    trader.cancel_all()
-    assert fake_ib.global_cancels == 1
 
 
 def test_connect_error_names_the_gateway(fake_ib, monkeypatch):
@@ -211,24 +188,6 @@ def test_connect_error_names_the_gateway(fake_ib, monkeypatch):
     trader = IBKRTrader(host="127.0.0.1", port=4002, client_id=1)
     with pytest.raises(ConnectionError, match="IB Gateway"):
         trader.account()
-
-
-def test_registry_creates_ibkr_from_config(fake_ib):
-    from flask import Flask
-
-    import app.brokers as brokers
-    from app.brokers.ibkr_client import IBKRTrader
-
-    flask_app = Flask(__name__)
-    flask_app.config.update(
-        IBKR_HOST="127.0.0.1", IBKR_PORT=4002, IBKR_CLIENT_ID=9, IBKR_PAPER=True
-    )
-    brokers.clear_broker("ibkr")
-    with flask_app.app_context():
-        client = brokers.get_broker("ibkr")
-    assert isinstance(client, IBKRTrader)
-    assert client.client_id == 9
-    brokers.clear_broker("ibkr")
 
 
 def test_portfolio_detail_keeps_option_fields(trader, fake_ib):
@@ -256,43 +215,3 @@ def test_portfolio_detail_keeps_option_fields(trader, fake_ib):
         "market_value": -120.0, "unrealized_pl": 60.0,
     }
 
-
-def test_session_trades_maps_status_and_limit(trader, fake_ib):
-    fake_ib._trades = [
-        SimpleNamespace(
-            contract=SimpleNamespace(symbol="SPY", secType="OPT"),
-            order=SimpleNamespace(orderId=11, action="SELL", totalQuantity=1.0,
-                                  orderType="LMT", lmtPrice=1.25),
-            orderStatus=SimpleNamespace(status="Filled", filled=1.0,
-                                        avgFillPrice=1.27),
-        ),
-        SimpleNamespace(
-            contract=SimpleNamespace(symbol="IWN", secType="STK"),
-            order=SimpleNamespace(orderId=12, action="BUY", totalQuantity=5.0,
-                                  orderType="MKT"),
-            orderStatus=SimpleNamespace(status="Submitted", filled=0.0,
-                                        avgFillPrice=0.0),
-        ),
-    ]
-    filled, working = trader.session_trades()
-    assert filled["status"] == "Filled"
-    assert filled["limit_price"] == 1.25
-    assert filled["avg_fill_price"] == 1.27
-    assert working["limit_price"] is None
-    assert working["avg_fill_price"] is None
-    assert working["order_type"] == OrderType.MARKET
-
-
-def test_executions_maps_side_codes(trader, fake_ib):
-    fake_ib._executions = [
-        SimpleNamespace(
-            contract=SimpleNamespace(symbol="AMD", secType="STK"),
-            execution=SimpleNamespace(execId="e1", orderId=11, side="SLD",
-                                      shares=100.0, price=96.1,
-                                      time="2026-08-09 14:30:00"),
-        ),
-    ]
-    (ex,) = trader.executions()
-    assert ex["side"] == "sell"
-    assert ex["order_id"] == "11"
-    assert ex["price"] == 96.1

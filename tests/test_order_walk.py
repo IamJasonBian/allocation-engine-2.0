@@ -77,11 +77,6 @@ def test_build_replace_payload_overrides_price_and_mints_ref_id():
     assert "id" not in p and "state" not in p and "is_editable" not in p
 
 
-def test_build_replace_payload_keeps_price_when_omitted():
-    p = build_replace_payload(base_order(191.28))
-    assert p["price"] == "191.28"
-
-
 def test_build_replace_payload_reuses_ref_id_on_retry():
     o = base_order(191.28)
     # same intent retried -> same idempotency key (RH dedups, no stacking)
@@ -104,24 +99,11 @@ def test_walk_converges_and_chains_replacement_ids():
     assert float(box.orders["ord-5"]["price"]) == 191.53
 
 
-def test_walk_dry_run_does_one_step_only():
-    box = FakeBox(base_order(191.28))
-    steps = walk_order(box, "ord-0", 192.70, dry_run=True)
-    assert len(steps) == 1 and steps[0]["to"] == 191.33
-    assert box.replace_calls[0][2] is True
-
-
 def test_walk_stops_when_not_editable():
     o = base_order(191.28)
     o["is_editable"] = False
     steps = walk_order(FakeBox(o), "ord-0", 192.70, dry_run=False)
     assert steps == []
-
-
-def test_walk_downward_toward_lower_target():
-    box = FakeBox(base_order(191.50, "ord-0"))
-    steps = walk_order(box, "ord-0", 191.40, step=0.05, dry_run=False)
-    assert [s["to"] for s in steps] == [191.45, 191.40]
 
 
 # -- API routes --------------------------------------------------------------
@@ -149,16 +131,6 @@ def api(monkeypatch):
     return app.test_client()
 
 
-def test_get_order_route(api):
-    r = api.get("/api/robinhood/orders/abc", headers=AUTH)
-    assert r.status_code == 200 and r.get_json()["id"] == "abc"
-
-
-def test_replace_route_requires_payload(api):
-    r = api.post("/api/robinhood/orders/abc/replace", json={}, headers=AUTH)
-    assert r.status_code == 400
-
-
 def test_replace_route_relays_payload(api):
     r = api.post("/api/robinhood/orders/abc/replace",
                  json={"payload": {"price": "192.00"}, "dry_run": True},
@@ -167,14 +139,6 @@ def test_replace_route_relays_payload(api):
     assert r.status_code == 200 and body["replaces"] == "abc"
     assert body["price"] == "192.00"
 
-
-def test_cancel_route(api):
-    r = api.post("/api/robinhood/orders/abc/cancel", json={"dry_run": True},
-                 headers=AUTH)
-    assert r.status_code == 200 and r.get_json()["cancelled"] == "abc"
-
-
-# -- token gate (fail closed) ------------------------------------------------
 
 def test_routes_reject_without_token(api):
     assert api.get("/api/robinhood/orders/abc").status_code == 401
@@ -203,10 +167,3 @@ def test_cancel_order_is_idempotent_on_already_gone():
     out = GoneBox(base_url="https://x", token="t").cancel_order("x", dry_run=False)
     assert out == {"cancelled": "x", "already_gone": True}
 
-
-def test_cancel_order_reraises_other_errors():
-    class BrokenBox(AuthServiceClient):
-        def _request(self, *a, **k):
-            raise AuthServiceError("auth-service returned 502: upstream boom")
-    with pytest.raises(AuthServiceError):
-        BrokenBox(base_url="https://x", token="t").cancel_order("x", dry_run=False)

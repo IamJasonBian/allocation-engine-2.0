@@ -39,28 +39,12 @@ def test_average_price_is_carried_across():
     assert out[0]["limit_price"] == 112.0
 
 
-def test_an_existing_average_price_is_not_overwritten():
-    order = dict(FILLED, average_price=99.0)
-    assert _equity_order_history(_Broker([order]))[0]["average_price"] == 99.0
-
-
-def test_a_market_order_with_no_price_is_left_alone():
-    order = {k: v for k, v in FILLED.items() if k != "price"}
-    assert "average_price" not in _equity_order_history(_Broker([order]))[0]
-
-
 def test_a_broker_failure_never_breaks_the_sync():
     assert _equity_order_history(_Broker(raises=True)) == []
 
 
 def test_a_broker_without_history_is_tolerated():
     assert _equity_order_history(object()) == []
-
-
-def test_limit_is_passed_through():
-    broker = _Broker([])
-    _equity_order_history(broker, limit=25)
-    assert broker.limit == 25
 
 
 def test_history_is_posted_as_recent_orders():

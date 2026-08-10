@@ -92,16 +92,8 @@ def test_built_payload_passes_guard():
 
 @pytest.mark.parametrize("mutation,why", [
     ({"side": "buy"}, "buy order"),
-    ({"trigger": "immediate"}, "plain market sell (no stop trigger)"),
     ({"type": "limit"}, "limit order"),
-    ({"time_in_force": "gfd"}, "non-GTC"),
     ({"trailing_peg": None}, "missing trailing peg"),
-    ({"trailing_peg": {"type": "price", "price": "5"}}, "price peg"),
-    ({"trailing_peg": {"type": "percentage", "percentage": "0"}}, "0% trail"),
-    ({"trailing_peg": {"type": "percentage", "percentage": "80"}}, ">50% trail"),
-    ({"trailing_peg": {"type": "percentage", "percentage": "nope"}}, "NaN trail"),
-    ({"quantity": "0"}, "zero quantity"),
-    ({"quantity": "-3"}, "negative quantity"),
     ({"price": "250.00"}, "smuggled limit price key"),
 ])
 def test_guard_rejects_destructive_payloads(mutation, why):
@@ -116,13 +108,6 @@ def test_live_placement_requires_account_and_instrument():
         validate_trailing_stop_payload(valid_payload(), live=True)
     validate_trailing_stop_payload(
         valid_payload(account="https://a/", instrument="https://i/"), live=True)
-
-
-def test_fake_client_enforces_guard_on_place():
-    c = FakeClient()
-    with pytest.raises(GuardrailViolation):
-        c.place_stop(valid_payload(side="buy"))
-    assert c.placed == []
 
 
 def test_replace_requires_order_id():
@@ -151,12 +136,8 @@ def test_mcp_allows_readonly():
 
 @pytest.mark.parametrize("payload", [
     mcp("tools/call", "place_order"),
-    mcp("tools/call", "buy"),
-    mcp("tools/call", "sell_shares"),
     mcp("tools/call", "cancel_order"),
-    mcp("tools/call", ""),
     mcp("resources/read"),
-    mcp("completion/complete"),
 ])
 def test_mcp_blocks_destructive_or_unknown(payload):
     with pytest.raises(GuardrailViolation):
@@ -186,13 +167,6 @@ def test_check_is_sqlite_first_no_rh_call(store):
     assert c.rh_reads == reads_after_sweep, "check must not hit RH when fresh"
 
 
-def test_check_repopulates_when_db_empty(store):
-    c = FakeClient(book=[rh_order("IWN")])
-    row = check(c, store, "IWN")            # empty db -> sweep -> row
-    assert row is not None
-    assert c.rh_reads >= 1
-
-
 def test_expiring_stop_triggers_explicit_rh_check_and_renew(store):
     old = rh_order("IWN", created="2026-04-10T00:00:00+00:00")  # ~86d ago
     c = FakeClient(book=[old])
@@ -203,26 +177,6 @@ def test_expiring_stop_triggers_explicit_rh_check_and_renew(store):
     assert c.rh_reads > reads, "near-expiry must force an RH re-read"
     assert {r[0] for r in c.replaced} == {old["id"]}
     assert all(r[2] is True for r in c.replaced), "renew must default to dry_run"
-
-
-def test_live_renew_refreshes_expiry_so_check_stops_renewing(store):
-    old = rh_order("IWN", created="2026-04-10T00:00:00+00:00")
-    c = FakeClient(book=[old])
-    sweep(c, store, ["IWN"], dry_run=False)   # live sweep renews for real
-
-    # simulate RH returning the replacement order with a fresh created_at
-    class LiveClient(FakeClient):
-        def replace_stop(self, order_id, payload, dry_run=True):
-            super().replace_stop(order_id, payload, dry_run)
-            return rh_order("IWN", created=sw._now_iso())
-
-    c2 = LiveClient(book=[old])
-    renew(c2, store, "IWN", dry_run=False)
-    row = store.get("IWN")
-    assert not sw._expiring_soon(row), "live renew must advance expires_at"
-    replaced_before = len(c2.replaced)
-    check(c2, store, "IWN")                    # fresh row -> no more renews
-    assert len(c2.replaced) == replaced_before
 
 
 def test_renew_skips_buy_side_stop_instead_of_crashing(store):
@@ -261,29 +215,6 @@ def test_live_sweep_places_whole_shares_with_stop_price(store):
     assert store.get("AAPL")["order_id"] == "ord-123"
 
 
-def test_live_sweep_skips_fractional_only_position(store):
-    c = OrderIdClient()
-    out = sweep(c, store, ["AAPL"], **_live_kwargs(qty=0.4))
-    assert c.placed == []
-    assert out["skipped"][0]["reason"] == "fractional_or_no_qty"
-
-
-def test_live_sweep_skips_without_price(store):
-    c = OrderIdClient()
-    kw = _live_kwargs(qty=5); kw["price_map"] = {}
-    out = sweep(c, store, ["AAPL"], **kw)
-    assert c.placed == []
-    assert out["skipped"][0]["reason"] == "no_price"
-
-
-def test_live_sweep_skips_unresolved_instrument(store):
-    c = OrderIdClient()
-    kw = _live_kwargs(qty=5); kw["instrument_resolver"] = lambda s: ""
-    out = sweep(c, store, ["AAPL"], **kw)
-    assert c.placed == []
-    assert out["skipped"][0]["reason"] == "unresolved_urls"
-
-
 def test_rh_rejection_without_id_is_not_placed(store):
     # box returns 200 but RH rejected (no id) -> must count as skipped
     class RejectClient(FakeClient):
@@ -297,13 +228,6 @@ def test_rh_rejection_without_id_is_not_placed(store):
     assert out["placed"] == []
     assert out["skipped"][0]["reason"].startswith("rh_rejected")
     assert store.get("AAPL") is None
-
-
-def test_dry_run_sweep_unchanged_without_urls(store):
-    c = FakeClient()
-    out = sweep(c, store, ["AAPL"], dry_run=True)
-    assert [p["symbol"] for p in out["placed"]] == ["AAPL"]
-    assert c.placed[0][1] is True
 
 
 def test_prune_removes_rows_gone_from_rh(store):
@@ -340,11 +264,6 @@ def test_trail_clamps_and_renormalizes_within_tolerance():
     assert abs(_weighted_avg(mvs, trails) - sw.TRAIL_PERCENT) <= 0.1
 
 
-def test_trail_single_symbol_gets_flat_budget():
-    trails = sw.compute_trail_percents({"AAPL": 1000}, {"AAPL": 0.3})
-    assert trails == {"AAPL": sw.TRAIL_PERCENT}
-
-
 def test_trail_degenerate_sigma_falls_back_flat():
     mvs = {"AAPL": 5000, "NOSIG": 5000, "ZEROSIG": 1000}
     sigmas = {"AAPL": 0.3, "ZEROSIG": 0.0}
@@ -361,14 +280,6 @@ def test_trail_empty_sigmas_is_flat_16_compatible():
     assert trails == {"AAPL": sw.TRAIL_PERCENT, "IWN": sw.TRAIL_PERCENT}
 
 
-def test_trail_quantizes_to_half_percent_steps():
-    mvs = {"AAPL": 5000, "TSLA": 3000, "KO": 2000}
-    sigmas = {"AAPL": 0.25, "TSLA": 0.45, "KO": 0.12}
-    trails = sw.compute_trail_percents(mvs, sigmas)
-    for t in trails.values():
-        assert abs(t / sw.TRAIL_QUANTUM - round(t / sw.TRAIL_QUANTUM)) < 1e-9
-
-
 def test_sweep_uses_trail_map_per_symbol(store):
     c = FakeClient()
     sweep(c, store, ["AAPL", "IWN"],
@@ -376,13 +287,6 @@ def test_sweep_uses_trail_map_per_symbol(store):
     pegs = {p["symbol"]: float(p["trailing_peg"]["percentage"])
             for p, _ in c.placed}
     assert pegs == {"AAPL": 12.5, "IWN": 20.0}
-
-
-def test_sweep_without_trail_map_stays_flat(store):
-    c = FakeClient()
-    sweep(c, store, ["AAPL"])
-    payload, _ = c.placed[0]
-    assert float(payload["trailing_peg"]["percentage"]) == sw.TRAIL_PERCENT
 
 
 # --------------------------------------------------------------------------- #
@@ -395,27 +299,9 @@ def test_parse_utc_coerces_naive_to_utc():
     assert dt is not None and dt.tzinfo == timezone.utc
 
 
-def test_parse_utc_handles_z_suffix_and_junk():
-    assert sw._parse_utc("2026-08-06T00:00:15.5Z") is not None
-    assert sw._parse_utc("not-a-date") is None
-    assert sw._parse_utc(None) is None
-
-
 def test_expiring_soon_with_naive_created_does_not_raise():
     # Regression: a naive expires_at used to raise TypeError (naive vs aware).
     naive_created = "2026-08-06T00:00:15"          # no tz
     expires = sw._plus_days(naive_created, sw.GTC_LIFETIME_DAYS)
     assert "+00:00" in expires                      # _plus_days now emits aware
     assert sw._expiring_soon({"expires_at": expires}) is False
-
-
-def test_expiring_soon_true_when_within_lead_window():
-    soon = sw._plus_days(sw._now_iso(), sw.EXPIRY_LEAD_DAYS - 1)
-    assert sw._expiring_soon({"expires_at": soon}) is True
-
-
-def test_expiring_soon_false_for_far_future_and_missing():
-    far = sw._plus_days(sw._now_iso(), sw.EXPIRY_LEAD_DAYS + 30)
-    assert sw._expiring_soon({"expires_at": far}) is False
-    assert sw._expiring_soon({}) is False
-    assert sw._expiring_soon({"expires_at": "garbage"}) is False

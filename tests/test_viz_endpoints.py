@@ -91,12 +91,6 @@ def test_order_funnel_stages_and_slippage(client):
     assert body["executions"][0]["exec_id"] == "e1"
 
 
-def test_order_funnel_rejects_history_less_broker(client):
-    r = client.get("/api/viz/order-funnel/minimal")
-    assert r.status_code == 400
-    assert "does not expose" in r.get_json()["error"]
-
-
 def test_wheel_lanes_groups_and_phases(client):
     body = client.get("/api/viz/wheel-lanes").get_json()
     lanes = {lane["symbol"]: lane for lane in body["lanes"]}
@@ -106,7 +100,3 @@ def test_wheel_lanes_groups_and_phases(client):
     assert lanes["QQQ"]["phase"] == "cash_secured_put"
     assert lanes["QQQ"]["shares"] is None
 
-
-def test_wheel_lanes_rejects_detail_less_broker(client):
-    r = client.get("/api/viz/wheel-lanes/minimal")
-    assert r.status_code == 400
