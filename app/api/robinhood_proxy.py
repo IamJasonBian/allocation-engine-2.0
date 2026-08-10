@@ -72,6 +72,39 @@ def place_trailing_stop():
     return _handle(lambda: client.place_trailing_stop(payload, dry_run=dry_run))
 
 
+@bp.route("/robinhood/orders/<order_id>", methods=["GET"])
+def get_order(order_id):
+    """Look up a single order by id (raw Robinhood order dict)."""
+    client = AuthServiceClient()
+    return _handle(lambda: client.get_order(order_id))
+
+
+@bp.route("/robinhood/orders/<order_id>/replace", methods=["POST"])
+def replace_order(order_id):
+    """Patch an order by replacing it. Body: {payload, dry_run?}.
+
+    ``payload`` is a full order body with a fresh ``ref_id`` (see
+    ``build_replace_payload``); RH returns a new order whose ``replaces`` points
+    at this one.
+    """
+    body = request.get_json(silent=True) or {}
+    dry_run = body.get("dry_run", current_app.config.get("DRY_RUN", True))
+    payload = body.get("payload")
+    if payload is None:
+        return jsonify({"error": "provide a 'payload' object"}), 400
+    client = AuthServiceClient()
+    return _handle(lambda: client.replace_order(order_id, payload, dry_run=dry_run))
+
+
+@bp.route("/robinhood/orders/<order_id>/cancel", methods=["POST"])
+def cancel_order(order_id):
+    """Cancel a single order by id. Body: {dry_run?}."""
+    body = request.get_json(silent=True) or {}
+    dry_run = body.get("dry_run", current_app.config.get("DRY_RUN", True))
+    client = AuthServiceClient()
+    return _handle(lambda: client.cancel_order(order_id, dry_run=dry_run))
+
+
 @bp.route("/robinhood/mcp", methods=["POST"])
 def run_mcp():
     """Relay a JSON-RPC call to the official Robinhood MCP via the auth-service.

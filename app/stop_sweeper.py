@@ -299,18 +299,34 @@ def _now_iso():
     return datetime.now(timezone.utc).isoformat()
 
 
-def _plus_days(iso, days):
+def _parse_utc(iso):
+    """Parse an ISO timestamp to a UTC-aware datetime, or None if unparseable.
+
+    Robinhood stamps `created_at` with a trailing ``Z``; other sources may emit
+    a naive timestamp with no offset. A naive value is assumed to be UTC so
+    downstream arithmetic never mixes offset-naive and offset-aware datetimes
+    (which raises TypeError).
+    """
+    if not iso:
+        return None
     try:
-        dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+        dt = datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
     except ValueError:
-        dt = datetime.now(timezone.utc)
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def _plus_days(iso, days):
+    dt = _parse_utc(iso) or datetime.now(timezone.utc)
     return (dt + timedelta(days=days)).isoformat()
 
 
 def _expiring_soon(row, lead_days=EXPIRY_LEAD_DAYS):
     if not row or not row.get("expires_at"):
         return False
-    exp = datetime.fromisoformat(row["expires_at"])
+    exp = _parse_utc(row["expires_at"])
+    if exp is None:
+        return False
     return exp - datetime.now(timezone.utc) <= timedelta(days=lead_days)
 
 

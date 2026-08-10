@@ -383,3 +383,39 @@ def test_sweep_without_trail_map_stays_flat(store):
     sweep(c, store, ["AAPL"])
     payload, _ = c.placed[0]
     assert float(payload["trailing_peg"]["percentage"]) == sw.TRAIL_PERCENT
+
+
+# --------------------------------------------------------------------------- #
+# timezone-safe expiry checks (_parse_utc / _plus_days / _expiring_soon)
+# --------------------------------------------------------------------------- #
+
+def test_parse_utc_coerces_naive_to_utc():
+    from datetime import timezone
+    dt = sw._parse_utc("2026-08-06T00:00:15")      # no offset -> assume UTC
+    assert dt is not None and dt.tzinfo == timezone.utc
+
+
+def test_parse_utc_handles_z_suffix_and_junk():
+    assert sw._parse_utc("2026-08-06T00:00:15.5Z") is not None
+    assert sw._parse_utc("not-a-date") is None
+    assert sw._parse_utc(None) is None
+
+
+def test_expiring_soon_with_naive_created_does_not_raise():
+    # Regression: a naive expires_at used to raise TypeError (naive vs aware).
+    naive_created = "2026-08-06T00:00:15"          # no tz
+    expires = sw._plus_days(naive_created, sw.GTC_LIFETIME_DAYS)
+    assert "+00:00" in expires                      # _plus_days now emits aware
+    assert sw._expiring_soon({"expires_at": expires}) is False
+
+
+def test_expiring_soon_true_when_within_lead_window():
+    soon = sw._plus_days(sw._now_iso(), sw.EXPIRY_LEAD_DAYS - 1)
+    assert sw._expiring_soon({"expires_at": soon}) is True
+
+
+def test_expiring_soon_false_for_far_future_and_missing():
+    far = sw._plus_days(sw._now_iso(), sw.EXPIRY_LEAD_DAYS + 30)
+    assert sw._expiring_soon({"expires_at": far}) is False
+    assert sw._expiring_soon({}) is False
+    assert sw._expiring_soon({"expires_at": "garbage"}) is False
