@@ -53,6 +53,8 @@ class FakeIB:
         self._summary = []
         self._portfolio = []
         self._open_trades = []
+        self._account_wide = []      # orders from other clients/TWS
+        self.all_open_requested = 0
         self._trades = []
         self._executions = []
 
@@ -70,6 +72,15 @@ class FakeIB:
 
     def openTrades(self):
         return self._open_trades
+
+    def reqAllOpenOrders(self):
+        # account-wide fetch: orders from other clients become visible here
+        self.all_open_requested += 1
+        seen = {id(t) for t in self._open_trades}
+        for t in self._account_wide:
+            if id(t) not in seen:
+                self._open_trades.append(t)
+        return [t.order for t in self._open_trades]
 
     def trades(self):
         return self._trades
@@ -216,6 +227,23 @@ def test_loads_maintained_ib_async_when_ib_insync_is_unavailable(monkeypatch):
 
     monkeypatch.setattr("builtins.__import__", import_module)
     assert ibkr_client._load_ib_client() is fake
+
+
+def test_open_orders_is_account_wide_not_just_this_client(trader, fake_ib):
+    # An order placed under a different clientId isn't in this session's
+    # openTrades() until reqAllOpenOrders() pulls the account-wide book.
+    fake_ib._account_wide = [
+        SimpleNamespace(
+            contract=SimpleNamespace(symbol="F"),
+            order=SimpleNamespace(orderId=4, action="BUY", totalQuantity=1.0,
+                                  orderType="LMT", lmtPrice=14.05, auxPrice=0.0),
+            orderStatus=SimpleNamespace(status="PreSubmitted"),
+        )
+    ]
+    orders = trader.open_orders()
+    assert fake_ib.all_open_requested == 1        # account-wide fetch happened
+    assert [o["id"] for o in orders] == ["4"]     # cross-client order is visible
+    assert orders[0]["status"] == "PreSubmitted"
 
 
 def test_cancel_order_matches_by_id(trader, fake_ib):

@@ -214,6 +214,11 @@ class IBKRTrader(BrokerClient):
 
     def open_orders(self) -> list[dict]:
         ib = self._connect()
+        # Account-wide: reqAllOpenOrders surfaces orders from every clientId and
+        # from TWS/gateway itself, not just this session. openTrades() alone is
+        # client-scoped and silently misses orders placed under another clientId
+        # (e.g. after a reconnect), which would make the engine misjudge the book.
+        ib.reqAllOpenOrders()
         out = []
         for trade in ib.openTrades():
             order = trade.order
@@ -268,6 +273,7 @@ class IBKRTrader(BrokerClient):
 
     def cancel_order(self, order_id: str):
         ib = self._connect()
+        ib.reqAllOpenOrders()   # see orders from other clients too, so we can cancel them
         for trade in ib.openTrades():
             if str(trade.order.orderId) == str(order_id):
                 ib.cancelOrder(trade.order)
