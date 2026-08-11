@@ -50,7 +50,11 @@ class Config:
     # on a box we control (Tailscale / GCP); this is just where we reach it.
     IBKR_BASE_URL = os.getenv("IBKR_BASE_URL", "")
     IBKR_ACCOUNT_ID = os.getenv("IBKR_ACCOUNT_ID", "")
-    IBKR_VERIFY_SSL = os.getenv("IBKR_VERIFY_SSL", "false").lower() == "true"
+    # Defaults to verifying the gateway's certificate. Only set this to
+    # false for a gateway with a self-signed cert on a network we trust
+    # (Tailscale / private GCP) — never for a gateway reachable over the
+    # open internet.
+    IBKR_VERIFY_SSL = os.getenv("IBKR_VERIFY_SSL", "true").lower() == "true"
 
     # -- Money movement (deposit / transfer between broker accounts) --
     # Linked bank relationship to use for Robinhood ACH deposit/withdraw.

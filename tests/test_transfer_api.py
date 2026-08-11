@@ -99,6 +99,33 @@ def test_transfer_rejects_non_positive_amount(client, fake_brokers):
     assert resp.status_code == 400
 
 
+@pytest.mark.parametrize("armed_value", ["false", "0", "no", 1, 0])
+def test_transfer_live_requires_literal_true_for_armed(client, fake_brokers, armed_value):
+    """A JSON string "false" is truthy in Python — armed must reject anything
+    that isn't the literal boolean true, not just anything falsy-looking."""
+    resp = client.post("/api/transfer", json={
+        "from_broker": "robinhood", "to_broker": "ibkr", "amount": 500,
+        "dry_run": False, "armed": armed_value,
+    })
+    assert resp.status_code == 400
+    assert "armed" in resp.get_json()["error"]
+
+
+@pytest.mark.parametrize("amount", [1.999, 0.001, True, float("nan"), float("inf")])
+def test_transfer_rejects_amounts_that_would_change_on_serialization(client, fake_brokers, amount):
+    resp = client.post("/api/transfer", json={
+        "from_broker": "robinhood", "to_broker": "ibkr", "amount": amount,
+    })
+    assert resp.status_code == 400
+
+
+def test_transfer_accepts_two_decimal_amount(client, fake_brokers):
+    resp = client.post("/api/transfer", json={
+        "from_broker": "robinhood", "to_broker": "ibkr", "amount": 99.99,
+    })
+    assert resp.status_code == 200
+
+
 # --------------------------------------------------------------------------- #
 # orchestration: withdraw then deposit, and the "not rolled back" case
 # --------------------------------------------------------------------------- #
@@ -106,6 +133,11 @@ def test_transfer_rejects_non_positive_amount(client, fake_brokers):
 def test_transfer_armed_calls_withdraw_then_deposit(client, monkeypatch):
     robinhood = FakeBroker(withdraw_result={"id": "wd-42"})
     ibkr = FakeBroker(deposit_result={"id": "dep-42"})
+    call_order = []
+    monkeypatch.setattr(robinhood, "withdraw",
+                         lambda amount: call_order.append("withdraw") or {"id": "wd-42"})
+    monkeypatch.setattr(ibkr, "deposit",
+                         lambda amount: call_order.append("deposit") or {"id": "dep-42"})
     monkeypatch.setattr(transfer_mod, "get_broker",
                          lambda name: {"robinhood": robinhood, "ibkr": ibkr}[name])
 
@@ -117,6 +149,7 @@ def test_transfer_armed_calls_withdraw_then_deposit(client, monkeypatch):
     body = resp.get_json()
     assert body["withdraw_result"]["id"] == "wd-42"
     assert body["deposit_result"]["id"] == "dep-42"
+    assert call_order == ["withdraw", "deposit"]
 
 
 def test_transfer_deposit_leg_failure_is_reported_not_hidden(client, monkeypatch):

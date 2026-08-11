@@ -565,9 +565,22 @@ class RobinhoodTrader(BrokerClient):
             "direction": direction,
         }
         try:
-            result = rh.helper.request_post(
-                "https://api.robinhood.com/ach/transfers/", payload
+            # jsonify_data=False so we can see the HTTP status code — the
+            # default jsonify_data=True silently returns the decoded error
+            # body, which looks identical to a real (bad) response and hides
+            # an expired box token from us.
+            resp = rh.helper.request_post(
+                "https://api.robinhood.com/ach/transfers/", payload, jsonify_data=False
             )
+            if resp is not None and resp.status_code == 401:
+                log.warning(
+                    "RH ACH %s got 401 — re-vending box token and retrying once", direction
+                )
+                self._box_auth(force=True)
+                resp = rh.helper.request_post(
+                    "https://api.robinhood.com/ach/transfers/", payload, jsonify_data=False
+                )
+            result = resp.json() if resp is not None else None
             if result and result.get("id"):
                 log.info("RH ACH %s submitted: $%.2f -> %s", direction, amount, result["id"])
                 return {"id": result["id"], "state": result.get("state"), "amount": amount}

@@ -29,10 +29,12 @@ log = logging.getLogger(__name__)
 _ORDER_TYPE_MAP = {
     OrderType.MARKET: "MKT",
     OrderType.LIMIT: "LMT",
-    OrderType.STOP: "STOP",
-    OrderType.STOP_LIMIT: "STOP_LIMIT",
+    OrderType.STOP: "STP",
+    OrderType.STOP_LIMIT: "STP_LMT",
 }
 _REVERSE_ORDER_TYPE_MAP = {v: k for k, v in _ORDER_TYPE_MAP.items()}
+
+_POSITIONS_PAGE_SIZE = 100
 
 
 class IBKRTrader(BrokerClient):
@@ -42,6 +44,7 @@ class IBKRTrader(BrokerClient):
         self.verify_ssl = verify_ssl
         self.timeout = timeout
         self._conid_cache: dict[str, int] = {}
+        self._portfolio_context_ready = False
 
         if not verify_ssl:
             # The gateway typically presents a self-signed cert on a private
@@ -53,29 +56,36 @@ class IBKRTrader(BrokerClient):
     def _url(self, path: str) -> str:
         return f"{self.base_url}{path}"
 
-    def _get(self, path: str, params: dict | None = None):
+    def _get(self, path: str, params: dict | None = None, tickle: bool = True):
+        if tickle:
+            self._tickle()
         resp = requests.get(self._url(path), params=params,
                              verify=self.verify_ssl, timeout=self.timeout)
         resp.raise_for_status()
         return resp.json() if resp.content else None
 
-    def _post(self, path: str, payload: dict):
+    def _post(self, path: str, payload: dict, tickle: bool = True):
+        if tickle:
+            self._tickle()
         resp = requests.post(self._url(path), json=payload,
                               verify=self.verify_ssl, timeout=self.timeout)
         resp.raise_for_status()
         return resp.json() if resp.content else None
 
-    def _delete(self, path: str, params: dict | None = None):
+    def _delete(self, path: str, params: dict | None = None, tickle: bool = True):
+        if tickle:
+            self._tickle()
         resp = requests.delete(self._url(path), params=params,
                                 verify=self.verify_ssl, timeout=self.timeout)
         resp.raise_for_status()
         return resp.json() if resp.content else None
 
     def _tickle(self):
-        """Best-effort keep-alive; a failed tickle just means the next real
-        call will surface the stale-session error itself."""
+        """Best-effort keep-alive, called before every other CPAPI request
+        (see _get/_post/_delete) so a stale session never silently skips it.
+        A failed tickle just means the next real call surfaces the error."""
         try:
-            self._post("/tickle", {})
+            self._post("/tickle", {}, tickle=False)
         except requests.RequestException:
             log.warning("[ibkr] tickle failed — gateway session may need re-auth")
 
@@ -103,8 +113,17 @@ class IBKRTrader(BrokerClient):
 
     # -- account / positions ------------------------------------------------
 
+    def _ensure_portfolio_context(self):
+        """CPAPI requires /portfolio/accounts to have been called at least
+        once before any /portfolio/{accountId}/* endpoint will respond —
+        this establishes the session's account context."""
+        if self._portfolio_context_ready:
+            return
+        self._get("/portfolio/accounts")
+        self._portfolio_context_ready = True
+
     def account(self) -> dict:
-        self._tickle()
+        self._ensure_portfolio_context()
         summary = self._get(f"/portfolio/{self.account_id}/summary") or {}
 
         def amt(key):
@@ -121,44 +140,61 @@ class IBKRTrader(BrokerClient):
         }
 
     def positions(self) -> list[dict]:
-        self._tickle()
-        raw = self._get(f"/portfolio/{self.account_id}/positions/0") or []
+        """Fetch every position page — CPAPI returns up to 100 positions per
+        zero-indexed page, so keep paging until a short page signals the end."""
+        self._ensure_portfolio_context()
         result = []
-        for p in raw:
-            qty = float(p.get("position", 0) or 0)
-            if qty == 0:
-                continue
-            avg_cost = float(p.get("avgCost", 0) or 0)
-            market_value = float(p.get("mktValue", 0) or 0)
-            unrealized_pl = float(p.get("unrealizedPnl", 0) or 0)
-            cost_basis = qty * avg_cost
-            result.append({
-                "symbol": p.get("ticker") or p.get("contractDesc", ""),
-                "qty": qty,
-                "side": "long" if qty > 0 else "short",
-                "market_value": round(market_value, 2),
-                "avg_entry": avg_cost,
-                "unrealized_pl": round(unrealized_pl, 2),
-                "unrealized_pl_pct": round(unrealized_pl / cost_basis, 4) if cost_basis else 0.0,
-            })
+        page = 0
+        while True:
+            raw = self._get(f"/portfolio/{self.account_id}/positions/{page}") or []
+            for p in raw:
+                qty = float(p.get("position", 0) or 0)
+                if qty == 0:
+                    continue
+                avg_cost = float(p.get("avgCost", 0) or 0)
+                market_value = float(p.get("mktValue", 0) or 0)
+                unrealized_pl = float(p.get("unrealizedPnl", 0) or 0)
+                cost_basis = qty * avg_cost
+                result.append({
+                    "symbol": p.get("ticker") or p.get("contractDesc", ""),
+                    "qty": qty,
+                    "side": "long" if qty > 0 else "short",
+                    "market_value": round(market_value, 2),
+                    "avg_entry": avg_cost,
+                    "unrealized_pl": round(unrealized_pl, 2),
+                    "unrealized_pl_pct": round(unrealized_pl / abs(cost_basis), 4) if cost_basis else 0.0,
+                })
+            if len(raw) < _POSITIONS_PAGE_SIZE:
+                break
+            page += 1
         return result
 
     def open_orders(self) -> list[dict]:
-        self._tickle()
         data = self._get("/iserver/account/orders", params={"accountId": self.account_id}) or {}
         raw = data.get("orders", []) if isinstance(data, dict) else []
         result = []
         for o in raw:
+            ibkr_type = o.get("orderType", "")
             price = o.get("price")
             aux_price = o.get("auxPrice")
+            price_f = float(price) if price not in (None, "") else None
+            aux_price_f = float(aux_price) if aux_price not in (None, "") else None
+            # STP carries the stop price in `price`; STP_LMT carries the
+            # limit price in `price` and the stop price in `auxPrice`.
+            if ibkr_type == "STP":
+                limit_price, stop_price = None, price_f
+            elif ibkr_type == "STP_LMT":
+                limit_price, stop_price = price_f, aux_price_f
+            else:
+                limit_price, stop_price = price_f, None
             result.append({
                 "id": str(o.get("orderId", "")),
                 "symbol": o.get("ticker", ""),
                 "side": (o.get("side") or "").upper(),
                 "qty": float(o.get("totalSize", 0) or 0),
-                "type": _REVERSE_ORDER_TYPE_MAP.get(o.get("orderType", ""), "market"),
-                "limit_price": float(price) if price not in (None, "") else None,
-                "stop_price": float(aux_price) if aux_price not in (None, "") else None,
+                "type": _REVERSE_ORDER_TYPE_MAP.get(ibkr_type, "market"),
+                "limit_price": limit_price,
+                "stop_price": stop_price,
                 "status": o.get("status", "unknown"),
             })
         return result
@@ -181,7 +217,6 @@ class IBKRTrader(BrokerClient):
         return data
 
     def submit_order(self, order: dict) -> dict | None:
-        self._tickle()
         symbol = order["symbol"]
         side = order["side"].upper()
         qty = float(order["quantity"])
@@ -202,9 +237,16 @@ class IBKRTrader(BrokerClient):
             "tif": "GTC",
             "acctId": self.account_id,
         }
-        if otype in (OrderType.LIMIT, OrderType.STOP_LIMIT) and limit_px is not None:
+        # CPAPI price fields differ by order type: LMT/STP_LMT carry the
+        # limit price in `price`; STP carries its stop price in `price`
+        # instead (there's no separate limit leg); STP_LMT's stop price
+        # goes in `auxPrice`.
+        if otype == OrderType.LIMIT and limit_px is not None:
             ibkr_order["price"] = float(limit_px)
-        if otype in (OrderType.STOP, OrderType.STOP_LIMIT) and stop_px is not None:
+        elif otype == OrderType.STOP and stop_px is not None:
+            ibkr_order["price"] = float(stop_px)
+        elif otype == OrderType.STOP_LIMIT and limit_px is not None and stop_px is not None:
+            ibkr_order["price"] = float(limit_px)
             ibkr_order["auxPrice"] = float(stop_px)
 
         try:
@@ -231,7 +273,6 @@ class IBKRTrader(BrokerClient):
         }
 
     def cancel_order(self, order_id: str):
-        self._tickle()
         self._delete(f"/iserver/account/{self.account_id}/order/{order_id}",
                       params={"accountId": self.account_id})
         log.info("Cancelled IBKR order %s", order_id)

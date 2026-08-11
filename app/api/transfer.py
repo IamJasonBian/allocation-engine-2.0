@@ -8,6 +8,8 @@ independently, and ACH settlement takes days. Real money only moves when
 TRANSFERS_DRY_RUN=false AND the request body sets armed=true.
 """
 
+from decimal import Decimal, InvalidOperation
+
 from flask import Blueprint, jsonify, request, current_app
 from app.brokers import get_broker
 
@@ -20,17 +22,27 @@ def _resolve_dry_run(body: dict) -> bool:
     return current_app.config.get("TRANSFERS_DRY_RUN", True)
 
 
+def _is_armed(body: dict) -> bool:
+    """Require the literal JSON boolean `true` — a string like "false" or a
+    stray `1` must not be able to authorize a real money movement."""
+    return body.get("armed") is True
+
+
 def _validate_amount(body: dict):
-    amount = body.get("amount")
-    if amount is None:
+    raw_amount = body.get("amount")
+    if raw_amount is None:
         return None, "amount is required"
+    if isinstance(raw_amount, bool):
+        return None, "amount must be a finite number"
     try:
-        amount = float(amount)
-    except (TypeError, ValueError):
-        return None, "amount must be a number"
-    if amount <= 0:
+        amount = Decimal(str(raw_amount))
+    except (InvalidOperation, TypeError, ValueError):
+        return None, "amount must be a finite number"
+    if not amount.is_finite() or amount <= 0:
         return None, "amount must be positive"
-    return amount, None
+    if amount.as_tuple().exponent < -2:
+        return None, "amount must have at most two decimal places"
+    return float(amount), None
 
 
 def _do_leg(broker_name: str, amount: float, action: str) -> dict:
@@ -60,7 +72,7 @@ def deposit(broker_name):
             "action": "deposit", "amount": amount,
             "message": "Deposit validated but not submitted (dry_run=true)",
         })
-    if not body.get("armed", False):
+    if not _is_armed(body):
         return jsonify({"error": "armed=true is required to submit a real deposit"}), 400
 
     try:
@@ -90,7 +102,7 @@ def withdraw(broker_name):
             "action": "withdraw", "amount": amount,
             "message": "Withdrawal validated but not submitted (dry_run=true)",
         })
-    if not body.get("armed", False):
+    if not _is_armed(body):
         return jsonify({"error": "armed=true is required to submit a real withdrawal"}), 400
 
     try:
@@ -132,7 +144,7 @@ def transfer():
             "from_broker": from_broker, "to_broker": to_broker, "amount": amount,
             "message": "Transfer validated but not submitted (dry_run=true)",
         })
-    if not body.get("armed", False):
+    if not _is_armed(body):
         return jsonify({"error": "armed=true is required to submit a real transfer"}), 400
 
     try:
