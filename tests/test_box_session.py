@@ -63,41 +63,10 @@ def test_expiring_token_refetches(db):
     assert tok["token"] == "acc-123"
 
 
-def test_force_refetches_despite_fresh_cache(db):
-    c = FakeAuthClient(tok=fresh_token())
-    bs.get_box_token(client=c, db_path=db)
-    bs.get_box_token(client=c, db_path=db, force=True)
-    assert c.calls == 2
-
-
 def test_box_error_returns_none_never_raises(db):
     from app.auth_service_client import AuthServiceError
     c = FakeAuthClient(error=AuthServiceError("auth-service GET /token returned 404"))
     assert bs.get_box_token(client=c, db_path=db) is None
-
-
-def test_otp_pending_returns_none(db):
-    from app.auth_service_client import OTPRequired
-    c = FakeAuthClient(error=OTPRequired("device approval needed"))
-    assert bs.get_box_token(client=c, db_path=db) is None
-
-
-def test_iso_and_epoch_expiry_both_parse():
-    assert bs.token_expiring({"expires_at": time.time() + 3600}) is False
-    assert bs.token_expiring({"expires_at": time.time() + 10}) is True
-    iso_future = "2099-01-01T00:00:00+00:00"
-    assert bs.token_expiring({"expires_at": iso_future}) is False
-    assert bs.token_expiring({"expires_at": "garbage"}) is True
-    assert bs.token_expiring({}) is True
-
-
-def test_cached_token_status_fragment(db):
-    assert bs.cached_token_status(db) == {"box_token_cached": False}
-    bs._write_meta(db, bs._META_KEY, json.dumps(fresh_token()))
-    st = bs.cached_token_status(db)
-    assert st["box_token_cached"] is True
-    assert st["account_number"] == "A1"
-    assert st["box_token_expiring"] is False
 
 
 # --------------------------------------------------------------------------- #

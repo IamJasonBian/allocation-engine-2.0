@@ -20,6 +20,15 @@ class Config:
     ALPACA_SECRET_KEY = os.getenv("ALPACA_SECRET_KEY", "")
     ALPACA_PAPER = os.getenv("ALPACA_PAPER", "true").lower() == "true"
 
+    # -- IBKR --
+    # The gateway socket is unauthenticated, so IBKR_HOST must only ever be
+    # localhost or an SSH-tunnel endpoint — never a public address. See
+    # docs/IBKR_GATEWAY.md for where the gateway process runs.
+    IBKR_HOST = os.getenv("IBKR_HOST", "127.0.0.1")
+    IBKR_PORT = int(os.getenv("IBKR_PORT", "4002"))  # gateway paper; 4001 live
+    IBKR_CLIENT_ID = int(os.getenv("IBKR_CLIENT_ID", "1"))
+    IBKR_PAPER = os.getenv("IBKR_PAPER", "true").lower() == "true"
+
     # -- Robinhood --
     # Credentials, TOTP and device identity live in the auth-service box only;
     # this service never logs in. Email is kept for status reporting and the
@@ -33,6 +42,10 @@ class Config:
     AUTH_SERVICE_URL = os.getenv("AUTH_SERVICE_URL", "")
     RH_AUTH_SERVICE_REQUEST_TOKEN = os.getenv("RH_AUTH_SERVICE_REQUEST_TOKEN", "")
     AUTH_SERVICE_TIMEOUT = int(os.getenv("AUTH_SERVICE_TIMEOUT", "30"))
+    # Bearer token gating the order-mutation routes (replace/cancel/lookup),
+    # same scheme as the render-logs netlify function. Fail closed: unset means
+    # those routes refuse to run.
+    DASHBOARD_REQUEST_TOKEN = os.getenv("DASHBOARD_REQUEST_TOKEN", "")
 
     # -- Trailing-stop sweeper (runs in the background engine loop) --
     # Universe beyond current positions; comma-separated symbols.
@@ -41,6 +54,9 @@ class Config:
     STOP_SWEEP_DRY_RUN = os.getenv("STOP_SWEEP_DRY_RUN", "true").lower() == "true"
     # Earliest ET hour for the daily sweep (0 = first tick of the day).
     STOP_SWEEP_HOUR_ET = int(os.getenv("STOP_SWEEP_HOUR_ET", "0"))
+    # Vol-scaled trail percentages (docs/TRAILING_STOP_WATERFALL.md).
+    # Off = flat STOP_TRAIL_PERCENT, byte-for-byte today's behavior.
+    STOP_VOL_SCALED = os.getenv("STOP_VOL_SCALED", "false").lower() == "true"
     STOP_DB_PATH = os.getenv(
         "STOP_DB_PATH",
         os.path.join(os.path.dirname(__file__), "..", "data", "stops.sqlite3"),

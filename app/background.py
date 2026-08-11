@@ -287,12 +287,25 @@ def start_engine_thread(app):
                     log.info("[stop-sweeper] live sweep deferred — positions "
                              "not loaded yet")
                     return
+                trail_map = None
+                if config.get("STOP_VOL_SCALED"):
+                    mv_map = {}
+                    for p in current_positions:
+                        sym = (p.get("symbol") or "").upper()
+                        if sym and p.get("market_value"):
+                            mv_map[sym] = float(p["market_value"])
+                    # No sigma source is wired yet (see the gaps in
+                    # docs/TRAILING_STOP_WATERFALL.md) — empty sigmas mean
+                    # every symbol falls back to the flat budget, logged.
+                    trail_map = sw.compute_trail_percents(mv_map, {})
                 log.info("[stop-sweeper] starting daily sweep "
-                         "(tickers=%s, trail=%.0f%%, dry_run=%s)",
-                         tickers or "book-only", sw.TRAIL_PERCENT, dry)
+                         "(tickers=%s, trail=%.0f%%, vol_scaled=%s, dry_run=%s)",
+                         tickers or "book-only", sw.TRAIL_PERCENT,
+                         bool(trail_map), dry)
                 out = sw.sweep(sweeper_client, sweeper_store, tickers,
                                dry_run=dry, qty_map=qty_map, price_map=price_map,
-                               account_url=sw.account_url_from_box())
+                               account_url=sw.account_url_from_box(),
+                               trail_map=trail_map)
                 log.info("[stop-sweeper] sweep done: %d active in RH book, "
                          "placed=%s, renewed=%s, pruned=%s, skipped=%s",
                          out["active_from_rh"],

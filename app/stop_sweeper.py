@@ -48,6 +48,11 @@ BOX_BASE = os.getenv("AUTH_SERVICE_URL", "")
 BOX_TOKEN = os.getenv("RH_AUTH_SERVICE_REQUEST_TOKEN", "")
 
 TRAIL_PERCENT = float(os.getenv("STOP_TRAIL_PERCENT", "16"))
+# Vol-scaled trail bounds (docs/TRAILING_STOP_WATERFALL.md): clamp then
+# renormalize so the budget invariant survives; quantize to broker-friendly steps.
+TRAIL_FLOOR = 8.0
+TRAIL_CAP = 24.0
+TRAIL_QUANTUM = 0.5
 GTC_LIFETIME_DAYS = 90          # RH cancels GTC orders after ~90 days
 EXPIRY_LEAD_DAYS = int(os.getenv("STOP_EXPIRY_LEAD_DAYS", "7"))
 # Pace live placements — RH throttles bursts (~429 after a handful/second).
@@ -294,18 +299,34 @@ def _now_iso():
     return datetime.now(timezone.utc).isoformat()
 
 
-def _plus_days(iso, days):
+def _parse_utc(iso):
+    """Parse an ISO timestamp to a UTC-aware datetime, or None if unparseable.
+
+    Robinhood stamps `created_at` with a trailing ``Z``; other sources may emit
+    a naive timestamp with no offset. A naive value is assumed to be UTC so
+    downstream arithmetic never mixes offset-naive and offset-aware datetimes
+    (which raises TypeError).
+    """
+    if not iso:
+        return None
     try:
-        dt = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+        dt = datetime.fromisoformat(str(iso).replace("Z", "+00:00"))
     except ValueError:
-        dt = datetime.now(timezone.utc)
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def _plus_days(iso, days):
+    dt = _parse_utc(iso) or datetime.now(timezone.utc)
     return (dt + timedelta(days=days)).isoformat()
 
 
 def _expiring_soon(row, lead_days=EXPIRY_LEAD_DAYS):
     if not row or not row.get("expires_at"):
         return False
-    exp = datetime.fromisoformat(row["expires_at"])
+    exp = _parse_utc(row["expires_at"])
+    if exp is None:
+        return False
     return exp - datetime.now(timezone.utc) <= timedelta(days=lead_days)
 
 
@@ -390,9 +411,81 @@ def _placement_ok(result):
     return False, str(detail)[:200]
 
 
+def compute_trail_percents(market_values, sigmas, budget=TRAIL_PERCENT,
+                           floor=TRAIL_FLOOR, cap=TRAIL_CAP,
+                           quantum=TRAIL_QUANTUM):
+    """Vol-scaled trailing-stop %% per symbol under the fixed risk budget.
+
+    Pure function (no I/O): trail_i = budget * sigma_i / sigma_bar_w, where
+    sigma_bar_w is the market-value-weighted mean sigma, so the weighted
+    average trail equals `budget` — the flat-percent risk profile is frozen
+    and only the per-symbol distribution moves. Symbols with degenerate data
+    (missing/zero sigma or market value) fall back to the flat `budget`,
+    which keeps them invariant-neutral. Sigmas only enter as ratios, so any
+    consistent unit (daily or annualized vol) works.
+
+    Args:
+        market_values: symbol -> market value (weight basis).
+        sigmas: symbol -> realized volatility; missing entries fall back flat.
+        budget: weighted-average trail to preserve (default flat 16).
+        floor: minimum per-symbol trail %% (clamped, then renormalized).
+        cap: maximum per-symbol trail %% (clamped, then renormalized).
+        quantum: quantize trails to this step; 0 disables quantization.
+
+    Returns:
+        symbol (uppercased) -> trail percent.
+    """
+    out, scaled = {}, {}
+    for sym, mv in (market_values or {}).items():
+        try:
+            mv = float(mv or 0)
+            sig = float((sigmas or {}).get(sym) or 0)
+        except (TypeError, ValueError):
+            mv, sig = 0.0, 0.0
+        if mv > 0 and sig > 1e-12:
+            scaled[sym.upper()] = (mv, sig)
+        else:
+            out[sym.upper()] = float(budget)
+            log.info("trail: %s degenerate data (mv=%s, sigma=%s) — flat %.1f%%",
+                     sym, mv, (sigmas or {}).get(sym), budget)
+
+    if scaled:
+        total_mv = sum(mv for mv, _ in scaled.values())
+        w = {s: mv / total_mv for s, (mv, _) in scaled.items()}
+        sigma_bar = sum(w[s] * sig for s, (_, sig) in scaled.items())
+        raw = {s: budget * sig / sigma_bar for s, (_, sig) in scaled.items()}
+        # Water-filling: pin the worst clamp violator, rescale the rest so the
+        # invariant survives, repeat. One pin per pass — pinning both sides at
+        # once can leave no freedom to renormalize (opposite-direction
+        # violators may self-heal once the other side is pinned).
+        fixed, free = {}, dict(raw)
+        while free:
+            residual = budget - sum(w[s] * t for s, t in fixed.items())
+            k = residual / sum(w[s] * raw[s] for s in free)
+            trial = {s: raw[s] * k for s in free}
+            viol = {s: max(t - cap, floor - t) for s, t in trial.items()
+                    if not floor <= t <= cap}
+            if not viol:
+                free = trial
+                break
+            worst = max(viol, key=viol.get)
+            fixed[worst] = min(max(trial[worst], floor), cap)
+            del free[worst]
+        trails = {**fixed, **free}
+        drift = sum(w[s] * t for s, t in trails.items()) - budget
+        if abs(drift) > 0.1:
+            log.warning("trail: invariant drift %.3f%% after clamping — "
+                        "check clamp bounds vs budget", drift)
+        out.update(trails)
+
+    if quantum:
+        out = {s: round(round(t / quantum) * quantum, 4) for s, t in out.items()}
+    return out
+
+
 def sweep(client, store, tickers, trail_percent=TRAIL_PERCENT, dry_run=True,
           qty_map=None, price_map=None, account_url="",
-          instrument_resolver=resolve_instrument_url):
+          instrument_resolver=resolve_instrument_url, trail_map=None):
     """The start-of-day pass: mirror RH stops into sqlite, cover naked tickers.
 
     Live placement (dry_run=False) needs a WHOLE-share quantity (RH rejects
@@ -442,11 +535,12 @@ def sweep(client, store, tickers, trail_percent=TRAIL_PERCENT, dry_run=True,
                 continue
 
         place_qty = whole_qty if not dry_run else (whole_qty or 1)
+        t_trail = float((trail_map or {}).get(t, trail_percent))
         if not dry_run and (placed or skipped):
             time.sleep(PLACE_DELAY_SECONDS)   # pace to dodge RH 429 throttling
-        log.info("sweep: %s placing %.0f%% trailing stop qty=%s (dry_run=%s)",
-                 t, float(trail_percent), place_qty, dry_run)
-        payload = build_payload(t, "sell", place_qty, trail_percent,
+        log.info("sweep: %s placing %.1f%% trailing stop qty=%s (dry_run=%s)",
+                 t, t_trail, place_qty, dry_run)
+        payload = build_payload(t, "sell", place_qty, t_trail,
                                 account_url=account_url,
                                 instrument_url=instrument_url,
                                 current_price=current_price)
@@ -468,7 +562,7 @@ def sweep(client, store, tickers, trail_percent=TRAIL_PERCENT, dry_run=True,
                          "created_at": _now_iso(), "side": "sell",
                          "quantity": str(place_qty),
                          "trailing_peg": {"type": "percentage",
-                                          "percentage": str(trail_percent)}})
+                                          "percentage": str(t_trail)}})
 
     store.set_meta("last_sweep_at", _now_iso())
     return {"active_from_rh": len(covered), "placed": placed,

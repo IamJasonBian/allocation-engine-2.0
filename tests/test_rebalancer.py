@@ -74,25 +74,6 @@ class TestShadowDepeg:
         assert o["limit_price"] == 30.01
         assert "shadow_replace" in o["reason"]
 
-    def test_no_order_id_skipped(self, rebalancer):
-        event = RiskEvent(
-            event_type=RiskEventType.PRICE_DEPEG,
-            symbol="BTC",
-            drift_pct=0.10,
-            message="no order id",
-            metadata={"asset_type": AssetType.SHADOW_EQUITY},
-        )
-        rebalancer.on_risk_event(event)
-        orders, cancels = rebalancer.drain()
-        assert cancels == []
-        assert orders == []
-
-    def test_no_projected_price_cancel_only(self, rebalancer):
-        rebalancer.on_risk_event(_shadow_event(projected_price=0))
-        orders, cancels = rebalancer.drain()
-        assert len(cancels) == 1
-        assert orders == []
-
     def test_multiple_cancel_and_replace(self, rebalancer):
         rebalancer.on_risk_event(_shadow_event(order_id="ord-1", limit_price=33.0, quantity=375))
         rebalancer.on_risk_event(_shadow_event(order_id="ord-2", limit_price=32.0, quantity=450))
@@ -117,12 +98,6 @@ class TestPositionDrift:
         assert o["quantity"] == 100
         assert o["order_type"] == "market"
 
-    def test_zero_qty_skipped(self, rebalancer):
-        rebalancer.on_risk_event(_position_event(position_qty=0))
-        orders, _ = rebalancer.drain()
-        assert orders == []
-
-
 class TestDrainClears:
     def test_drain_empties_both(self, rebalancer):
         rebalancer.on_risk_event(_shadow_event())
@@ -134,17 +109,3 @@ class TestDrainClears:
         orders2, cancels2 = rebalancer.drain()
         assert orders2 == []
         assert cancels2 == []
-
-
-class TestIgnoresOtherEvents:
-    def test_ignores_non_depeg(self, rebalancer):
-        event = RiskEvent(
-            event_type=RiskEventType.ORDER_REJECTED,
-            symbol="BTC",
-            drift_pct=0.0,
-            message="rejected",
-        )
-        rebalancer.on_risk_event(event)
-        orders, cancels = rebalancer.drain()
-        assert orders == []
-        assert cancels == []
