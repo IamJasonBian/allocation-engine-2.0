@@ -7,7 +7,7 @@ flask-cors>=4.0.0
 alpaca-py>=0.31.0
 robin-stocks>=3.0.0
 pyotp>=2.9.0
-# ib_insync>=0.9.86   # only on the ibkr-gateway box (lazy import; see docs/IBKR_GATEWAY.md)
+# ib_async>=1.0.0   # only on the ibkr-gateway box (lazy import; ib_insync fallback; see docs/IBKR_GATEWAY.md)
 
 # Validation
 pydantic>=2.5.0

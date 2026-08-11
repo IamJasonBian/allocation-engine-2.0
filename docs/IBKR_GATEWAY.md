@@ -129,5 +129,8 @@ user or accept the auto-relogin.
 
 `ib_insync` was archived in 2024 (its author passed away); the maintained
 drop-in fork is [`ib_async`](https://github.com/ib-api-reloaded/ib_async).
-The lazy import in `ibkr_client.py` (`_load_ib_insync`) is the single seam
-to swap when we take that migration.
+The lazy import in `ibkr_client.py` (`_load_ib_client`) now prefers `ib_async`
+and falls back to `ib_insync` for older gateway boxes that still have it.
+`scripts/connect_probe.py` is a read-only connectivity check (it imports
+`ib_async` directly) — run it on the gateway box to confirm the socket before
+enabling the broker.

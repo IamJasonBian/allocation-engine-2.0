@@ -1,4 +1,4 @@
-"""IBKR trading client — wraps ib_insync against a TWS / IB Gateway socket.
+"""IBKR trading client — wraps ib_async against a TWS / IB Gateway socket.
 
 Unlike Alpaca (REST) and Robinhood (token vended by the auth-service box),
 IBKR routing needs a live socket to a running TWS or IB Gateway process, and
@@ -6,7 +6,7 @@ that socket is unauthenticated by design. Where that process lives — and why
 this client must only ever dial localhost or an SSH tunnel, never a public
 address — is docs/IBKR_GATEWAY.md.
 
-ib_insync is imported lazily so deployments that never enable the broker
+The IB client is imported lazily so deployments that never enable the broker
 (ENABLED_BROKERS without "ibkr") don't need it installed.
 """
 
@@ -27,15 +27,19 @@ _IB_TYPE_MAP = {
 }
 
 
-def _load_ib_insync():
-    """Lazy import so non-IBKR deployments don't require the package."""
+def _load_ib_client():
+    """Load maintained ib_async, with ib_insync fallback for old gateway boxes."""
     try:
-        import ib_insync  # type: ignore
-    except ImportError as e:
-        raise ImportError(
-            "ib_insync is required for the ibkr broker. Install with: pip install ib_insync"
-        ) from e
-    return ib_insync
+        import ib_async  # type: ignore
+        return ib_async
+    except ImportError:
+        try:
+            import ib_insync  # type: ignore
+            return ib_insync
+        except ImportError as e:
+            raise ImportError(
+                "ib_async is required for the ibkr broker. Install with: pip install ib_async"
+            ) from e
 
 
 class IBKRTrader(BrokerClient):
@@ -44,21 +48,21 @@ class IBKRTrader(BrokerClient):
         self.port = port
         self.client_id = client_id
         self.paper = paper
-        self._ib = None  # ib_insync.IB, created on first connect
+        self._ib = None  # ib_async.IB, created on first connect
 
     # -- connection -----------------------------------------------------------
 
     def _connect(self):
         """Dial the gateway socket if not already connected. Returns the IB handle."""
-        ib_insync = _load_ib_insync()
+        ib_client = _load_ib_client()
         if self._ib is None:
-            # The engine loop runs in a daemon thread; ib_insync needs an
+            # The engine loop runs in a daemon thread; the IB client needs an
             # asyncio loop in whichever thread touches it.
             try:
                 asyncio.get_event_loop()
             except RuntimeError:
                 asyncio.set_event_loop(asyncio.new_event_loop())
-            self._ib = ib_insync.IB()
+            self._ib = ib_client.IB()
         if not self._ib.isConnected():
             try:
                 self._ib.connect(self.host, self.port, clientId=self.client_id)
@@ -74,8 +78,30 @@ class IBKRTrader(BrokerClient):
         return self._ib
 
     def _stock(self, symbol: str):
-        ib_insync = _load_ib_insync()
-        return ib_insync.Stock(symbol, "SMART", "USD")
+        ib_client = _load_ib_client()
+        return ib_client.Stock(symbol, "SMART", "USD")
+
+    def _contract(self, order: dict):
+        """Build a stock or single-leg option contract from canonical fields."""
+        if order.get("asset_class", "stock").lower() not in ("option", "opt"):
+            return self._stock(order["symbol"])
+
+        missing = [
+            key for key in ("expiration", "strike", "option_type")
+            if order.get(key) in (None, "")
+        ]
+        if missing:
+            raise ValueError(f"Option order missing required fields: {', '.join(missing)}")
+
+        right = str(order["option_type"])[0].upper()
+        if right not in ("C", "P"):
+            raise ValueError("option_type must be call/put or C/P")
+        expiry = str(order["expiration"]).replace("-", "")
+        ib_client = _load_ib_client()
+        return ib_client.Option(
+            order["symbol"], expiry, float(order["strike"]), right,
+            order.get("exchange", "SMART"), order.get("currency", "USD"),
+        )
 
     # -- account / positions ------------------------------------------------
 
@@ -206,7 +232,7 @@ class IBKRTrader(BrokerClient):
     # -- order submission ---------------------------------------------------
 
     def submit_order(self, order: dict) -> dict | None:
-        ib_insync = _load_ib_insync()
+        ib_client = _load_ib_client()
         symbol = order["symbol"]
         action = "BUY" if order["side"] == AppOrderSide.BUY else "SELL"
         qty = float(order["quantity"])
@@ -215,18 +241,18 @@ class IBKRTrader(BrokerClient):
         stop_px = order.get("stop_price")
 
         if otype == OrderType.LIMIT and limit_px is not None:
-            ib_order = ib_insync.LimitOrder(action, qty, float(limit_px))
+            ib_order = ib_client.LimitOrder(action, qty, float(limit_px))
         elif otype == OrderType.STOP and stop_px is not None:
-            ib_order = ib_insync.StopOrder(action, qty, float(stop_px))
+            ib_order = ib_client.StopOrder(action, qty, float(stop_px))
         elif otype == OrderType.STOP_LIMIT and limit_px is not None and stop_px is not None:
-            ib_order = ib_insync.StopLimitOrder(action, qty, float(limit_px), float(stop_px))
+            ib_order = ib_client.StopLimitOrder(action, qty, float(limit_px), float(stop_px))
         else:
-            ib_order = ib_insync.MarketOrder(action, qty)
+            ib_order = ib_client.MarketOrder(action, qty)
         ib_order.tif = "GTC"
 
         try:
             ib = self._connect()
-            contract = self._stock(symbol)
+            contract = self._contract(order)
             ib.qualifyContracts(contract)
             trade = ib.placeOrder(contract, ib_order)
             log.info("Order submitted: %s %s %s @ %s -> %s",

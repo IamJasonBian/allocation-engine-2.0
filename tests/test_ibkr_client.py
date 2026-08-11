@@ -1,7 +1,10 @@
-"""Tests for the IBKR broker client — mapping logic against a fake ib_insync.
+"""Tests for the IBKR broker client — mapping logic against a fake IB client.
 
-No gateway, no network: a stub ib_insync module is injected into sys.modules
-so the client's dict-mapping (the part this repo owns) is what's under test.
+No gateway, no network: a stub IB module is injected into sys.modules so the
+client's dict-mapping (the part this repo owns) is what's under test. The stub
+is injected as both ``ib_async`` (the client's first-choice import) and
+``ib_insync``, so the suite passes whether or not the real ib_async is installed
+alongside the connectivity probe.
 """
 
 import sys
@@ -13,12 +16,16 @@ import pytest
 from app.enums import OrderSide, OrderType
 
 
-def _fake_ib_insync(ib):
+def _fake_ib_client(ib, module_name="ib_async"):
     """Build a module-shaped stub whose IB() returns the given fake."""
-    mod = types.ModuleType("ib_insync")
+    mod = types.ModuleType(module_name)
     mod.IB = lambda: ib
     mod.Stock = lambda symbol, exchange, currency: SimpleNamespace(
         symbol=symbol, exchange=exchange, currency=currency
+    )
+    mod.Option = lambda symbol, expiry, strike, right, exchange, currency: SimpleNamespace(
+        symbol=symbol, lastTradeDateOrContractMonth=expiry, strike=strike,
+        right=right, exchange=exchange, currency=currency, secType="OPT",
     )
     for name, fields in {
         "MarketOrder": ("action", "totalQuantity"),
@@ -90,7 +97,11 @@ class FakeIB:
 @pytest.fixture
 def fake_ib(monkeypatch):
     ib = FakeIB()
-    monkeypatch.setitem(sys.modules, "ib_insync", _fake_ib_insync(ib))
+    # Inject under the client's first-choice import (ib_async) so a real
+    # ib_async installed for the probe does not shadow the stub, and under
+    # ib_insync for the fallback path.
+    monkeypatch.setitem(sys.modules, "ib_async", _fake_ib_client(ib, "ib_async"))
+    monkeypatch.setitem(sys.modules, "ib_insync", _fake_ib_client(ib, "ib_insync"))
     return ib
 
 
@@ -168,6 +179,45 @@ def test_submit_limit_order(trader, fake_ib):
     assert order.tif == "GTC"
 
 
+def test_submit_option_limit_order_uses_full_contract(trader, fake_ib):
+    result = trader.submit_order({
+        "symbol": "SPY",
+        "asset_class": "option",
+        "expiration": "20260918",
+        "strike": "500",
+        "option_type": "call",
+        "side": OrderSide.BUY,
+        "quantity": 2,
+        "order_type": OrderType.LIMIT,
+        "limit_price": 4.25,
+    })
+
+    assert result == {"id": "101", "symbol": "SPY", "status": "Submitted"}
+    (contract, order), = fake_ib.placed
+    assert contract.secType == "OPT"
+    assert contract.lastTradeDateOrContractMonth == "20260918"
+    assert contract.strike == 500.0
+    assert contract.right == "C"
+    assert order.lmtPrice == 4.25
+
+
+def test_loads_maintained_ib_async_when_ib_insync_is_unavailable(monkeypatch):
+    from app.brokers import ibkr_client
+
+    fake = types.ModuleType("ib_async")
+    real_import = __import__
+
+    def import_module(name, *args, **kwargs):
+        if name == "ib_async":
+            return fake
+        if name == "ib_insync":
+            raise ImportError("archived client unavailable")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr("builtins.__import__", import_module)
+    assert ibkr_client._load_ib_client() is fake
+
+
 def test_cancel_order_matches_by_id(trader, fake_ib):
     fake_ib._open_trades = [
         SimpleNamespace(order=SimpleNamespace(orderId=7),
@@ -214,4 +264,3 @@ def test_portfolio_detail_keeps_option_fields(trader, fake_ib):
         "expiry": "20260918", "qty": -1.0, "avg_cost": 180.0,
         "market_value": -120.0, "unrealized_pl": 60.0,
     }
-
