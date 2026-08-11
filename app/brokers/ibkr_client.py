@@ -66,9 +66,13 @@ class IBKRTrader(BrokerClient):
         if not self._ib.isConnected():
             try:
                 self._ib.connect(self.host, self.port, clientId=self.client_id)
-                log.info("IBKR connected %s:%s clientId=%s (%s)",
-                         self.host, self.port, self.client_id,
-                         "paper" if self.paper else "LIVE")
+                # Report the account actually reached — the IBKR_PAPER flag is
+                # advisory and does NOT control which gateway/account you hit
+                # (a "paper" flag can connect to a live account). The account
+                # number is authoritative (live accounts are U-prefixed, paper DU-).
+                accounts = self._ib.managedAccounts()
+                log.info("IBKR connected %s:%s clientId=%s accounts=%s",
+                         self.host, self.port, self.client_id, accounts)
             except Exception as e:
                 raise ConnectionError(
                     f"Could not reach IB Gateway/TWS at {self.host}:{self.port}. "
@@ -93,8 +97,9 @@ class IBKRTrader(BrokerClient):
         if missing:
             raise ValueError(f"Option order missing required fields: {', '.join(missing)}")
 
-        right = str(order["option_type"])[0].upper()
-        if right not in ("C", "P"):
+        raw = str(order["option_type"]).strip().lower()
+        right = {"c": "C", "call": "C", "p": "P", "put": "P"}.get(raw)
+        if right is None:
             raise ValueError("option_type must be call/put or C/P")
         expiry = str(order["expiration"]).replace("-", "")
         ib_client = _load_ib_client()

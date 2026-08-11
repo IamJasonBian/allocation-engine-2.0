@@ -11,10 +11,13 @@ GET /api/viz/wheel-lanes/<broker> → 400 unless the broker reports option legs
 
 from datetime import datetime, timezone
 
+import logging
+
 from flask import Blueprint, jsonify
 
 from app.brokers import get_broker
 
+log = logging.getLogger(__name__)
 bp = Blueprint("viz_wheel_lanes", __name__)
 
 
@@ -63,5 +66,6 @@ def wheel_lanes(broker_name="ibkr"):
             "count": len(lanes),
             "lanes": lanes,
         })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except Exception:
+        log.exception("wheel-lanes retrieval failed (broker=%s)", broker_name)
+        return jsonify({"error": "wheel-lanes retrieval failed"}), 500

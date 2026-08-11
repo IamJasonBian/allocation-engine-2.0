@@ -1,5 +1,13 @@
 # IBKR gateway box — infrastructure
 
+> **STATUS / TODO (deferred):** the VM `ibkr-gateway-prod` is provisioned in
+> `allocation-agent-service` (`us-central1-a`, Docker installed) but **stopped**
+> to pause spend. To finish "runs offline": (1) create the no-MFA secondary
+> IBKR account, (2) store its creds in Secret Manager (`ib-user`/`ib-password`),
+> (3) `gcloud compute instances start ibkr-gateway-prod`, checkout this repo on
+> the box, and `docker compose ... up -d --build`. See `provision.sh`.
+
+
 Infrastructure-as-code for the IBKR leg. The IB Gateway is a long-lived,
 stateful, 2FA-authenticated JVM, so it runs on a **persistent GCE VM**, not
 Cloud Run (stateless / scale-to-zero can't hold the session — see

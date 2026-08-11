@@ -64,6 +64,9 @@ class FakeIB:
     def connect(self, host, port, clientId):
         self.connected = True
 
+    def managedAccounts(self):
+        return ["DU111"]
+
     def accountSummary(self):
         return self._summary
 

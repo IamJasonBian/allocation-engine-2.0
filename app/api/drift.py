@@ -8,6 +8,7 @@ GET /api/viz/drift          → evaluated against the default ibkr broker
 GET /api/viz/drift/<broker> → any registered broker (drift is broker-neutral)
 """
 
+import logging
 from datetime import datetime, timezone
 
 from flask import Blueprint, jsonify
@@ -15,6 +16,7 @@ from flask import Blueprint, jsonify
 from app.brokers import get_broker
 from app.engine import DRIFT_THRESHOLD
 
+log = logging.getLogger(__name__)
 bp = Blueprint("viz_drift", __name__)
 
 
@@ -42,5 +44,7 @@ def drift(broker_name="ibkr"):
             "max_symbol": worst["symbol"] if worst else None,
             "symbols": symbols,
         })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except Exception:
+        # Don't leak gateway/backend internals to the client; log server-side.
+        log.exception("drift retrieval failed (broker=%s)", broker_name)
+        return jsonify({"error": "drift retrieval failed"}), 500

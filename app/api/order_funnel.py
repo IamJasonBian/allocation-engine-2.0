@@ -10,10 +10,13 @@ GET /api/viz/order-funnel          → ibkr
 GET /api/viz/order-funnel/<broker> → 400 unless the broker keeps history
 """
 
+import logging
+
 from flask import Blueprint, jsonify
 
 from app.brokers import get_broker
 
+log = logging.getLogger(__name__)
 bp = Blueprint("viz_order_funnel", __name__)
 
 
@@ -57,5 +60,6 @@ def order_funnel(broker_name="ibkr"):
             "fills": fills,
             "executions": executions,
         })
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    except Exception:
+        log.exception("order-funnel retrieval failed (broker=%s)", broker_name)
+        return jsonify({"error": "order-funnel retrieval failed"}), 500
