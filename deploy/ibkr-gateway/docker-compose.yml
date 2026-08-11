@@ -1,0 +1,35 @@
+# IBKR gateway box — ib-gateway (IBC + Xvfb) + the engine's IBKR leg,
+# co-located so the unauthenticated API socket never leaves localhost.
+# See docs/IBKR_GATEWAY.md. Credentials come from the environment (fetched
+# from GCP Secret Manager on the VM), never committed.
+services:
+  ib-gateway:
+    image: ghcr.io/gnzsnz/ib-gateway:stable
+    restart: always
+    environment:
+      TWS_USERID: ${IB_USER:?set IB_USER}
+      TWS_PASSWORD: ${IB_PASSWORD:?set IB_PASSWORD}
+      TRADING_MODE: ${TRADING_MODE:-paper}   # flip to live deliberately
+      READ_ONLY_API: "no"                     # orders need this off
+      TWOFA_TIMEOUT_ACTION: restart
+      AUTO_RESTART_TIME: "11:59 PM"
+    # no `ports:` — nothing is ever published
+
+  engine-ibkr:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    restart: always
+    depends_on:
+      - ib-gateway
+    environment:
+      ENABLED_BROKERS: ibkr
+      DEFAULT_BROKER: ibkr
+      ENGINE_BROKER: ibkr
+      IBKR_HOST: ib-gateway
+      # gnzsnz image socat ports: 4004 paper, 4003 live
+      IBKR_PORT: ${IBKR_PORT:-4004}
+      IBKR_PAPER: ${IBKR_PAPER:-true}
+      IBKR_CLIENT_ID: "10"
+      DRY_RUN: ${DRY_RUN:-true}                # arm deliberately, later
+    command: python main.py --broker ibkr run

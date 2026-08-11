@@ -1,0 +1,16 @@
+.git
+.venv
+venv
+__pycache__
+*.pyc
+.pytest_cache
+tests
+node_modules
+mobile
+dashboard
+market-data-service
+auth-service
+robinhood-mcp
+data/*.sqlite3
+*.log
+.env
