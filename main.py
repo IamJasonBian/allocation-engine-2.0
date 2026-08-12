@@ -14,8 +14,12 @@ from app import create_app
 from app.config import Config
 from app.engine import AllocationEngine
 from app.brokers import get_broker
+from app.heartbeat import DEFAULT_PATH as HEARTBEAT_PATH, write_heartbeat
 from app.risk import RiskSubject, SlackAlertObserver, RebalancerObserver
 from app.runtime_client import RuntimeClient
+
+# Cap the exponential backoff so a long gateway outage still retries ~every 5 min.
+MAX_BACKOFF_SECONDS = 300
 
 logging.basicConfig(
     level=logging.INFO,
@@ -32,11 +36,60 @@ def run_once(engine: AllocationEngine):
         log.exception("Error during tick")
 
 
+def tick_and_report(engine: AllocationEngine, state: dict, interval: int,
+                    heartbeat_path: str = HEARTBEAT_PATH) -> int:
+    """Run one resilient tick: update state, write a heartbeat, return next sleep.
+
+    A ConnectionError means the IBKR gateway is unreachable — expected during
+    Sunday maintenance and the weekly re-auth — so it is retryable, never fatal.
+    Consecutive failures back off exponentially (capped) so an unattended box
+    keeps trying without hammering a down gateway. Any success resets the streak.
+
+    Args:
+        engine: the allocation engine to tick.
+        state: mutable dict carrying ``tick_count`` and ``consecutive_errors``.
+        interval: normal poll interval in seconds.
+        heartbeat_path: where to write the heartbeat JSON.
+
+    Returns:
+        Seconds to sleep before the next tick.
+    """
+    try:
+        engine.tick()
+        state["tick_count"] += 1
+        state["consecutive_errors"] = 0
+        status_, last_error = "ok", None
+    except ConnectionError as e:
+        state["consecutive_errors"] += 1
+        status_, last_error = "error", f"ConnectionError: {e}"
+        log.warning("tick failed — gateway unreachable (attempt %d): %s",
+                    state["consecutive_errors"], e)
+    except Exception as e:  # noqa: BLE001 — the loop must never die on a tick
+        state["consecutive_errors"] += 1
+        status_, last_error = "error", f"{type(e).__name__}: {e}"
+        log.exception("tick failed")
+
+    try:
+        write_heartbeat(heartbeat_path, status=status_,
+                        tick_count=state["tick_count"],
+                        consecutive_errors=state["consecutive_errors"],
+                        last_error=last_error)
+    except Exception:  # noqa: BLE001 — heartbeat is best-effort, never fatal
+        log.exception("heartbeat write failed")
+
+    if state["consecutive_errors"] == 0:
+        return interval
+    # exponential backoff on the failure streak, capped
+    return min(interval * 2 ** min(state["consecutive_errors"], 6),
+               MAX_BACKOFF_SECONDS)
+
+
 def run_loop(engine: AllocationEngine, interval: int):
     log.info("Starting engine loop (interval=%ds, dry_run=%s)", interval, engine.dry_run)
+    state = {"tick_count": 0, "consecutive_errors": 0}
     while True:
-        run_once(engine)
-        time.sleep(interval)
+        sleep_s = tick_and_report(engine, state, interval)
+        time.sleep(sleep_s)
 
 
 def status(engine: AllocationEngine, broker_name: str):

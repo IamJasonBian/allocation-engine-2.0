@@ -46,6 +46,24 @@ Ports: gnzsnz image exposes **4004 paper / 4003 live** (socat). Flip to live by
 setting `TRADING_MODE=live IBKR_PORT=4003 IBKR_PAPER=false` — a deliberate act,
 only after paper + `DRY_RUN=true` survives a weekly re-auth unattended.
 
+## Health / heartbeat
+
+The engine writes an atomic JSON heartbeat every loop iteration to
+`ENGINE_HEARTBEAT_PATH` (`/app/data/heartbeat.json` on the box, in the
+`engine-data` volume). The container's healthcheck marks it healthy while that
+file stays fresh — so the loop being alive is decoupled from gateway
+reachability (a gateway-down tick still refreshes the file, backing off
+exponentially). Read it:
+
+```bash
+docker compose -f deploy/ibkr-gateway/docker-compose.yml exec engine-ibkr \
+  cat /app/data/heartbeat.json
+# {"status":"ok|error","updated_at":...,"tick_count":N,"consecutive_errors":M,"last_error":...}
+```
+
+`consecutive_errors` climbing with a stale gateway = a re-auth/maintenance
+outage to look at; `status:"ok"` with a rising `tick_count` = healthy.
+
 ## Local dev equivalent
 
 The same IBC config runs locally against IB Gateway on this machine
