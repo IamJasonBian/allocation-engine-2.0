@@ -74,6 +74,8 @@ Broker defaults to `DEFAULT_BROKER` env var. Append `/alpaca` or `/robinhood` to
 | `DRY_RUN` | Log orders without submitting | `true` |
 | `ENGINE_ENABLED` | Run background engine loop | `true` |
 | `ENGINE_BROKER` | Broker for engine reconciliation | `alpaca` |
+| `MAX_ORDER_QTY` | Per-order share cap (orders above it are trimmed) | `50` |
+| `MAX_ORDER_NOTIONAL` | Per-order dollar cap; `0` disables. When set, an order with no limit price and no live quote is skipped rather than submitted unbounded | `0` |
 | `PORT` | Server port | `10000` |
 
 ## Service boundaries

@@ -370,6 +370,7 @@ def start_engine_thread(app):
                             dry_run=config["DRY_RUN"],
                             data_broker=data_broker,
                             max_order_qty=config["MAX_ORDER_QTY"],
+                            max_order_notional=config.get("MAX_ORDER_NOTIONAL"),
                             risk_subject=risk_subject,
                         )
                         _engine_status["last_error"] = None

@@ -91,6 +91,10 @@ class Config:
     ENGINE_BROKER = os.getenv("ENGINE_BROKER", "robinhood")
     DATA_BROKER = os.getenv("DATA_BROKER", "alpaca")
     MAX_ORDER_QTY = int(os.getenv("MAX_ORDER_QTY", "50"))
+    # Dollar cap per order. A share cap alone bounds nothing in dollars — 50
+    # shares of a $1,000 stock is a $50k order. 0 (the default) disables it, so
+    # an unconfigured deploy keeps the share-cap-only behaviour.
+    MAX_ORDER_NOTIONAL = float(os.getenv("MAX_ORDER_NOTIONAL", "0"))
 
     # -- S3 (order event storage) --
     S3_BUCKET = os.getenv("S3_BUCKET", "")
