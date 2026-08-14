@@ -1,15 +1,29 @@
 """Write-path client for EPS values — fetch, trim, persist, export.
 
-Same role as `trading_db.py`: this repo owns the write path. It fetches EPS
-values, keeps a fixed window, and writes them to `EarningsStore`, which exports
-the JSON dataset allocation-gym-2.0 reads. Nothing here reads back for analysis.
+Same role as `trading_db.py`: this repo owns the write path. Nothing here reads
+back for analysis and nothing here renders — allocation-gym-2.0 does both.
 
 Retention is HISTORY_QUARTERS reported quarters per ticker plus every upcoming
-one, so the dataset carries actuals-vs-estimates for recent history and the
+one, so the dataset carries estimate-vs-actual for recent history and the
 current estimate for what has not printed yet.
 
 yfinance is not in requirements.txt — it is only needed to refresh, not to
 serve, so it is imported lazily and the store works without it.
+
+TODO(vendor): `fetch_yfinance` is one implementation of the `fetch` shape
+    (tickers, quarters, as_of) -> (records, failures). Yahoo has no SLA and
+    drops figures for older quarters (see `classify`). A paid feed would plug
+    in as a sibling function with the same signature, mapping its fields onto
+    RECORD_FIELDS:
+
+      Twelve Data /earnings   date, eps_estimate, eps_actual, surprise
+      FMP  /earnings-surprises date, epsEstimated, epsActual
+      Finnhub /stock/earnings  period, estimate, actual, surprisePercent
+
+    All three are already per-quarter estimate/actual rows, so only the field
+    names and the date key differ — the record shape below should not need to
+    change. Worth pricing before committing: Twelve Data is closest to our
+    naming, Finnhub carries the longest history.
 """
 
 from __future__ import annotations
@@ -21,6 +35,9 @@ from datetime import date
 from app.earnings_store import EarningsStore
 
 log = logging.getLogger(__name__)
+
+# The vendor-neutral record shape. Any fetch implementation must emit these.
+RECORD_FIELDS = ("ticker", "earnings_date", "eps_estimate", "eps_actual", "status")
 
 HISTORY_QUARTERS = 4    # reported quarters retained per ticker
 FETCH_QUARTERS = 12     # requested per ticker; trimmed down to the window above
@@ -105,7 +122,7 @@ def trim(records: list[dict], history_quarters: int = HISTORY_QUARTERS) -> list[
     return kept
 
 
-def fetch(
+def fetch_yfinance(
     tickers: list[str],
     quarters: int = FETCH_QUARTERS,
     as_of: str | None = None,
@@ -168,6 +185,7 @@ def refresh(
     tickers: list[str] | None = None,
     store: EarningsStore | None = None,
     history_quarters: int = HISTORY_QUARTERS,
+    fetch=fetch_yfinance,
 ) -> dict:
     """Fetch, trim, persist, and export in one pass.
 
@@ -175,6 +193,7 @@ def refresh(
         tickers: symbols to refresh; defaults to DEFAULT_TICKERS.
         store: an open store, or None to open the configured one.
         history_quarters: reported quarters to retain per ticker.
+        fetch: vendor fetch implementation; see the TODO at the top.
 
     Returns:
         Summary with written, tickers, failures, and the exported path.

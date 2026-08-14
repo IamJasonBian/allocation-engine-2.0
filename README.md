@@ -76,6 +76,21 @@ Broker defaults to `DEFAULT_BROKER` env var. Append `/alpaca` or `/robinhood` to
 | `ENGINE_BROKER` | Broker for engine reconciliation | `alpaca` |
 | `PORT` | Server port | `10000` |
 
+## EPS dataset
+
+`app/earnings_writer.py` fetches per-quarter EPS estimate/actual, keeps 4
+reported quarters per ticker plus every upcoming one, and writes
+`data/eps.sqlite3` + `data/eps.json` (both gitignored).
+
+```bash
+python scripts/refresh_eps.py            # needs yfinance, not in requirements
+python scripts/refresh_eps.py --show     # dump the store, no fetch
+```
+
+The exported JSON is read and rendered by
+[allocation-gym-2.0](https://github.com/IamJasonBian/allocation-gym-2.0).
+This repo only writes it; nothing here reads it back or plots it.
+
 ## Service boundaries
 
 This repo holds two independently-operated services plus a local tool:
