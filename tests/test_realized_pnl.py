@@ -26,6 +26,7 @@ def _order(symbol, side, qty, price, days_ago, state="filled"):
 def trader(monkeypatch):
     monkeypatch.setattr(rc.RobinhoodTrader, "_ensure_auth", lambda self: None)
     monkeypatch.setattr(rc, "_symbol_from_instrument", lambda url: url)
+    monkeypatch.setattr(rc.rh.orders, "get_all_crypto_orders", lambda: [])
     return rc.RobinhoodTrader()
 
 

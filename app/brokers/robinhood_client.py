@@ -273,12 +273,39 @@ class RobinhoodTrader(BrokerClient):
         return result
 
     def trade_fills(self) -> list[dict]:
-        """Normalize RH stock orders into replay_fills() input."""
+        """Normalize RH stock and crypto orders into replay_fills() input."""
         self._ensure_auth()
-        all_orders = rh.orders.get_all_stock_orders()
+        fills: list[dict] = []
+        self._append_trade_fills(
+            fills, rh.orders.get_all_stock_orders(),
+            lambda o: _symbol_from_instrument(o.get("instrument", "")),
+        )
+        self._append_trade_fills(
+            fills, rh.orders.get_all_crypto_orders(),
+            self._crypto_symbol_from_order,
+        )
+        return fills
 
-        fills = []
-        for o in (all_orders or []):
+    @staticmethod
+    def _crypto_symbol_from_order(order: dict) -> str:
+        currency = order.get("currency")
+        if isinstance(currency, dict):
+            code = currency.get("code") or currency.get("name")
+            if code:
+                return str(code).upper()
+        symbol = order.get("symbol")
+        if symbol:
+            return str(symbol).split("-")[0].upper()
+        pair = order.get("currency_pair_id") or ""
+        if pair:
+            return pair.rstrip("/").split("/")[-1].upper()
+        return ""
+
+    @staticmethod
+    def _append_trade_fills(
+        fills: list[dict], orders, symbol_from_order,
+    ) -> None:
+        for o in (orders or []):
             if not isinstance(o, dict):
                 continue
             qty = float(o.get("cumulative_quantity") or 0)
@@ -286,19 +313,21 @@ class RobinhoodTrader(BrokerClient):
             side = o.get("side", "")
             if qty <= 0 or not avg_price or side not in ("buy", "sell"):
                 continue
+            symbol = symbol_from_order(o)
+            if not symbol:
+                continue
             ts_raw = o.get("updated_at") or o.get("created_at") or ""
             try:
                 ts = datetime.fromisoformat(ts_raw.replace("Z", "+00:00"))
             except (ValueError, TypeError):
                 continue
             fills.append({
-                "symbol": _symbol_from_instrument(o.get("instrument", "")),
+                "symbol": symbol,
                 "side": "BUY" if side == "buy" else "SELL",
                 "qty": qty,
                 "price": float(avg_price),
                 "ts": ts,
             })
-        return fills
 
     def mark_prices_from_positions(self) -> dict[str, float]:
         """Current mark prices for open stock positions."""
