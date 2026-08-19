@@ -13,8 +13,14 @@ from flask import Blueprint, Response
 bp = Blueprint("dashboard", __name__)
 
 _PAGE = Path(__file__).resolve().parents[2] / "dashboard" / "index.html"
+_BTC_BASIS = Path(__file__).resolve().parents[2] / "dashboard" / "btc-basis.html"
 
 
 @bp.route("/dashboard")
 def dashboard() -> Response:
     return Response(_PAGE.read_text(), mimetype="text/html")
+
+
+@bp.route("/dashboard/btc-basis")
+def btc_basis_dashboard() -> Response:
+    return Response(_BTC_BASIS.read_text(), mimetype="text/html")

@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BTC cost basis</title>
+<style>
+  :root { --ink:#0029de; --bg:#f5f5f5; --line:#0029de59; }
+  body { font-family: ui-monospace, Menlo, monospace; margin: 0; background: var(--bg); color: var(--ink); }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 1.25rem; font-weight: 600; margin: 0 0 8px; }
+  .meta { font-size: .8rem; opacity: .7; margin-bottom: 16px; }
+  canvas { width: 100%; height: 360px; background: #fff; border: 1px solid var(--line); }
+  .err { color: #b00020; white-space: pre-wrap; }
+  label { font-size: .75rem; margin-right: 12px; }
+  input, select { font: inherit; padding: 4px 8px; margin-right: 8px; }
+  button { font: inherit; padding: 4px 12px; cursor: pointer; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>BTC average cost basis</h1>
+  <p class="meta">Steps at each fill from <code>GET /api/pnl/basis/BTC/robinhood</code></p>
+  <div style="margin-bottom:12px">
+    <label>Symbol <input id="symbol" value="BTC" size="6"></label>
+    <label>Broker <select id="broker"><option>robinhood</option></select></label>
+    <button id="load">Load</button>
+  </div>
+  <canvas id="chart" width="920" height="360"></canvas>
+  <p id="status" class="meta"></p>
+  <pre id="err" class="err"></pre>
+</div>
+<script>
+const canvas = document.getElementById('chart');
+const ctx = canvas.getContext('2d');
+
+function draw(points) {
+  const w = canvas.width, h = canvas.height;
+  const pad = { l: 56, r: 16, t: 20, b: 40 };
+  ctx.clearRect(0, 0, w, h);
+  if (!points.length) {
+    ctx.fillStyle = '#0029de99';
+    ctx.fillText('No fills for this symbol', pad.l, h / 2);
+    return;
+  }
+  const xs = points.map((_, i) => i);
+  const ys = points.map(p => p.avgOpenPrice);
+  const yMin = Math.min(...ys) * 0.98;
+  const yMax = Math.max(...ys) * 1.02;
+  const xScale = i => pad.l + (i / Math.max(points.length - 1, 1)) * (w - pad.l - pad.r);
+  const yScale = v => pad.t + (1 - (v - yMin) / (yMax - yMin || 1)) * (h - pad.t - pad.b);
+
+  ctx.strokeStyle = '#0029de26';
+  for (let i = 0; i < 5; i++) {
+    const y = pad.t + (i / 4) * (h - pad.t - pad.b);
+    ctx.beginPath(); ctx.moveTo(pad.l, y); ctx.lineTo(w - pad.r, y); ctx.stroke();
+    const val = yMax - (i / 4) * (yMax - yMin);
+    ctx.fillStyle = '#0029de99';
+    ctx.font = '11px ui-monospace, Menlo, monospace';
+    ctx.fillText('$' + val.toFixed(2), 4, y + 4);
+  }
+
+  ctx.strokeStyle = '#0029de';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  points.forEach((p, i) => {
+    const x = xScale(i), y = yScale(p.avgOpenPrice);
+    i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  });
+  ctx.stroke();
+
+  points.forEach((p, i) => {
+    const x = xScale(i), y = yScale(p.avgOpenPrice);
+    ctx.fillStyle = p.side === 'BUY' ? '#1f9e95' : '#dd4a63';
+    ctx.beginPath(); ctx.arc(x, y, 4, 0, Math.PI * 2); ctx.fill();
+  });
+
+  ctx.fillStyle = '#0029de99';
+  ctx.font = '10px ui-monospace, Menlo, monospace';
+  const step = Math.max(1, Math.floor(points.length / 6));
+  points.forEach((p, i) => {
+    if (i % step !== 0 && i !== points.length - 1) return;
+    const d = new Date(p.ts);
+    ctx.fillText(d.toLocaleDateString(), xScale(i) - 24, h - 12);
+  });
+}
+
+async function load() {
+  const symbol = document.getElementById('symbol').value.trim().toUpperCase();
+  const broker = document.getElementById('broker').value;
+  const status = document.getElementById('status');
+  const err = document.getElementById('err');
+  err.textContent = '';
+  status.textContent = 'Loading…';
+  try {
+    const r = await fetch(`/api/pnl/basis/${symbol}/${broker}`);
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error || r.statusText);
+    draw(data.points || []);
+    const last = (data.points || []).at(-1);
+    status.textContent = `${data.count} fills · latest basis $${last?.avgOpenPrice ?? '—'} · position ${last?.netPosition ?? 0}`;
+  } catch (e) {
+    status.textContent = '';
+    err.textContent = String(e);
+  }
+}
+
+document.getElementById('load').addEventListener('click', load);
+load();
+</script>
+</body>
+</html>

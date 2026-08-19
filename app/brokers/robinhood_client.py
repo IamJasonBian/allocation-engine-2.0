@@ -13,6 +13,7 @@ import robin_stocks.robinhood as rh
 
 from app.brokers.base import BrokerClient
 from app.enums import OrderType
+from app.pnl import compute_pnl
 
 log = logging.getLogger(__name__)
 
@@ -271,85 +272,63 @@ class RobinhoodTrader(BrokerClient):
                 break
         return result
 
-    def realized_pnl(self, days: int = 30) -> dict:
-        """Compute realized P&L from filled orders within the last N days."""
+    def trade_fills(self) -> list[dict]:
+        """Normalize RH stock orders into replay_fills() input."""
         self._ensure_auth()
         all_orders = rh.orders.get_all_stock_orders()
-        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 
-        buys: dict[str, list] = {}
-        sells: dict[str, list] = {}
-        total_buy_volume = 0.0
-        total_sell_volume = 0.0
-
+        fills = []
         for o in (all_orders or []):
             if not isinstance(o, dict):
                 continue
-            if o.get("state") != "filled":
+            qty = float(o.get("cumulative_quantity") or 0)
+            avg_price = o.get("average_price")
+            side = o.get("side", "")
+            if qty <= 0 or not avg_price or side not in ("buy", "sell"):
                 continue
-            created = o.get("created_at", "")
-            if not created:
-                continue
+            ts_raw = o.get("updated_at") or o.get("created_at") or ""
             try:
-                order_time = datetime.fromisoformat(created.replace("Z", "+00:00"))
+                ts = datetime.fromisoformat(ts_raw.replace("Z", "+00:00"))
             except (ValueError, TypeError):
                 continue
-            if order_time < cutoff:
-                continue
-
-            symbol = _symbol_from_instrument(o.get("instrument", ""))
-            qty = float(o.get("cumulative_quantity", 0))
-            avg_price = o.get("average_price")
-            if not avg_price or qty == 0:
-                continue
-            price = float(avg_price)
-            side = o.get("side", "")
-            volume = qty * price
-
-            entry = {"qty": qty, "price": price, "time": created}
-            if side == "buy":
-                buys.setdefault(symbol, []).append(entry)
-                total_buy_volume += volume
-            elif side == "sell":
-                sells.setdefault(symbol, []).append(entry)
-                total_sell_volume += volume
-
-        # Compute per-symbol realized P&L using average cost basis
-        symbols_pnl = []
-        total_realized = 0.0
-        all_symbols = set(list(buys.keys()) + list(sells.keys()))
-        for sym in sorted(all_symbols):
-            sym_buys = buys.get(sym, [])
-            sym_sells = sells.get(sym, [])
-            total_bought_qty = sum(b["qty"] for b in sym_buys)
-            total_bought_vol = sum(b["qty"] * b["price"] for b in sym_buys)
-            total_sold_qty = sum(s["qty"] for s in sym_sells)
-            total_sold_vol = sum(s["qty"] * s["price"] for s in sym_sells)
-            avg_buy_price = total_bought_vol / total_bought_qty if total_bought_qty > 0 else 0
-            avg_sell_price = total_sold_vol / total_sold_qty if total_sold_qty > 0 else 0
-            matched_qty = min(total_bought_qty, total_sold_qty)
-            realized = matched_qty * (avg_sell_price - avg_buy_price) if matched_qty > 0 else 0
-
-            total_realized += realized
-            symbols_pnl.append({
-                "symbol": sym,
-                "realizedPnL": round(realized, 2),
-                "totalBought": round(total_bought_vol, 2),
-                "totalSold": round(total_sold_vol, 2),
-                "buyCount": len(sym_buys),
-                "sellCount": len(sym_sells),
-                "avgBuyPrice": round(avg_buy_price, 4),
-                "avgSellPrice": round(avg_sell_price, 4),
-                "remainingShares": round(total_bought_qty - total_sold_qty, 4),
+            fills.append({
+                "symbol": _symbol_from_instrument(o.get("instrument", "")),
+                "side": "BUY" if side == "buy" else "SELL",
+                "qty": qty,
+                "price": float(avg_price),
+                "ts": ts,
             })
+        return fills
 
-        return {
-            "totalRealizedPnL": round(total_realized, 2),
-            "totalBuyVolume": round(total_buy_volume, 2),
-            "totalSellVolume": round(total_sell_volume, 2),
-            "days": days,
-            "symbols": symbols_pnl,
-        }
+    def mark_prices_from_positions(self) -> dict[str, float]:
+        """Current mark prices for open stock positions."""
+        marks: dict[str, float] = {}
+        for p in self.positions():
+            qty = float(p.get("qty") or 0)
+            if qty == 0:
+                continue
+            mv = float(p.get("market_value") or 0)
+            marks[p["symbol"]] = mv / qty
+        return marks
+
+    def realized_pnl(self, days: int = 30) -> dict:
+        """Compute realized P&L for the last N days via average-cost replay.
+
+        The FULL order history is replayed through per-symbol PnlSnapshots so
+        cost basis is correct even for buys older than the window; only the
+        realize events (sells against basis) are then filtered to the window.
+        Partial fills count: any order with cumulative quantity > 0 is a fill,
+        regardless of terminal state.
+        """
+        return compute_pnl(self.trade_fills(), days=days)
+
+    def total_pnl(self, days: int = 30) -> dict:
+        """Realized P&L in the window plus unrealized on the open book."""
+        return compute_pnl(
+            self.trade_fills(),
+            days=days,
+            mark_prices=self.mark_prices_from_positions(),
+        )
 
     # -- options ------------------------------------------------------------
 
