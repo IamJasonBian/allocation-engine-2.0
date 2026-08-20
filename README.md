@@ -36,9 +36,11 @@ curl -s http://localhost:10000/api/pnl/basis/BTC/robinhood | python3 -m json.too
 
 App modes live in `configs/config.json` (`dev` / `prod`), each declaring its
 env file and storage routing; `APP_MODE` env overrides the file. `dev` reads
-fills from `data/local/trade_fills.json` (auto-seeded from
-`app/storage/samples/`); `prod` (the checked-in default, used on Render) reads
-live Robinhood via the auth box and needs `RH_AUTH_SERVICE_REQUEST_TOKEN`.
+fills from `data/local/trading.db` — a SQLite mirror of the Trading DB
+`stock_orders` shape, auto-seeded from `app/storage/samples/` and queryable
+from DBeaver (point a SQLite connection at the file; drop the `public.`
+prefix). `prod` (the checked-in default, used on Render) reads live Robinhood
+via the auth box and needs `RH_AUTH_SERVICE_REQUEST_TOKEN`.
 
 ```bash
 # Flask dev server

@@ -1,4 +1,4 @@
-"""Trade-fill storage router — broker live reads vs local files."""
+"""Trade-fill storage router — broker live reads vs local SQLite."""
 
 from app.config import Config
 

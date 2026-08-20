@@ -9,7 +9,7 @@ work) plus the local fill store introduced for dev mode:
     s3                    S3 order events + snapshots     engine sync, /api/events
     trading_db            Postgres via Netlify functions  engine sync -> dashboard
     option_history        Netlify Blobs history           engine sync (options)
-    local                 data dir JSON (dev fills)       PnL replay in dev mode
+    local                 SQLite stock_orders (dev)       PnL replay + DBeaver
 
 Fill routing (`get_trade_fills` / `save_trade_fills`) picks between live
 broker reads and the local store based on the app mode in configs/config.json.
