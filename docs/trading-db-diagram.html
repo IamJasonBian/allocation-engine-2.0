@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trading DB — reads &amp; writes</title>
+<style>
+  :root{
+    --hw-bg:#0000f2; --hw-fg:#f5f5f5; --hw-accent:#edff45; --hw-paper:#fff;
+    --fg-60:#f5f5f599; --fg-40:#f5f5f566;
+    --ink:#0000f2; --ink-60:#0029de99; --ink-45:#0029de73;
+    --rule:#0029de26; --rule-2:#0029de59;
+    --gain:#1f9e95; --loss:#dd4a63; --write:#c45a00; --read:#1f9e95;
+    --serif:"Times New Roman",Times,serif;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;
+  }
+  *{box-sizing:border-box}
+  ::selection{background:var(--hw-accent);color:var(--hw-bg)}
+  body{margin:0;background:var(--hw-bg);color:var(--hw-fg);
+       font-family:var(--mono);font-size:13px;line-height:1.55;
+       -webkit-font-smoothing:antialiased}
+  body::before{content:"";position:fixed;inset:0;pointer-events:none;opacity:.05;z-index:1;
+    background:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.72' numOctaves='4' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    background-size:12.8rem 12.8rem}
+  .shell{position:relative;z-index:2;max-width:1100px;margin:0 auto;padding:40px 22px 70px}
+  .eyebrow{font-size:.68rem;letter-spacing:.1em;text-transform:uppercase;color:var(--fg-60)}
+  h1{font-family:var(--serif);font-size:clamp(2rem,5vw,3.2rem);font-weight:400;
+     letter-spacing:-.02em;line-height:1.05;margin:.35rem 0 1rem;text-transform:uppercase}
+  .lead{color:var(--fg-60);max-width:62ch;margin-bottom:2rem}
+  .card{background:var(--hw-paper);color:var(--ink);padding:22px 24px;margin-bottom:18px;
+        border:1px solid var(--rule-2)}
+  .card h2{font-family:var(--serif);font-size:1.15rem;font-weight:400;
+           text-transform:uppercase;letter-spacing:.04em;margin:0 0 14px}
+  .legend{display:flex;flex-wrap:wrap;gap:18px;margin-bottom:18px;font-size:.72rem;
+          letter-spacing:.06em;text-transform:uppercase}
+  .legend span{display:flex;align-items:center;gap:7px}
+  .dot{width:10px;height:10px;border-radius:50%}
+  .dot.write{background:var(--write)}
+  .dot.read{background:var(--read)}
+  .dot.other{background:var(--fg-40)}
+  .mermaid-wrap{overflow-x:auto;padding:8px 0}
+  .mermaid{background:transparent!important}
+  table{width:100%;border-collapse:collapse;font-size:.78rem}
+  th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--rule);vertical-align:top}
+  th{font-size:.65rem;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-60);
+     font-weight:600}
+  td code{font-size:.72rem;background:#0029de0d;padding:1px 5px}
+  .tag{display:inline-block;font-size:.62rem;letter-spacing:.06em;text-transform:uppercase;
+       padding:2px 7px;border:1px solid;margin-right:4px}
+  .tag.write{color:var(--write);border-color:var(--write)}
+  .tag.read{color:var(--gain);border-color:var(--gain)}
+  .tag.skip{color:var(--ink-45);border-color:var(--rule-2)}
+  .note{font-size:.75rem;color:var(--ink-60);margin-top:12px}
+  .foot{margin-top:2rem;font-size:.72rem;color:var(--fg-40);letter-spacing:.04em}
+  a{color:var(--hw-accent)}
+</style>
+</head>
+<body>
+<div class="shell">
+  <p class="eyebrow">Architecture</p>
+  <h1>Trading DB</h1>
+  <p class="lead">
+    Postgres behind the 5thstreetcapital Netlify functions. The allocation-engine worker
+    is the only automated writer; dashboards and the mobile app read through public GET endpoints.
+    Writes run every <code>TRADING_DB_SYNC_SECONDS</code> (default 900s) and are not gated on
+    <code>DRY_RUN</code>.
+  </p>
+
+  <div class="card">
+    <div class="legend">
+      <span><i class="dot write"></i> Write path</span>
+      <span><i class="dot read"></i> Read path</span>
+      <span><i class="dot other"></i> External (not DB)</span>
+    </div>
+    <div class="mermaid-wrap">
+      <pre class="mermaid">
+flowchart TB
+    subgraph sources["Data sources — not DB"]
+        RH["Robinhood API"]
+        AUTH["auth-service box<br/>GET /token"]
+    end
+
+    subgraph writers["Writers"]
+        WORKER["allocation-engine-2.0 worker<br/>Render"]
+        MCP["robinhood-mcp<br/>manual sync"]
+    end
+
+    subgraph netlify["5thstreetcapital Netlify functions"]
+        FN_ORDERS["POST /db-orders"]
+        FN_POS["POST /db-positions"]
+        FN_ACT["POST /db-bot-activity"]
+        FN_SNAP["GET /order-book-snapshot"]
+        FN_READ_ACT["GET /db-bot-activity"]
+    end
+
+    subgraph db["Trading DB — Postgres"]
+        T_ORDERS[("stock_orders<br/>option_orders")]
+        T_POS[("positions<br/>option_positions<br/>account")]
+        T_ACT[("bot_activity")]
+    end
+
+    subgraph readers["Readers"]
+        DASH_WEB["Live dashboard<br/>5thstreetcapital.org"]
+        DASH_NET["allocation-engine-dashboard<br/>.netlify.app"]
+        DASH_API["API /dashboard"]
+        MOBILE["Mobile app WebView"]
+    end
+
+    AUTH --> WORKER
+    RH --> WORKER
+    RH --> MCP
+
+    WORKER -->|"post_orders<br/>~900s"| FN_ORDERS
+    WORKER -->|"post_positions<br/>whole-book replace"| FN_POS
+    WORKER -->|"post_bot_activity<br/>on trailing-stop events"| FN_ACT
+    MCP -->|"sync_trading_db<br/>batch backfill"| FN_ORDERS
+
+    FN_ORDERS --> T_ORDERS
+    FN_POS --> T_POS
+    FN_ACT --> T_ACT
+
+    FN_SNAP --> T_ORDERS
+    FN_SNAP --> T_POS
+    FN_READ_ACT --> T_ACT
+
+    FN_SNAP --> DASH_WEB
+    FN_SNAP --> DASH_NET
+    FN_SNAP --> DASH_API
+    FN_READ_ACT --> DASH_WEB
+    FN_READ_ACT --> DASH_NET
+    FN_READ_ACT --> DASH_API
+
+    DASH_WEB --> MOBILE
+    DASH_NET --> MOBILE
+
+    linkStyle 3,4,5,6,7,8,9,10 stroke:#c45a00,stroke-width:2px
+    linkStyle 14,15,16,17,18,19,20,21 stroke:#1f9e95,stroke-width:2px
+      </pre>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Writes</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Endpoint</th>
+          <th>Writer</th>
+          <th>Cadence</th>
+          <th>Semantics</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>POST /db-orders</code></td>
+          <td><code>app/trading_db.post_orders</code></td>
+          <td>~900s</td>
+          <td>Upsert open + recent stock/option orders (engine-blob dump shape)</td>
+        </tr>
+        <tr>
+          <td><code>POST /db-positions</code></td>
+          <td><code>app/trading_db.post_positions</code></td>
+          <td>~900s</td>
+          <td>Whole-book replace — symbols absent from payload are deleted downstream</td>
+        </tr>
+        <tr>
+          <td><code>POST /db-bot-activity</code></td>
+          <td><code>app/trading_db.post_bot_activity</code></td>
+          <td>On event</td>
+          <td>Append-only; deduped on <code>{order_id}:{status}</code></td>
+        </tr>
+        <tr>
+          <td><code>POST /db-orders</code></td>
+          <td><code>robinhood-mcp sync_trading_db</code></td>
+          <td>Manual</td>
+          <td>Batch historical order backfill from Robinhood API</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h2>Reads</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Endpoint</th>
+          <th>Consumers</th>
+          <th>Poll</th>
+          <th>Returns</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>GET /order-book-snapshot</code></td>
+          <td>Dashboard (web, Netlify, API <code>/dashboard</code>), mobile WebView</td>
+          <td>60s</td>
+          <td>Portfolio, positions, options, open/recent orders</td>
+        </tr>
+        <tr>
+          <td><code>GET /db-bot-activity</code></td>
+          <td>Same dashboard clients</td>
+          <td>60s</td>
+          <td>Bot activity feed</td>
+        </tr>
+      </tbody>
+    </table>
+    <p class="note">
+      <code>order-book-snapshot</code> aggregates rows written by <code>db-orders</code> and
+      <code>db-positions</code>; there is no separate snapshot write path.
+    </p>
+  </div>
+
+  <div class="card">
+    <h2>Not Trading DB</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Route</th>
+          <th>Service</th>
+          <th>Source</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><span class="tag skip">skip</span><code>GET /api/snapshot</code></td>
+          <td>allocation-engine-api</td>
+          <td>Live Robinhood read via auth-service — bypasses Postgres</td>
+        </tr>
+        <tr>
+          <td><span class="tag skip">skip</span><code>GET /price-history</code></td>
+          <td>Netlify function</td>
+          <td>Yahoo Finance proxy for sparklines</td>
+        </tr>
+        <tr>
+          <td><span class="tag skip">skip</span><code>GET /render-logs</code></td>
+          <td>Netlify function</td>
+          <td>Render service logs</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p class="foot">
+    Open locally: <code>open docs/trading-db-diagram.html</code> ·
+    Source: <code>app/trading_db.py</code>, <code>app/background.py</code>, <code>dashboard/index.html</code>
+  </p>
+</div>
+
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: "base",
+    themeVariables: {
+      primaryColor: "#ffffff",
+      primaryTextColor: "#0000f2",
+      primaryBorderColor: "#0029de59",
+      lineColor: "#0029de99",
+      secondaryColor: "#f5f5f5",
+      tertiaryColor: "#edff45",
+      fontFamily: "ui-monospace, monospace",
+      fontSize: "12px",
+    },
+    flowchart: { curve: "basis", padding: 16, htmlLabels: true },
+  });
+</script>
+</body>
+</html>
