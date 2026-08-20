@@ -2,7 +2,7 @@
 
 from flask import Blueprint, jsonify, request, current_app
 from app.brokers import get_broker
-from app.pnl import cost_basis_series
+from app.pnl import cost_basis_series, pnl_risk, portfolio_risk
 
 bp = Blueprint("history", __name__)
 
@@ -41,6 +41,38 @@ def pnl(broker_name=None):
                 return jsonify({"error": f"Broker {broker_name} does not support P&L"}), 400
             data = broker.realized_pnl(days=days)
         return jsonify({"broker": broker_name, **data})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@bp.route("/pnl/risk")
+def pnl_portfolio_risk():
+    """Portfolio volatility across all traded symbols (?broker= to select)."""
+    broker_name = request.args.get("broker") or current_app.config["DEFAULT_BROKER"]
+    try:
+        broker = get_broker(broker_name)
+        if not hasattr(broker, "trade_fills") or not hasattr(broker, "price_history"):
+            return jsonify({"error": f"Broker {broker_name} does not support risk series"}), 400
+        fills = broker.trade_fills()
+        symbols = sorted({f["symbol"] for f in fills})
+        closes_by_symbol = {sym: broker.price_history(sym) for sym in symbols}
+        data = portfolio_risk(fills, closes_by_symbol)
+        return jsonify({"broker": broker_name, **data})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@bp.route("/pnl/risk/<symbol>")
+@bp.route("/pnl/risk/<symbol>/<broker_name>")
+def pnl_risk_series(symbol, broker_name=None):
+    """Daily mark-to-market P&L series with std-of-returns risk measure."""
+    broker_name = broker_name or current_app.config["DEFAULT_BROKER"]
+    try:
+        broker = get_broker(broker_name)
+        if not hasattr(broker, "trade_fills") or not hasattr(broker, "price_history"):
+            return jsonify({"error": f"Broker {broker_name} does not support risk series"}), 400
+        data = pnl_risk(broker.trade_fills(), broker.price_history(symbol), symbol)
+        return jsonify({"broker": broker_name, "symbol": symbol.upper(), **data})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

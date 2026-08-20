@@ -8,6 +8,9 @@ sqlite3 CLI) can run the same query shapes as the real Trading DB:
            created_at, updated_at, raw, ingested_at
     FROM stock_orders;
 
+A `price_history` table (symbol, date, close) holds daily closes for the
+risk/volatility series, seeded from samples alongside stock_orders.
+
 SQLite has no schemas, so drop the `public.` prefix. Fill semantics match
 docs/sql/pnl_shapes.sql: a fill is any row with filled_quantity > 0 and a
 non-null average_price, timestamped by COALESCE(updated_at, created_at).
@@ -23,7 +26,9 @@ from pathlib import Path
 
 log = logging.getLogger(__name__)
 
-_SAMPLES = Path(__file__).resolve().parent / "samples" / "stock_orders.json"
+_SAMPLES_DIR = Path(__file__).resolve().parent / "samples"
+_SAMPLES = _SAMPLES_DIR / "stock_orders.json"
+_PRICE_SAMPLES = _SAMPLES_DIR / "price_history.json"
 
 COLUMNS = [
     "order_id", "symbol", "side", "order_type", "trigger_type", "state",
@@ -48,6 +53,15 @@ CREATE TABLE IF NOT EXISTS stock_orders (
     updated_at      TEXT,
     raw             TEXT,
     ingested_at     TEXT
+)
+"""
+
+_PRICE_SCHEMA = """
+CREATE TABLE IF NOT EXISTS price_history (
+    symbol TEXT NOT NULL,
+    date   TEXT NOT NULL,
+    close  REAL NOT NULL,
+    PRIMARY KEY (symbol, date)
 )
 """
 
@@ -94,12 +108,19 @@ def _insert_orders(conn: sqlite3.Connection, rows: list[dict]) -> None:
 
 
 def _seed_if_empty(conn: sqlite3.Connection) -> None:
-    if conn.execute("SELECT count(*) FROM stock_orders").fetchone()[0]:
-        return
-    rows = json.loads(_SAMPLES.read_text())
-    _insert_orders(conn, rows)
-    conn.commit()
-    log.info("[storage] seeded %d sample orders into %s", len(rows), db_path())
+    if not conn.execute("SELECT count(*) FROM stock_orders").fetchone()[0]:
+        rows = json.loads(_SAMPLES.read_text())
+        _insert_orders(conn, rows)
+        conn.commit()
+        log.info("[storage] seeded %d sample orders into %s", len(rows), db_path())
+    if not conn.execute("SELECT count(*) FROM price_history").fetchone()[0]:
+        rows = json.loads(_PRICE_SAMPLES.read_text())
+        conn.executemany(
+            "INSERT INTO price_history (symbol, date, close) VALUES (?, ?, ?)",
+            [(r["symbol"], r["date"], r["close"]) for r in rows],
+        )
+        conn.commit()
+        log.info("[storage] seeded %d sample closes into %s", len(rows), db_path())
 
 
 def _connect() -> sqlite3.Connection:
@@ -108,6 +129,7 @@ def _connect() -> sqlite3.Connection:
     conn = sqlite3.connect(path)
     conn.row_factory = sqlite3.Row
     conn.execute(_SCHEMA)
+    conn.execute(_PRICE_SCHEMA)
     _seed_if_empty(conn)
     return conn
 
@@ -124,6 +146,18 @@ def read_trade_fills() -> list[dict]:
                 "ts": _parse_ts(row["ts"]),
             }
             for row in conn.execute(_FILLS_QUERY)
+        ]
+
+
+def read_price_history(symbol: str) -> list[dict]:
+    """Daily closes for one symbol, ascending by date."""
+    with closing(_connect()) as conn:
+        return [
+            {"date": row["date"], "close": float(row["close"])}
+            for row in conn.execute(
+                "SELECT date, close FROM price_history WHERE symbol = ? ORDER BY date",
+                (symbol.upper(),),
+            )
         ]
 
 

@@ -32,6 +32,8 @@ gunicorn app.wsgi:application
 cp .env.local.example .env.local   # laptop overrides (gitignored)
 python main.py serve               # http://localhost:10000
 curl -s http://localhost:10000/api/pnl/basis/BTC/robinhood | python3 -m json.tool
+curl -s http://localhost:10000/api/pnl/risk/BTC/robinhood | python3 -m json.tool
+curl -s http://localhost:10000/api/pnl/risk | python3 -m json.tool   # portfolio vol
 ```
 
 App modes live in `configs/config.json` (`dev` / `prod`), each declaring its

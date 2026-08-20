@@ -127,3 +127,72 @@ def test_compute_pnl_total_with_mark_prices():
     assert sym["unrealizedPnL"] == pytest.approx(250.0)
     assert sym["totalPnL"] == pytest.approx(750.0)
     assert sym["markPrice"] == pytest.approx(15.0)
+
+
+def test_pnl_risk_std_of_daily_marks():
+    # Long 1 unit from day 1 at 100; closes 100, 110, 105, 115.
+    # Daily PnL: 0, 10, 5, 15 -> deltas [10, -5, 10], stdev = 8.66
+    fills = [_fill("BTC", "BUY", 1, 100.0, 10)]
+    closes = [
+        {"date": (NOW - timedelta(days=10 - i)).date().isoformat(), "close": c}
+        for i, c in enumerate([100.0, 110.0, 105.0, 115.0])
+    ]
+    from app.pnl import pnl_risk
+    out = pnl_risk(fills, closes, "BTC")
+    assert out["observations"] == 3
+    assert [p["totalPnl"] for p in out["series"]] == [0.0, 10.0, 5.0, 15.0]
+    assert out["dailyStdUsd"] == pytest.approx(8.66, abs=0.01)
+    # pct returns: 10/100, -5/110, 10/105
+    from statistics import stdev
+    expected_pct = stdev([0.10, -5 / 110, 10 / 105]) * 100
+    assert out["dailyStdPct"] == pytest.approx(expected_pct, abs=0.001)
+    assert out["periodsPerYear"] == 365  # consecutive calendar days
+
+
+def test_pnl_risk_flat_days_excluded():
+    # Position opens on the 3rd close day; the flat-flat delta is excluded.
+    fills = [_fill("BTC", "BUY", 1, 100.0, 8)]
+    closes = [
+        {"date": (NOW - timedelta(days=10 - i)).date().isoformat(), "close": c}
+        for i, c in enumerate([90.0, 95.0, 100.0, 110.0])
+    ]
+    from app.pnl import pnl_risk
+    out = pnl_risk(fills, closes, "BTC")
+    # Only day2->day3 has prior exposure: delta 10 on exposure 100
+    assert out["observations"] == 1
+    assert "dailyStdUsd" not in out  # needs >= 2 observations
+
+
+def test_portfolio_risk_sums_symbols():
+    # A: long 1 @100; closes 100, 110, 105. B: long 2 @50; closes 50, 55, 45.
+    # Portfolio PnL: 0, 20, -5 -> deltas [20, -25]
+    # Exposure: d0 = 100 + 100 = 200, d1 = 110 + 110 = 220
+    from app.pnl import portfolio_risk
+    fills = [_fill("AAA", "BUY", 1, 100.0, 10), _fill("BBB", "BUY", 2, 50.0, 10)]
+    d = lambda i: (NOW - timedelta(days=10 - i)).date().isoformat()
+    closes = {
+        "AAA": [{"date": d(i), "close": c} for i, c in enumerate([100.0, 110.0, 105.0])],
+        "BBB": [{"date": d(i), "close": c} for i, c in enumerate([50.0, 55.0, 45.0])],
+    }
+    out = portfolio_risk(fills, closes)
+    assert out["symbols"] == ["AAA", "BBB"]
+    assert [p["totalPnl"] for p in out["series"]] == [0.0, 20.0, -5.0]
+    assert [p["grossExposure"] for p in out["series"]] == [200.0, 220.0, 195.0]
+    assert out["observations"] == 2
+    from statistics import stdev
+    assert out["dailyStdUsd"] == pytest.approx(stdev([20.0, -25.0]), abs=0.01)
+    assert out["dailyStdPct"] == pytest.approx(stdev([20 / 200, -25 / 220]) * 100, abs=0.001)
+
+
+def test_portfolio_risk_forward_fills_missing_close():
+    # B has no close on the last day; its last mark carries forward.
+    from app.pnl import portfolio_risk
+    fills = [_fill("AAA", "BUY", 1, 100.0, 10), _fill("BBB", "BUY", 2, 50.0, 10)]
+    d = lambda i: (NOW - timedelta(days=10 - i)).date().isoformat()
+    closes = {
+        "AAA": [{"date": d(i), "close": c} for i, c in enumerate([100.0, 110.0, 105.0])],
+        "BBB": [{"date": d(i), "close": c} for i, c in enumerate([50.0, 55.0])],
+    }
+    out = portfolio_risk(fills, closes)
+    # Last day: A pnl 5 + B carried at 55 (pnl 10) = 15
+    assert [p["totalPnl"] for p in out["series"]] == [0.0, 20.0, 15.0]

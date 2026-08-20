@@ -37,6 +37,15 @@ def test_write_roundtrip(storage_dir):
     assert fills[0]["ts"] == ts
 
 
+def test_price_history_seeds_and_reads(storage_dir):
+    closes = local.read_price_history("btc")
+    assert len(closes) == 120
+    assert closes[0]["date"] == "2026-04-22"
+    assert closes[0]["close"] == 42000.0
+    assert closes == sorted(closes, key=lambda c: c["date"])
+    assert local.read_price_history("UNKNOWN") == []
+
+
 def test_stock_orders_queryable_in_trading_db_shape(storage_dir):
     """The exact Trading DB column list works against the local SQLite db."""
     local.read_trade_fills()  # triggers seed

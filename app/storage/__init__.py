@@ -20,7 +20,7 @@ from app import redis_store as redis
 from app import s3_store as s3
 from app import trading_db
 from app.storage import local
-from app.storage.fills import get_trade_fills, save_trade_fills
+from app.storage.fills import get_price_history, get_trade_fills, save_trade_fills
 
 __all__ = [
     "redis",
@@ -29,5 +29,6 @@ __all__ = [
     "option_history",
     "local",
     "get_trade_fills",
+    "get_price_history",
     "save_trade_fills",
 ]

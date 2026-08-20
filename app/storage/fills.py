@@ -11,6 +11,14 @@ def get_trade_fills(broker) -> list[dict]:
     return broker._fetch_live_trade_fills()
 
 
+def get_price_history(broker, symbol: str) -> list[dict]:
+    """Daily closes [{date, close}] for the risk series."""
+    if Config.STORAGE_BACKEND == "local":
+        from app.storage import local
+        return local.read_price_history(symbol)
+    return broker._fetch_live_price_history(symbol)
+
+
 def save_trade_fills(broker) -> str:
     """Pull live fills from the broker and persist to the client store."""
     fills = broker._fetch_live_trade_fills()

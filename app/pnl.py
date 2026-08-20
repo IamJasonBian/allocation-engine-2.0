@@ -7,7 +7,9 @@ realizes P&L versus the average cost at that moment. Position flips
 (close-and-open) reset the average to the flip price.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
+from math import sqrt
+from statistics import stdev
 
 
 class PnlSnapshot:
@@ -239,6 +241,145 @@ def compute_pnl(
         out["totalPnL"] = round(total_realized + total_unrealized, 2)
 
     return out
+
+
+def _fill_date(ts) -> str:
+    if isinstance(ts, datetime):
+        return ts.date().isoformat()
+    if isinstance(ts, date):
+        return ts.isoformat()
+    return str(ts)[:10]
+
+
+def _mark_series(fills: list[dict], closes: list[dict], symbol: str) -> list[dict]:
+    """Daily mark-to-market series for one symbol: fills replayed day by day,
+    open position marked to each daily close."""
+    sym = symbol.upper()
+    sym_fills = sorted(
+        (f for f in fills if f["symbol"].upper() == sym), key=lambda f: f["ts"]
+    )
+    closes = sorted(closes, key=lambda c: c["date"])
+
+    snap = PnlSnapshot(sym)
+    series: list[dict] = []
+    i = 0
+    for row in closes:
+        day, close = row["date"], float(row["close"])
+        while i < len(sym_fills) and _fill_date(sym_fills[i]["ts"]) <= day:
+            f = sym_fills[i]
+            snap.update_by_tradefeed(
+                1 if f["side"] == "BUY" else 2, f["price"], f["qty"]
+            )
+            i += 1
+        snap.update_by_marketdata(close)
+        series.append({
+            "date": day,
+            "close": close,
+            "position": round(snap.m_net_position, 8),
+            "totalPnl": round(snap.m_total_pnl, 2),
+        })
+    return series
+
+
+def _std_stats(dates: list[str], deltas: list[float], returns: list[float]) -> dict:
+    """Std of daily P&L deltas / returns, annualized by sampling density."""
+    out: dict = {"observations": len(deltas)}
+    if len(deltas) >= 2:
+        daily_std_pct = stdev(returns) * 100
+        # Sampling frequency implies the annualization calendar: near-daily
+        # closes (crypto) => 365 periods/year, trading-day closes => 252.
+        span_days = (
+            date.fromisoformat(dates[-1]) - date.fromisoformat(dates[0])
+        ).days or 1
+        periods_per_year = 365 if len(dates) / span_days > 0.9 else 252
+        out.update({
+            "dailyStdUsd": round(stdev(deltas), 2),
+            "dailyStdPct": round(daily_std_pct, 4),
+            "annualizedStdPct": round(daily_std_pct * sqrt(periods_per_year), 2),
+            "periodsPerYear": periods_per_year,
+        })
+    return out
+
+
+def pnl_risk(fills: list[dict], closes: list[dict], symbol: str) -> dict:
+    """Daily mark-to-market P&L series for one symbol, with std as the risk measure.
+
+    Replays fills day by day and marks the open position to each daily close,
+    so volatility while holding is captured — not just P&L at trade instants.
+    Std is computed over day-to-day P&L deltas, restricted to days with an
+    open position (flat days are zero by construction and would dilute it).
+    Percent returns are P&L delta over prior-day market exposure.
+    """
+    series = _mark_series(fills, closes, symbol)
+
+    deltas: list[float] = []
+    returns: list[float] = []
+    for prev, cur in zip(series, series[1:]):
+        exposure = abs(prev["position"]) * prev["close"]
+        if exposure < 1e-9:
+            continue
+        delta = cur["totalPnl"] - prev["totalPnl"]
+        deltas.append(delta)
+        returns.append(delta / exposure)
+
+    return {
+        "method": "daily_mark_to_market",
+        "series": series,
+        **_std_stats([p["date"] for p in series], deltas, returns),
+    }
+
+
+def portfolio_risk(fills: list[dict], closes_by_symbol: dict[str, list[dict]]) -> dict:
+    """Portfolio volatility: per-symbol mark-to-market P&L summed per day.
+
+    Each symbol is marked on its own close calendar, then summed on the union
+    of dates; a symbol without a close on a given date carries its last mark
+    forward. Percent returns divide the daily P&L delta by prior-day gross
+    exposure (sum of |position| x close across symbols).
+    """
+    per_symbol: dict[str, list[dict]] = {}
+    for sym, closes in closes_by_symbol.items():
+        marks = _mark_series(fills, closes, sym)
+        if marks:
+            per_symbol[sym.upper()] = marks
+
+    dates = sorted({p["date"] for marks in per_symbol.values() for p in marks})
+    cursor = dict.fromkeys(per_symbol, 0)
+    series: list[dict] = []
+    for day in dates:
+        pnl = 0.0
+        exposure = 0.0
+        for sym, marks in per_symbol.items():
+            i = cursor[sym]
+            while i + 1 < len(marks) and marks[i + 1]["date"] <= day:
+                i += 1
+            cursor[sym] = i
+            point = marks[i]
+            if point["date"] > day:  # symbol has no close yet
+                continue
+            pnl += point["totalPnl"]
+            exposure += abs(point["position"]) * point["close"]
+        series.append({
+            "date": day,
+            "totalPnl": round(pnl, 2),
+            "grossExposure": round(exposure, 2),
+        })
+
+    deltas: list[float] = []
+    returns: list[float] = []
+    for prev, cur in zip(series, series[1:]):
+        if prev["grossExposure"] < 1e-9:
+            continue
+        delta = cur["totalPnl"] - prev["totalPnl"]
+        deltas.append(delta)
+        returns.append(delta / prev["grossExposure"])
+
+    return {
+        "method": "daily_mark_to_market_portfolio",
+        "symbols": sorted(per_symbol),
+        "series": series,
+        **_std_stats(dates, deltas, returns),
+    }
 
 
 def cost_basis_series(fills: list[dict], symbol: str) -> list[dict]:
