@@ -31,6 +31,13 @@ else
     echo ".env already exists, skipping"
 fi
 
+if [ ! -f ".env.local" ]; then
+    cp .env.local.example .env.local
+    echo "Created .env.local from .env.local.example — local API dev overrides"
+else
+    echo ".env.local already exists, skipping"
+fi
+
 # 4. Session directory for Robinhood pickle
 mkdir -p ~/.tokens
 echo "Session directory ready: ~/.tokens"
@@ -42,5 +49,5 @@ python scripts/check_schemas.py
 
 echo ""
 echo "=== Setup complete ==="
-echo "Start the server:  source .venv/bin/activate && gunicorn app.wsgi:application"
-echo "Or dev mode:        source .venv/bin/activate && python main.py serve"
+echo "Start the server:  source .venv/bin/activate && python main.py serve"
+echo "Local config:      .env.local (see .env.local.example)"

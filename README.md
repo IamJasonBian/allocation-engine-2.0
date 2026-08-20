@@ -29,6 +29,18 @@ gunicorn app.wsgi:application
 ### Local development
 
 ```bash
+cp .env.local.example .env.local   # laptop overrides (gitignored)
+python main.py serve               # http://localhost:10000
+curl -s http://localhost:10000/api/pnl/basis/BTC/robinhood | python3 -m json.tool
+```
+
+App modes live in `configs/config.json` (`dev` / `prod`), each declaring its
+env file and storage routing; `APP_MODE` env overrides the file. `dev` reads
+fills from `data/local/trade_fills.json` (auto-seeded from
+`app/storage/samples/`); `prod` (the checked-in default, used on Render) reads
+live Robinhood via the auth box and needs `RH_AUTH_SERVICE_REQUEST_TOKEN`.
+
+```bash
 # Flask dev server
 python main.py serve
 

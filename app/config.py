@@ -1,10 +1,18 @@
 import os
 from dotenv import load_dotenv
 
+from app.app_config import load_app_config
+
 load_dotenv()
+load_dotenv(".env.local", override=True)
+
+# Mode-based file config (configs/config.json) — also loads the mode's env file.
+_app_config = load_app_config()
 
 
 class Config:
+    # -- App mode (configs/config.json; APP_MODE env overrides) --
+    APP_MODE = _app_config.app_mode
     # -- Flask --
     SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-change-me")
     DEBUG = os.getenv("FLASK_DEBUG", "false").lower() == "true"
@@ -91,6 +99,12 @@ class Config:
     ENGINE_BROKER = os.getenv("ENGINE_BROKER", "robinhood")
     DATA_BROKER = os.getenv("DATA_BROKER", "alpaca")
     MAX_ORDER_QTY = int(os.getenv("MAX_ORDER_QTY", "50"))
+
+    # -- Storage routing (from configs/config.json, per app mode) --
+    # broker = live Robinhood reads; local = {LOCAL_STORAGE_DIR}/trade_fills.json
+    # LOCAL_STORAGE_DIR is None in broker modes that omit `storage_dir`.
+    STORAGE_BACKEND = _app_config.mode.storage_backend
+    LOCAL_STORAGE_DIR = _app_config.mode.storage_dir
 
     # -- S3 (order event storage) --
     S3_BUCKET = os.getenv("S3_BUCKET", "")

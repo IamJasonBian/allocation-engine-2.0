@@ -14,6 +14,7 @@ import robin_stocks.robinhood as rh
 from app.brokers.base import BrokerClient
 from app.enums import OrderType
 from app.pnl import compute_pnl
+from app.storage import get_trade_fills
 
 log = logging.getLogger(__name__)
 
@@ -273,7 +274,11 @@ class RobinhoodTrader(BrokerClient):
         return result
 
     def trade_fills(self) -> list[dict]:
-        """Normalize RH stock and crypto orders into replay_fills() input."""
+        """Normalized stock + crypto fills for PnL replay."""
+        return get_trade_fills(self)
+
+    def _fetch_live_trade_fills(self) -> list[dict]:
+        """Pull fills from Robinhood (stock + crypto orders)."""
         self._ensure_auth()
         fills: list[dict] = []
         self._append_trade_fills(

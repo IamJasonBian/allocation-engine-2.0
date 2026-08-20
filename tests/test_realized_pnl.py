@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 import app.brokers.robinhood_client as rc
+from app.config import Config
 
 NOW = datetime.now(timezone.utc)
 
@@ -24,6 +25,7 @@ def _order(symbol, side, qty, price, days_ago, state="filled"):
 
 @pytest.fixture
 def trader(monkeypatch):
+    monkeypatch.setattr(Config, "STORAGE_BACKEND", "broker")
     monkeypatch.setattr(rc.RobinhoodTrader, "_ensure_auth", lambda self: None)
     monkeypatch.setattr(rc, "_symbol_from_instrument", lambda url: url)
     monkeypatch.setattr(rc.rh.orders, "get_all_crypto_orders", lambda: [])

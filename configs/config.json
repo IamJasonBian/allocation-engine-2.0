@@ -1,0 +1,14 @@
+{
+    "description": "This app has two modes: dev, prod. APP_MODE env overrides app_mode.",
+    "app_mode": "prod",
+    "dev": {
+        "env_file": ".env.local",
+        "storage_backend": "local",
+        "local_storage_dir": "./data/local"
+    },
+    "prod": {
+        "env_file": ".env",
+        "storage_backend": "broker",
+        "local_storage_dir": "/tmp/allocation-engine"
+    }
+}
