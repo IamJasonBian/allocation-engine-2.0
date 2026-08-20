@@ -1,6 +1,7 @@
 """Local trade-fill storage + mode-based config loader."""
 
 import json
+import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -22,7 +23,7 @@ def test_read_seeds_from_samples(storage_dir):
     assert len(fills) == 4
     assert fills[0]["symbol"] == "BTC"
     assert fills[0]["ts"].tzinfo is not None
-    assert (storage_dir / "trade_fills.json").exists()
+    assert (storage_dir / "trading.db").exists()
 
 
 def test_write_roundtrip(storage_dir):
@@ -34,6 +35,21 @@ def test_write_roundtrip(storage_dir):
     assert len(fills) == 1
     assert fills[0]["symbol"] == "AAA"
     assert fills[0]["ts"] == ts
+
+
+def test_stock_orders_queryable_in_trading_db_shape(storage_dir):
+    """The exact Trading DB column list works against the local SQLite db."""
+    local.read_trade_fills()  # triggers seed
+    with sqlite3.connect(storage_dir / "trading.db") as conn:
+        rows = conn.execute(
+            "SELECT order_id, symbol, side, order_type, trigger_type, state,"
+            " quantity, limit_price, stop_price, filled_quantity, average_price,"
+            " created_at, updated_at, raw, ingested_at FROM stock_orders"
+        ).fetchall()
+    assert len(rows) == 4
+    order_ids = {r[0] for r in rows}
+    assert order_ids == {"sample-0001", "sample-0002", "sample-0003", "sample-0004"}
+    assert all(json.loads(r[13]) is not None for r in rows)  # raw column is JSON
 
 
 # --------------------------------------------------------------------------- #

@@ -101,7 +101,7 @@ class Config:
     MAX_ORDER_QTY = int(os.getenv("MAX_ORDER_QTY", "50"))
 
     # -- Storage routing (from configs/config.json, per app mode) --
-    # broker = live Robinhood reads; local = {LOCAL_STORAGE_DIR}/trade_fills.json
+    # broker = live Robinhood reads; local = {LOCAL_STORAGE_DIR}/trading.db (SQLite)
     # LOCAL_STORAGE_DIR is None in broker modes that omit `storage_dir`.
     STORAGE_BACKEND = _app_config.mode.storage_backend
     LOCAL_STORAGE_DIR = _app_config.mode.storage_dir
