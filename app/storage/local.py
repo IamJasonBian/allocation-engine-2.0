@@ -11,6 +11,9 @@ sqlite3 CLI) can run the same query shapes as the real Trading DB:
 A `price_history` table (symbol, date, close) holds daily closes for the
 risk/volatility series, seeded from samples alongside stock_orders.
 
+`risk_profile.json` is a local-only parse dump (not a store): flat
+{symbol: {...}, "portfolio": {symbols, riskUsd, uncorrelatedRiskUsd, text}}.
+
 SQLite has no schemas, so drop the `public.` prefix. Fill semantics match
 docs/sql/pnl_shapes.sql: a fill is any row with filled_quantity > 0 and a
 non-null average_price, timestamped by COALESCE(updated_at, created_at).
@@ -88,6 +91,14 @@ def db_path() -> Path:
     return _storage_dir() / "trading.db"
 
 
+def risk_profile_path() -> Path:
+    return _storage_dir() / "risk_profile.json"
+
+
+def equity_series_path() -> Path:
+    return _storage_dir() / "equity_series.json"
+
+
 def _parse_ts(raw) -> datetime:
     if isinstance(raw, datetime):
         return raw if raw.tzinfo else raw.replace(tzinfo=timezone.utc)
@@ -108,19 +119,124 @@ def _insert_orders(conn: sqlite3.Connection, rows: list[dict]) -> None:
 
 
 def _seed_if_empty(conn: sqlite3.Connection) -> None:
-    if not conn.execute("SELECT count(*) FROM stock_orders").fetchone()[0]:
-        rows = json.loads(_SAMPLES.read_text())
+    """Seed sample orders/closes; top up sample symbols a DB doesn't have yet.
+
+    Inserts are keyed (order_id / symbol+date) with OR IGNORE, so a
+    sample-seeded DB keeps its rows and only gains sample symbols added later.
+    A DB holding a live snapshot (non-sample order ids) is left alone.
+    """
+    have = {r[0] for r in conn.execute("SELECT order_id FROM stock_orders")}
+    if have and not all(oid.startswith("sample-") for oid in have):
+        return  # live snapshot (write_trade_fills) — never mix samples back in
+    rows = [r for r in json.loads(_SAMPLES.read_text()) if r["order_id"] not in have]
+    if rows:
         _insert_orders(conn, rows)
         conn.commit()
         log.info("[storage] seeded %d sample orders into %s", len(rows), db_path())
-    if not conn.execute("SELECT count(*) FROM price_history").fetchone()[0]:
-        rows = json.loads(_PRICE_SAMPLES.read_text())
-        conn.executemany(
-            "INSERT INTO price_history (symbol, date, close) VALUES (?, ?, ?)",
-            [(r["symbol"], r["date"], r["close"]) for r in rows],
-        )
+    rows = json.loads(_PRICE_SAMPLES.read_text())
+    cur = conn.executemany(
+        "INSERT OR IGNORE INTO price_history (symbol, date, close) VALUES (?, ?, ?)",
+        [(r["symbol"], r["date"], r["close"]) for r in rows],
+    )
+    if cur.rowcount:
         conn.commit()
-        log.info("[storage] seeded %d sample closes into %s", len(rows), db_path())
+        log.info("[storage] seeded %d sample closes into %s", cur.rowcount, db_path())
+    if not risk_profile_path().exists():
+        profile = _profile_from_conn(conn)
+        if profile:
+            path = _write_risk_json(profile)
+            log.info("[storage] seeded %d tickers into %s", len(profile), path)
+
+
+def _ticker_risk_flat(symbol: str, fills: list[dict], closes: list[dict]) -> tuple[dict, dict] | None:
+    from app.pnl import format_ticker_risk, pnl_risk
+    risk = pnl_risk(fills, closes, symbol)
+    if "closeStdUsd" not in risk:
+        return None
+    return {
+        "position": risk["position"],
+        "closeStdUsd": risk["closeStdUsd"],
+        "growthRatePct": risk["growthRatePct"],
+        "growthRateMeanPct": risk["growthRateMeanPct"],
+        "growthRateStdPct": risk["growthRateStdPct"],
+        "riskAdjustedGrowthRate": risk["riskAdjustedGrowthRate"],
+        "growthRateZ": risk["growthRateZ"],
+        "riskUsd": risk["riskUsd"],
+        "variance": risk.get("variance"),
+        "monthlyGrowth": risk.get("monthlyGrowth") or [],
+        "text": format_ticker_risk(symbol.upper(), risk),
+    }, {
+        "daily": risk.get("equitySeries") or [],
+        "variance": risk.get("variance"),
+        "monthlyGrowth": risk.get("monthlyGrowth") or [],
+    }
+
+
+def _portfolio_flat(tickers: dict) -> dict:
+    from math import sqrt
+    from app.pnl import format_portfolio_risk
+    risks = [t["riskUsd"] for t in tickers.values()]
+    row = {
+        "symbols": sorted(tickers),
+        "riskUsd": round(sum(risks), 2),
+        "uncorrelatedRiskUsd": round(sqrt(sum(r ** 2 for r in risks)), 2) if risks else 0.0,
+    }
+    row["text"] = format_portfolio_risk(row)
+    return row
+
+
+def _write_equity_series(series_by_symbol: dict) -> Path:
+    path = equity_series_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(series_by_symbol, indent=2) + "\n")
+    return path
+
+
+def _build_profile(fills: list[dict], closes_by_symbol: dict[str, list[dict]]) -> dict:
+    profile = {}
+    series_by_symbol = {}
+    symbols = {f["symbol"].upper() for f in fills} | {s.upper() for s in closes_by_symbol}
+    for sym in sorted(symbols):
+        pair = _ticker_risk_flat(sym, fills, closes_by_symbol.get(sym, []))
+        if not pair:
+            continue
+        row, series = pair
+        profile[sym] = row
+        series_by_symbol[sym] = series
+    if profile:
+        profile["portfolio"] = _portfolio_flat(profile)
+        _write_equity_series(series_by_symbol)
+    return profile
+
+
+def _profile_from_conn(conn: sqlite3.Connection) -> dict:
+    fills = [
+        {
+            "symbol": row["symbol"],
+            "side": row["side"],
+            "qty": float(row["qty"]),
+            "price": float(row["price"]),
+            "ts": _parse_ts(row["ts"]),
+        }
+        for row in conn.execute(_FILLS_QUERY)
+    ]
+    closes_by_symbol = {}
+    for sym in {f["symbol"].upper() for f in fills}:
+        closes_by_symbol[sym] = [
+            {"date": row["date"], "close": float(row["close"])}
+            for row in conn.execute(
+                "SELECT date, close FROM price_history WHERE symbol = ? ORDER BY date",
+                (sym,),
+            )
+        ]
+    return _build_profile(fills, closes_by_symbol)
+
+
+def _write_risk_json(profile: dict) -> Path:
+    path = risk_profile_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(profile, indent=2) + "\n")
+    return path
 
 
 def _connect() -> sqlite3.Connection:
@@ -191,3 +307,16 @@ def write_trade_fills(fills: list[dict]) -> Path:
         _insert_orders(conn, rows)
     log.info("[storage] wrote %d orders to %s", len(rows), db_path())
     return db_path()
+
+
+def read_risk_profile() -> dict:
+    """Flat ticker-risk JSON: {symbol: {position, closeStdUsd, ...}}."""
+    path = risk_profile_path()
+    if not path.exists():
+        with closing(_connect()):
+            pass  # seed via _seed_if_empty
+    if not path.exists():
+        return {}
+    return json.loads(path.read_text())
+
+

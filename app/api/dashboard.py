@@ -14,6 +14,7 @@ bp = Blueprint("dashboard", __name__)
 
 _PAGE = Path(__file__).resolve().parents[2] / "dashboard" / "index.html"
 _BTC_BASIS = Path(__file__).resolve().parents[2] / "dashboard" / "btc-basis.html"
+_RISK = Path(__file__).resolve().parents[2] / "dashboard" / "risk.html"
 
 
 @bp.route("/dashboard")
@@ -24,3 +25,9 @@ def dashboard() -> Response:
 @bp.route("/dashboard/btc-basis")
 def btc_basis_dashboard() -> Response:
     return Response(_BTC_BASIS.read_text(), mimetype="text/html")
+
+
+@bp.route("/risk")
+def risk_dashboard() -> Response:
+    """Metrics & risk site — reads /api/risk/report from this same service."""
+    return Response(_RISK.read_text(), mimetype="text/html")

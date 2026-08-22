@@ -1,0 +1,415 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Risk Desk</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --bg:#17191D;--panel:#1F2228;--panel-2:#262A31;--rule:#33383F;--ink:#E8E4DA;--muted:#9A9EA8;--faint:#5E636C;
+  --accent:#E3A33A;--accent-soft:rgba(227,163,58,.16);--bound:#6E8FC9;
+  --gain:#4FA37A;--loss:#D9534F;--warn:#E3A33A;--crit:#D9534F;--info:#6E8FC9;
+  --sans:"IBM Plex Sans",system-ui,-apple-system,sans-serif;--mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 var(--sans)}
+a{color:inherit}
+.num{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.wrap{max-width:1280px;margin:0 auto;padding:28px 24px 64px;display:grid;gap:22px}
+header{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px;border-bottom:1px solid var(--rule);padding-bottom:14px}
+header h1{margin:0;font-size:22px;font-weight:600;letter-spacing:-.01em}
+header h1 span{color:var(--accent)}
+.meta{display:flex;gap:18px;flex-wrap:wrap;color:var(--muted);font-size:12.5px;align-items:center}
+.meta b{color:var(--ink);font-weight:500}
+button{font:inherit;color:var(--ink);background:var(--panel-2);border:1px solid var(--rule);border-radius:4px;padding:6px 12px;cursor:pointer}
+button:hover{border-color:var(--muted)} button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.eyebrow{font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);font-weight:500}
+section{display:grid;gap:10px}
+section > h2{margin:0;font-size:15px;font-weight:600;display:flex;align-items:baseline;gap:10px}
+section > h2 small{font-weight:400;color:var(--muted);font-size:12.5px}
+.panel{background:var(--panel);border:1px solid var(--rule);border-radius:6px;padding:16px}
+.grid{display:grid;gap:12px}
+.g2{grid-template-columns:repeat(auto-fit,minmax(380px,1fr))}
+.tiles{grid-template-columns:repeat(auto-fit,minmax(170px,1fr))}
+.tile{background:var(--panel);border:1px solid var(--rule);border-radius:6px;padding:14px 16px;display:grid;gap:4px;align-content:start}
+.tile .v{font:500 24px/1.15 var(--mono);font-variant-numeric:tabular-nums}
+.tile .s{font-size:12px;color:var(--muted)}
+.tile.accent{border-top:2px solid var(--accent)}
+.pos{color:var(--gain)} .neg{color:var(--loss)}
+.flags{display:grid;gap:8px}
+.flag{display:grid;grid-template-columns:auto 1fr;gap:12px;align-items:start;padding:10px 14px;background:var(--panel);border:1px solid var(--rule);border-left:3px solid var(--info);border-radius:4px}
+.flag.warning{border-left-color:var(--warn)} .flag.critical{border-left-color:var(--crit)}
+.flag .pill{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;padding:2px 8px;border-radius:999px;background:var(--panel-2);color:var(--muted);margin-top:2px}
+.flag.warning .pill{color:var(--warn)} .flag.critical .pill{color:var(--crit)}
+canvas{display:block;width:100%;height:auto}
+.chart-h{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px}
+.legend{display:flex;gap:14px;font-size:12px;color:var(--muted);flex-wrap:wrap}
+.legend i{display:inline-block;width:10px;height:3px;vertical-align:middle;margin-right:6px;border-radius:2px}
+.tablewrap{overflow-x:auto;border:1px solid var(--rule);border-radius:6px;background:var(--panel)}
+table{border-collapse:collapse;width:100%;min-width:880px}
+th,td{padding:9px 12px;text-align:right;white-space:nowrap;border-bottom:1px solid var(--rule)}
+th{font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--muted);font-weight:500;position:sticky;top:0;background:var(--panel)}
+td{font-family:var(--mono);font-variant-numeric:tabular-nums;font-size:13px}
+th:first-child,td:first-child{text-align:left}
+td.sym{font-family:var(--sans);font-weight:600}
+tr:last-child td{border-bottom:0}
+tfoot td{font-weight:500;border-top:2px solid var(--rule);background:var(--panel-2)}
+.side{font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;padding:1px 6px;border-radius:3px;margin-left:8px;font-family:var(--sans);font-weight:500}
+.side.long{background:rgba(79,163,122,.15);color:var(--gain)} .side.short{background:rgba(217,83,79,.15);color:var(--loss)}
+.wbar{display:inline-block;width:70px;height:6px;background:var(--rule);border-radius:3px;vertical-align:middle;margin-right:8px;overflow:hidden}
+.wbar i{display:block;height:100%;background:var(--accent)}
+.bars{display:grid;gap:8px}
+.bar{display:grid;grid-template-columns:64px 1fr 120px;gap:10px;align-items:center;font-size:13px}
+.bar .track{position:relative;height:14px;background:var(--panel-2);border-radius:3px}
+.bar .track i{position:absolute;top:0;bottom:0;background:var(--accent);border-radius:3px}
+.bar .track i.hedge{background:var(--gain)}
+.bar .track b{position:absolute;left:50%;top:-2px;bottom:-2px;width:1px;background:var(--rule)}
+.bounds{display:grid;gap:6px;margin-top:14px}
+.bounds .rail{position:relative;height:10px;background:var(--panel-2);border-radius:5px}
+.bounds .rail i{position:absolute;top:0;bottom:0;background:linear-gradient(90deg,rgba(110,143,201,.35),rgba(110,143,201,.15));border-radius:5px}
+.bounds .rail b{position:absolute;top:-4px;width:3px;height:18px;background:var(--accent);border-radius:2px}
+.bounds .lbl{display:flex;justify-content:space-between;font-size:12px;color:var(--muted)}
+.heat{display:grid;gap:2px}
+.heat .row{display:grid;gap:2px}
+.heat .cell{height:34px;display:flex;align-items:center;justify-content:center;font:12px var(--mono);border-radius:3px}
+.heat .hd{font:11px var(--sans);color:var(--muted);letter-spacing:.05em;background:transparent}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:0;border:1px solid var(--rule);border-radius:6px;overflow:hidden;background:var(--panel)}
+.stat{padding:12px 16px;border-right:1px solid var(--rule);border-bottom:1px solid var(--rule);display:grid;gap:2px}
+.stat .k{font-size:12px;color:var(--muted)} .stat .v{font:500 17px var(--mono);font-variant-numeric:tabular-nums}
+.spark{vertical-align:middle}
+.methods{font-size:13px;color:var(--muted);line-height:1.65;max-width:78ch}
+.methods code{font:12px var(--mono);color:var(--ink);background:var(--panel-2);padding:1px 5px;border-radius:3px}
+.methods dt{color:var(--ink);font-weight:500;margin-top:8px} .methods dd{margin:0}
+.state{padding:28px;text-align:center;color:var(--muted);border:1px dashed var(--rule);border-radius:6px}
+.state.error{border-color:var(--loss);color:var(--ink);text-align:left;display:grid;gap:8px;justify-items:start}
+.state.error code{font:12px var(--mono);color:var(--loss)}
+.skel{background:linear-gradient(90deg,var(--panel) 0%,var(--panel-2) 50%,var(--panel) 100%);background-size:200% 100%;animation:sh 1.4s infinite;border-radius:6px;min-height:96px}
+@keyframes sh{0%{background-position:200% 0}100%{background-position:-200% 0}}
+@media (prefers-reduced-motion:reduce){.skel{animation:none}}
+.hidden{display:none!important}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <div class="eyebrow">allocation engine · metrics &amp; risk</div>
+      <h1>Risk <span>Desk</span></h1>
+    </div>
+    <div class="meta">
+      <span>broker <b id="m-broker">—</b></span>
+      <span>book as of <b id="m-asof">—</b></span>
+      <span title="" id="m-gen-wrap">computed <b id="m-gen">—</b></span>
+      <button id="refresh" type="button">Refresh</button>
+    </div>
+  </header>
+
+  <div id="loading" class="grid">
+    <div class="skel" style="min-height:56px"></div>
+    <div class="grid tiles"><div class="skel"></div><div class="skel"></div><div class="skel"></div><div class="skel"></div><div class="skel"></div><div class="skel"></div></div>
+    <div class="skel" style="min-height:280px"></div>
+  </div>
+  <div id="error" class="state error hidden"></div>
+  <div id="empty" class="state hidden">No fills on this broker yet — the desk lights up with the first trade.</div>
+
+  <main id="main" class="hidden" style="display:grid;gap:26px">
+    <section>
+      <h2>Flags <small>each names the number it came from</small></h2>
+      <div id="flags" class="flags"></div>
+    </section>
+
+    <section>
+      <h2>Headline</h2>
+      <div id="tiles" class="grid tiles"></div>
+    </section>
+
+    <section>
+      <h2>Book curve <small>mark-to-market P&amp;L, every day, every symbol</small></h2>
+      <div class="grid g2">
+        <div class="panel">
+          <div class="chart-h"><span class="eyebrow">cumulative P&amp;L</span>
+            <span class="legend"><span><i style="background:var(--accent)"></i>P&amp;L</span><span><i style="background:var(--loss);opacity:.6"></i>drawdown from peak</span></span></div>
+          <canvas id="c-curve" height="260"></canvas>
+        </div>
+        <div class="panel">
+          <div class="chart-h"><span class="eyebrow">rolling 20-day volatility (annualized, on exposure)</span></div>
+          <canvas id="c-vol" height="260"></canvas>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Positions <small>what the book is right now</small></h2>
+      <div class="tablewrap"><table id="t-book"></table></div>
+    </section>
+
+    <section>
+      <h2>Where the risk lives <small>covariance decomposition of 1-day σ</small></h2>
+      <div class="grid g2">
+        <div class="panel">
+          <div class="chart-h"><span class="eyebrow">component risk — shares of portfolio σ</span><span class="legend"><span><i style="background:var(--accent)"></i>adds risk</span><span><i style="background:var(--gain)"></i>hedge</span></span></div>
+          <div id="bars" class="bars"></div>
+          <div class="bounds">
+            <div class="eyebrow" style="margin-top:6px">portfolio σ against its bounds</div>
+            <div class="rail"><i id="rail-fill"></i><b id="rail-mark"></b></div>
+            <div class="lbl"><span>uncorrelated floor <b class="num" id="b-unc"></b></span><span>true σ <b class="num" id="b-true" style="color:var(--accent)"></b></span><span>additive ceiling <b class="num" id="b-add"></b></span></div>
+            <div class="lbl"><span>diversification ratio <b class="num" id="b-dr"></b></span><span>annualized σ <b class="num" id="b-ann"></b></span></div>
+          </div>
+        </div>
+        <div class="panel">
+          <div class="chart-h"><span class="eyebrow">correlation of daily returns</span></div>
+          <div id="heat" class="heat"></div>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Tail <small>how bad is a bad day on today's book</small></h2>
+      <div class="grid g2">
+        <div class="panel">
+          <div class="chart-h"><span class="eyebrow">simulated 1-day P&amp;L — every observed return vector applied to current notionals</span></div>
+          <canvas id="c-hist" height="240"></canvas>
+          <div class="legend" style="margin-top:8px"><span><i style="background:var(--warn)"></i>VaR 95</span><span><i style="background:var(--loss)"></i>VaR 99</span><span><i style="background:var(--bound)"></i>normal model VaR 99</span></div>
+        </div>
+        <div class="tablewrap"><table id="t-tail"></table></div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Stress <small>what if</small></h2>
+      <div class="tablewrap"><table id="t-stress"></table></div>
+    </section>
+
+    <section>
+      <h2>Performance <small>on capital actually at risk, risk-free = 0</small></h2>
+      <div id="stats" class="stats"></div>
+    </section>
+
+    <section>
+      <h2>Methods</h2>
+      <div class="panel methods" id="methods"></div>
+    </section>
+  </main>
+</div>
+
+<script>
+(() => {
+const $ = (s) => document.querySelector(s);
+const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const usd = (x, d = 0) => (x < 0 ? "−" : "") + "$" + Math.abs(x).toLocaleString(undefined, {minimumFractionDigits: d, maximumFractionDigits: d});
+const pct = (x, d = 2) => (x == null ? "—" : (x > 0 ? "+" : x < 0 ? "−" : "") + Math.abs(x).toFixed(d) + "%");
+const num = (x, d = 2) => x == null ? "—" : Number(x).toLocaleString(undefined, {minimumFractionDigits: d, maximumFractionDigits: d});
+const sign = (x) => x > 0 ? "pos" : x < 0 ? "neg" : "";
+const esc = (s) => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const rel = (iso) => { const s = (Date.now() - new Date(iso)) / 1000; return s < 60 ? "just now" : s < 3600 ? Math.round(s/60) + " min ago" : s < 86400 ? Math.round(s/3600) + " h ago" : Math.round(s/86400) + " d ago"; };
+
+function show(id) { for (const k of ["loading","error","empty","main"]) $("#"+k).classList.toggle("hidden", k !== id); }
+
+async function load(refresh) {
+  show("loading");
+  const q = new URLSearchParams(location.search);
+  const url = "/api/risk/report?" + new URLSearchParams({...(q.get("broker") ? {broker: q.get("broker")} : {}), ...(refresh ? {refresh: 1} : {})});
+  let rep;
+  try {
+    const res = await fetch(url);
+    rep = await res.json();
+    if (!res.ok || rep.error) throw new Error(rep.error || ("HTTP " + res.status));
+  } catch (e) {
+    $("#error").innerHTML = `<div><b>Couldn't load the report.</b> The risk API returned an error, so nothing below is current.</div><code>${esc(e.message)}</code><button type="button" id="retry">Try again</button>`;
+    $("#retry").onclick = () => load(true);
+    show("error"); return;
+  }
+  if (!rep.curve || !rep.curve.length) { show("empty"); return; }
+  render(rep); show("main");
+}
+
+function render(rep) {
+  $("#m-broker").textContent = rep.broker;
+  $("#m-asof").textContent = rep.asOf;
+  $("#m-gen").textContent = rel(rep.generatedAt);
+  $("#m-gen-wrap").title = rep.generatedAt;
+  const h = rep.headline, g = h.grossExposureUsd || 1;
+
+  $("#flags").innerHTML = rep.flags.map(f => `<div class="flag ${f.severity}"><span class="pill">${f.severity}</span><div>${esc(f.text)}</div></div>`).join("");
+
+  $("#tiles").innerHTML = [
+    ["Total P&L", usd(h.totalPnlUsd), `realized ${usd(h.realizedPnlUsd)} · open ${usd(h.unrealizedPnlUsd)}`, sign(h.totalPnlUsd), true],
+    ["Gross exposure", usd(h.grossExposureUsd), `net ${usd(h.netExposureUsd)} · ${h.openPositions} positions`, ""],
+    ["1-day σ", usd(h.portfolioDailySigmaUsd), `${pct(h.portfolioDailySigmaUsd / g * 100)} of gross · covariance`, ""],
+    ["VaR 95 / 99", usd(h.var95Usd) + " / " + usd(h.var99Usd), `1-day, historical on today's book`, ""],
+    ["Sharpe", h.sharpe == null ? "—" : num(h.sharpe), `Sortino ${num(rep.performance.sortino)} · ${rep.performance.observations} days`, ""],
+    ["Max drawdown", usd(h.maxDrawdownUsd), `${pct(rep.performance.maxDrawdownPct)} of gross · ${rep.drawdown.inDrawdown ? "in drawdown now" : "recovered"}`, sign(h.maxDrawdownUsd)],
+  ].map(([k, v, s, cls, acc]) => `<div class="tile${acc ? " accent" : ""}"><div class="eyebrow">${k}</div><div class="v ${cls}">${v}</div><div class="s">${s}</div></div>`).join("");
+
+  drawCurve($("#c-curve"), rep.curve, rep.drawdownSeries);
+  drawVol($("#c-vol"), rep.rollingVol);
+  renderBook(rep);
+  renderDecomp(rep.covariance);
+  renderHeat(rep.covariance);
+  drawHist($("#c-hist"), rep.tail);
+  renderTail(rep.tail, rep.covariance);
+  renderStress(rep.stress);
+  renderStats(rep.performance, rep.drawdown, rep.exposure);
+  renderMethods();
+}
+
+/* ---------- canvas helpers ---------- */
+function setup(cv, hCss) {
+  const dpr = window.devicePixelRatio || 1, w = cv.clientWidth || 600;
+  cv.width = w * dpr; cv.height = hCss * dpr; cv.style.height = hCss + "px";
+  const ctx = cv.getContext("2d"); ctx.scale(dpr, dpr);
+  ctx.font = "11px " + css("--mono");
+  return [ctx, w, hCss];
+}
+function axisY(ctx, x0, x1, y0, y1, lo, hi, fmt, n = 4) {
+  ctx.strokeStyle = css("--rule"); ctx.fillStyle = css("--muted"); ctx.textAlign = "right"; ctx.textBaseline = "middle"; ctx.lineWidth = 1;
+  for (let i = 0; i <= n; i++) {
+    const v = lo + (hi - lo) * i / n, y = y1 - (y1 - y0) * i / n;
+    ctx.beginPath(); ctx.moveTo(x0, y + .5); ctx.lineTo(x1, y + .5); ctx.stroke();
+    ctx.fillText(fmt(v), x0 - 6, y);
+  }
+}
+function axisX(ctx, dates, x0, x1, y) {
+  ctx.fillStyle = css("--muted"); ctx.textAlign = "center"; ctx.textBaseline = "top";
+  const n = Math.min(6, dates.length);
+  for (let i = 0; i < n; i++) { const k = Math.round(i * (dates.length - 1) / Math.max(n - 1, 1)); ctx.fillText(dates[k].slice(5), x0 + (x1 - x0) * k / Math.max(dates.length - 1, 1), y + 6); }
+}
+
+function drawCurve(cv, curve, dd) {
+  const [ctx, W, H] = setup(cv, 260); const L = 64, R = 30, T = 10, B = 26;
+  const vals = curve.map(p => p.totalPnl), lo = Math.min(0, ...vals), hi = Math.max(0, ...vals);
+  const pad = (hi - lo) * .08 || 1; const ylo = lo - pad, yhi = hi + pad;
+  const X = i => L + (W - L - R) * i / Math.max(curve.length - 1, 1), Y = v => T + (H - T - B) * (1 - (v - ylo) / (yhi - ylo));
+  axisY(ctx, L, W - R, T, H - B, ylo, yhi, v => usd(v)); axisX(ctx, curve.map(p => p.date), L, W - R, H - B);
+  // drawdown shading: between running peak and pnl
+  let peak = -Infinity; ctx.fillStyle = "rgba(217,83,79,.18)"; ctx.beginPath();
+  curve.forEach((p, i) => { peak = Math.max(peak, p.totalPnl); i ? ctx.lineTo(X(i), Y(peak)) : ctx.moveTo(X(i), Y(peak)); });
+  for (let i = curve.length - 1; i >= 0; i--) ctx.lineTo(X(i), Y(curve[i].totalPnl));
+  ctx.closePath(); ctx.fill();
+  // zero line
+  ctx.strokeStyle = css("--faint"); ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.moveTo(L, Y(0) + .5); ctx.lineTo(W - R, Y(0) + .5); ctx.stroke(); ctx.setLineDash([]);
+  // area + line
+  const grad = ctx.createLinearGradient(0, T, 0, H - B); grad.addColorStop(0, "rgba(227,163,58,.25)"); grad.addColorStop(1, "rgba(227,163,58,0)");
+  ctx.fillStyle = grad; ctx.beginPath(); ctx.moveTo(X(0), Y(0)); curve.forEach((p, i) => ctx.lineTo(X(i), Y(p.totalPnl))); ctx.lineTo(X(curve.length - 1), Y(0)); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = css("--accent"); ctx.lineWidth = 1.8; ctx.beginPath(); curve.forEach((p, i) => i ? ctx.lineTo(X(i), Y(p.totalPnl)) : ctx.moveTo(X(i), Y(p.totalPnl))); ctx.stroke();
+  const last = curve[curve.length - 1]; ctx.fillStyle = css("--accent"); ctx.beginPath(); ctx.arc(X(curve.length - 1), Y(last.totalPnl), 3.5, 0, Math.PI * 2); ctx.fill();
+  ctx.textAlign = "right"; ctx.textBaseline = "bottom"; ctx.fillStyle = css("--ink"); ctx.font = "500 12px " + css("--mono"); ctx.fillText(usd(last.totalPnl), X(curve.length - 1) - 6, Y(last.totalPnl) - 6);
+}
+
+function drawVol(cv, rv) {
+  const [ctx, W, H] = setup(cv, 260); const L = 52, R = 30, T = 10, B = 26;
+  if (rv.length < 2) { ctx.fillStyle = css("--muted"); ctx.textAlign = "center"; ctx.fillText("needs 20+ days", W / 2, H / 2); return; }
+  const vals = rv.map(p => p.annualizedVolPct), yhi = Math.max(...vals) * 1.1 || 1;
+  const X = i => L + (W - L - R) * i / (rv.length - 1), Y = v => T + (H - T - B) * (1 - v / yhi);
+  axisY(ctx, L, W - R, T, H - B, 0, yhi, v => v.toFixed(0) + "%"); axisX(ctx, rv.map(p => p.date), L, W - R, H - B);
+  ctx.strokeStyle = css("--bound"); ctx.lineWidth = 1.6; ctx.beginPath(); rv.forEach((p, i) => i ? ctx.lineTo(X(i), Y(p.annualizedVolPct)) : ctx.moveTo(X(i), Y(p.annualizedVolPct))); ctx.stroke();
+  const last = rv[rv.length - 1]; ctx.fillStyle = css("--bound"); ctx.beginPath(); ctx.arc(X(rv.length - 1), Y(last.annualizedVolPct), 3.5, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = css("--ink"); ctx.textAlign = "right"; ctx.textBaseline = "bottom"; ctx.font = "500 12px " + css("--mono"); ctx.fillText(last.annualizedVolPct.toFixed(1) + "%", X(rv.length - 1) - 6, Y(last.annualizedVolPct) - 6);
+}
+
+function spark(vals, w = 90, h = 24, color) {
+  if (!vals || vals.length < 2) return "";
+  const lo = Math.min(...vals), hi = Math.max(...vals), r = hi - lo || 1;
+  const pts = vals.map((v, i) => `${(i / (vals.length - 1) * w).toFixed(1)},${(h - 2 - (v - lo) / r * (h - 4)).toFixed(1)}`).join(" ");
+  const up = vals[vals.length - 1] >= vals[0];
+  return `<svg class="spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><polyline fill="none" stroke="${color || (up ? css("--gain") : css("--loss"))}" stroke-width="1.4" points="${pts}"/></svg>`;
+}
+
+function drawHist(cv, tail) {
+  const [ctx, W, H] = setup(cv, 240); const L = 40, R = 12, T = 10, B = 26;
+  const pnl = tail.historical.simulatedPnl || []; if (pnl.length < 5) { ctx.fillStyle = css("--muted"); ctx.textAlign = "center"; ctx.fillText("not enough aligned days", W / 2, H / 2); return; }
+  const lo = Math.min(...pnl), hi = Math.max(...pnl), bins = Math.min(30, Math.max(10, Math.round(Math.sqrt(pnl.length) * 1.5)));
+  const bw = (hi - lo) / bins || 1, counts = new Array(bins).fill(0);
+  pnl.forEach(v => counts[Math.min(bins - 1, Math.floor((v - lo) / bw))]++);
+  const cmax = Math.max(...counts);
+  const X = v => L + (W - L - R) * (v - lo) / (hi - lo || 1), Y = c => T + (H - T - B) * (1 - c / cmax);
+  axisY(ctx, L, W - R, T, H - B, 0, cmax, v => v.toFixed(0), 3);
+  counts.forEach((c, i) => { const x0 = X(lo + i * bw), x1 = X(lo + (i + 1) * bw), mid = lo + (i + .5) * bw;
+    ctx.fillStyle = mid < 0 ? "rgba(217,83,79,.55)" : "rgba(79,163,122,.55)"; ctx.fillRect(x0 + .5, Y(c), Math.max(x1 - x0 - 1, 1), H - B - Y(c)); });
+  const mark = (v, color, label) => { const x = X(-v); ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.setLineDash([4, 3]); ctx.beginPath(); ctx.moveTo(x, T); ctx.lineTo(x, H - B); ctx.stroke(); ctx.setLineDash([]);
+    ctx.fillStyle = color; ctx.textAlign = "left"; ctx.textBaseline = "top"; ctx.fillText(label, x + 4, T); };
+  const lv = tail.historical.levels; mark(lv["95"].varUsd, css("--warn"), usd(lv["95"].varUsd)); mark(lv["99"].varUsd, css("--loss"), usd(lv["99"].varUsd));
+  mark(tail.parametric.levels["99"].varUsd, css("--bound"), "");
+  ctx.fillStyle = css("--muted"); ctx.textAlign = "center"; ctx.textBaseline = "top";
+  [lo, 0, hi].forEach(v => ctx.fillText(usd(v), X(v), H - B + 6));
+}
+
+/* ---------- tables & panels ---------- */
+function renderBook(rep) {
+  const rows = rep.symbols, ex = rep.exposure, wByS = Object.fromEntries(ex.positions.map(p => [p.symbol, p.weightPct]));
+  $("#t-book").innerHTML = `<thead><tr><th>Symbol</th><th>Position</th><th>Last</th><th>Notional</th><th>Weight</th><th>P&amp;L</th><th>30d</th><th>Daily σ</th><th>Downside σ</th><th>Latest z</th><th>1σ move</th><th>60d closes</th><th>60d z-path</th></tr></thead><tbody>` +
+    rows.map(s => { const side = s.notional > 0 ? "long" : s.notional < 0 ? "short" : "flat"; return `<tr>
+      <td class="sym">${s.symbol}<span class="side ${side}">${side}</span></td>
+      <td>${num(s.position, 4).replace(/\.?0+$/, "")}</td><td>${num(s.lastClose)}</td><td>${usd(s.notional)}</td>
+      <td><span class="wbar"><i style="width:${wByS[s.symbol] || 0}%"></i></span>${(wByS[s.symbol] || 0).toFixed(1)}%</td>
+      <td class="${sign(s.totalPnl)}">${usd(s.totalPnl)}</td><td class="${sign(s.return30dPct)}">${pct(s.return30dPct)}</td>
+      <td>${pct(s.growthRateStdPct, 2).replace("+", "")}</td><td>${pct(s.downsideGrowthRateStdPct, 2).replace("+", "")}</td>
+      <td class="${Math.abs(s.growthRateZ) >= 2 ? (s.growthRateZ > 0 ? "pos" : "neg") : ""}">${s.growthRateZ == null ? "—" : (s.growthRateZ > 0 ? "+" : "") + s.growthRateZ.toFixed(2)}σ</td>
+      <td>${s.riskUsd == null ? "—" : usd(s.riskUsd)}</td><td>${spark(s.sparkline)}</td><td>${spark(s.zSeries, 90, 24, css("--bound"))}</td></tr>`; }).join("") +
+    `</tbody><tfoot><tr><td class="sym">Book</td><td></td><td></td><td>${usd(ex.grossExposureUsd)} gross</td><td>net ${(ex.netToGrossPct).toFixed(0)}%</td><td class="${sign(rep.headline.totalPnlUsd)}">${usd(rep.headline.totalPnlUsd)}</td><td></td><td></td><td></td><td></td><td>${usd(rep.covariance.additiveSigmaUsd || 0)} additive</td><td colspan="2">effective N ${num(ex.effectiveN, 1)} · HHI ${num(ex.hhi, 3)}</td></tr></tfoot>`;
+}
+
+function renderDecomp(c) {
+  const cs = c.contributions || []; const mx = Math.max(...cs.map(x => Math.abs(x.componentRiskPct)), 1);
+  $("#bars").innerHTML = cs.map(x => { const w = Math.abs(x.componentRiskPct) / mx * 50; return `<div class="bar"><span class="sym" style="font-weight:600">${x.symbol}</span>
+    <div class="track"><b></b><i class="${x.isHedge ? "hedge" : ""}" style="${x.isHedge ? `right:50%;width:${w}%` : `left:50%;width:${w}%`}"></i></div>
+    <span class="num" style="text-align:right">${usd(x.componentRiskUsd)} · ${x.componentRiskPct.toFixed(1)}%</span></div>`; }).join("") || `<div class="state">no open positions with aligned history</div>`;
+  const unc = c.uncorrelatedSigmaUsd || 0, add = c.additiveSigmaUsd || 0, tru = c.portfolioDailySigmaUsd || 0;
+  const pos = add > unc ? Math.min(100, Math.max(0, (tru - unc) / (add - unc) * 100)) : 50;
+  $("#rail-fill").style.left = "0"; $("#rail-fill").style.width = "100%"; $("#rail-mark").style.left = `calc(${pos}% - 1px)`;
+  $("#b-unc").textContent = usd(unc); $("#b-true").textContent = usd(tru); $("#b-add").textContent = usd(add);
+  $("#b-dr").textContent = c.diversificationRatio == null ? "—" : num(c.diversificationRatio) + "×"; $("#b-ann").textContent = usd(c.portfolioAnnualSigmaUsd || 0);
+}
+
+function renderHeat(c) {
+  const syms = c.symbols || []; const el = $("#heat"); if (syms.length < 2) { el.innerHTML = `<div class="state">needs two or more positions</div>`; return; }
+  const cols = `grid-template-columns:56px repeat(${syms.length},1fr)`;
+  const color = v => v >= 0 ? `rgba(227,163,58,${(.08 + v * .75).toFixed(2)})` : `rgba(110,143,201,${(.08 + -v * .75).toFixed(2)})`;
+  el.innerHTML = `<div class="row" style="${cols}"><div class="cell hd"></div>${syms.map(s => `<div class="cell hd">${s}</div>`).join("")}</div>` +
+    syms.map(a => `<div class="row" style="${cols}"><div class="cell hd">${a}</div>${syms.map(b => { const v = c.correlation[a][b]; return `<div class="cell" style="background:${color(v)};color:${Math.abs(v) > .55 ? "#17191D" : "var(--ink)"}">${a === b ? "1" : v.toFixed(2)}</div>`; }).join("")}</div>`).join("");
+}
+
+function renderTail(t, c) {
+  const h = t.historical.levels, p = t.parametric.levels, g = c.portfolioDailySigmaUsd;
+  $("#t-tail").innerHTML = `<thead><tr><th>1-day</th><th>Historical VaR</th><th>Historical CVaR</th><th>Normal VaR</th><th>Normal CVaR</th><th>Fat-tail gap</th></tr></thead><tbody>` +
+    ["95", "99"].map(l => `<tr><td class="sym">${l}%</td><td>${usd(h[l].varUsd)}</td><td>${usd(h[l].cvarUsd)}</td><td>${usd(p[l].varUsd)}</td><td>${usd(p[l].cvarUsd)}</td><td class="${h[l].cvarUsd > p[l].cvarUsd ? "neg" : "pos"}">${pct((h[l].cvarUsd / p[l].cvarUsd - 1) * 100, 0)}</td></tr>`).join("") +
+    `<tr><td class="sym">Worst simulated day</td><td colspan="5" style="white-space:normal;text-align:left;font-family:var(--sans);color:var(--muted)">${usd(t.historical.worstDayUsd)} across ${t.historical.observations} observed days · best ${usd(t.historical.bestDayUsd)}</td></tr></tbody>`;
+}
+
+function renderStress(s) {
+  $("#t-stress").innerHTML = `<thead><tr><th>Scenario</th><th>Kind</th><th>P&amp;L</th><th>% of gross</th><th>Legs</th></tr></thead><tbody>` +
+    s.scenarios.map(sc => `<tr><td class="sym">${esc(sc.name)}</td><td style="font-family:var(--sans);color:var(--muted)">${sc.kind}</td><td class="${sign(sc.pnlUsd)}">${usd(sc.pnlUsd)}</td><td class="${sign(sc.pnlPctOfGross)}">${pct(sc.pnlPctOfGross, 1)}</td>
+      <td style="font-size:12px;color:var(--muted);white-space:normal;text-align:left">${sc.legs.map(l => `${l.symbol} ${pct(l.shockPct, 1)} → <span class="${sign(l.pnlUsd)}">${usd(l.pnlUsd)}</span>`).join(" · ")}</td></tr>`).join("") + `</tbody>`;
+}
+
+function renderStats(p, dd, ex) {
+  const items = [
+    ["Annualized return (on exposure)", pct(p.annualizedReturnPct)], ["Annualized vol", pct(p.annualizedVolPct).replace("+", "")], ["Sharpe", num(p.sharpe)], ["Sortino", num(p.sortino)], ["Calmar", p.calmar == null ? "—" : num(p.calmar)],
+    ["Return on avg exposure", pct(p.returnOnAvgExposurePct)], ["Avg gross exposure", usd(p.avgGrossExposureUsd)], ["Hit rate", pct(p.hitRatePct, 1).replace("+", "")], ["Profit factor", p.profitFactor == null ? "∞" : num(p.profitFactor)],
+    ["Avg win / loss", `${usd(p.avgWinUsd)} / ${usd(p.avgLossUsd)}`], ["Best / worst day", `${usd(p.bestDayUsd)} / ${usd(p.worstDayUsd)}`], ["Daily P&L σ", usd(p.dailyPnlStdUsd)],
+    ["Skew / excess kurtosis", `${num(p.skew)} / ${num(p.excessKurtosis)}`], ["Max drawdown", `${usd(dd.maxDrawdownUsd)} (${pct(dd.maxDrawdownPct, 1)})`], ["Drawdown window", dd.drawdownStart ? `${dd.drawdownStart} → ${dd.drawdownTrough}` : "—"],
+    ["Longest drawdown", `${dd.longestDrawdownDays} days`], ["Calendar", `${p.periodsPerYear}/yr · ${p.observations} active days`], ["Net / gross", `${pct(ex.netToGrossPct, 0).replace("+", "")}`],
+  ];
+  $("#stats").innerHTML = items.map(([k, v]) => `<div class="stat"><span class="k">${k}</span><span class="v">${v}</span></div>`).join("");
+}
+
+function renderMethods() {
+  $("#methods").innerHTML = `<dl>
+  <dt>Book curve</dt><dd>Each symbol's fills are replayed day by day (average-cost basis) and marked to that day's close; symbols are summed on the union calendar, carrying the last mark forward. Daily return = daily P&amp;L ÷ prior-day gross exposure, so it's return on capital at risk, not on an account balance.</dd>
+  <dt>Per-symbol σ</dt><dd>Growth rate <code>g = close_t / close_t−1 − 1</code>; σ is the sample std of g. Downside σ is the RMS of negative g (Sortino denominator). Latest z = <code>(g − mean) / σ</code>. 1σ move = <code>|position| × last close × σ</code>.</dd>
+  <dt>Portfolio σ</dt><dd>Covariance model on signed USD notionals: <code>σ = √(wᵀΣw)</code> with Σ from aligned daily growth rates. Component risk <code>CR_i = w_i (Σw)_i / σ</code> sums exactly to σ; negative CR is a hedge. Bounds: uncorrelated floor <code>√Σ(w_i σ_i)²</code>, additive ceiling <code>Σ|w_i| σ_i</code>. Diversification ratio = ceiling ÷ σ.</dd>
+  <dt>VaR / CVaR</dt><dd>Historical simulation on today's book: every observed joint return vector applied to current notionals, VaR = the (1−α) quantile loss, CVaR = mean loss beyond it. Normal model = <code>z_α σ</code> and <code>σ φ(z_α)/(1−α)</code>; the gap between them is the fat tail.</dd>
+  <dt>Stress</dt><dd>Hypothetical shocks are applied to signed notionals (shorts gain in a sell-off). Historical replays use the worst observed 1-day and compounded 5-day joint moves.</dd>
+  <dt>Annualization</dt><dd>365 periods/yr when closes are near-daily (crypto), 252 for trading-day calendars — inferred from sampling density.</dd>
+  </dl>`;
+}
+
+$("#refresh").onclick = () => load(true);
+window.addEventListener("resize", () => { if (!$("#main").classList.contains("hidden")) load(false); });
+load(false);
+})();
+</script>
+</body>
+</html>

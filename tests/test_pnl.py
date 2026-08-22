@@ -129,70 +129,88 @@ def test_compute_pnl_total_with_mark_prices():
     assert sym["markPrice"] == pytest.approx(15.0)
 
 
-def test_pnl_risk_std_of_daily_marks():
-    # Long 1 unit from day 1 at 100; closes 100, 110, 105, 115.
-    # Daily PnL: 0, 10, 5, 15 -> deltas [10, -5, 10], stdev = 8.66
-    fills = [_fill("BTC", "BUY", 1, 100.0, 10)]
+def test_equity_log_series_variance_and_monthly_growth():
+    from math import exp, log
+    from statistics import variance
+    from app.pnl import equity_log_series
+    points = [
+        {"date": "2026-01-30", "close": 100.0, "position": 2.0},
+        {"date": "2026-01-31", "close": 110.0, "position": 2.0},
+        {"date": "2026-02-01", "close": 105.0, "position": 2.0},
+        {"date": "2026-02-02", "close": 115.0, "position": 2.0},
+    ]
+    out = equity_log_series(points)
+    equities = [200.0, 220.0, 210.0, 230.0]
+    dlog = [log(equities[i] / equities[i - 1]) for i in range(1, 4)]
+    daily = out["daily"]
+    assert [p["date"] for p in daily] == [p["date"] for p in points]
+    assert [p["equity"] for p in daily] == equities
+    assert daily[0]["logReturn"] is None
+    assert [p["logReturn"] for p in daily[1:]] == pytest.approx(dlog, abs=1e-9)
+    assert out["variance"] == pytest.approx(variance(dlog), abs=1e-9)
+    # Jan: only 100->110; Feb: 110->105->115
+    jan = log(220 / 200)
+    feb = log(210 / 220) + log(230 / 210)
+    months = {m["month"]: m["growthRatePct"] for m in out["monthlyGrowth"]}
+    assert months["2026-01"] == pytest.approx((exp(jan) - 1) * 100, abs=0.001)
+    assert months["2026-02"] == pytest.approx((exp(feb) - 1) * 100, abs=0.001)
+
+
+def test_ticker_risk_model_std_and_standardized_growth():
+    from statistics import mean, stdev
+    from app.pnl import ticker_risk_model
+    out = ticker_risk_model([100.0, 110.0, 105.0, 115.0])
+    gr = [110 / 100 - 1, 105 / 110 - 1, 115 / 105 - 1]
+    mu, sig = mean(gr), stdev(gr)
+    z = [(g - mu) / sig for g in gr]
+    assert out["closeStdUsd"] == pytest.approx(stdev([100.0, 110.0, 105.0, 115.0]), abs=0.01)
+    assert out["growthRatePct"] == pytest.approx(mu * 100, abs=0.001)
+    assert out["growthRateMeanPct"] == pytest.approx(mu * 100, abs=0.001)
+    assert out["growthRateStdPct"] == pytest.approx(sig * 100, abs=0.001)
+    assert out["riskAdjustedGrowthRate"] == pytest.approx(mu / sig, abs=0.001)
+    assert out["growthRateZ"] == pytest.approx(z[-1], abs=0.001)
+    assert out["growthRateZSeries"] == pytest.approx(z, abs=0.001)
+
+
+def test_pnl_risk_ticker_close_and_growth_rate_std():
+    # Long 2 units from day 1 at 100; closes 100, 110, 105, 115.
+    from statistics import stdev
+    from app.pnl import pnl_risk
+    fills = [_fill("BTC", "BUY", 2, 100.0, 10)]
     closes = [
         {"date": (NOW - timedelta(days=10 - i)).date().isoformat(), "close": c}
         for i, c in enumerate([100.0, 110.0, 105.0, 115.0])
     ]
-    from app.pnl import pnl_risk
     out = pnl_risk(fills, closes, "BTC")
-    assert out["observations"] == 3
-    assert [p["totalPnl"] for p in out["series"]] == [0.0, 10.0, 5.0, 15.0]
-    assert out["dailyStdUsd"] == pytest.approx(8.66, abs=0.01)
-    # pct returns: 10/100, -5/110, 10/105
-    from statistics import stdev
-    expected_pct = stdev([0.10, -5 / 110, 10 / 105]) * 100
-    assert out["dailyStdPct"] == pytest.approx(expected_pct, abs=0.001)
-    assert out["periodsPerYear"] == 365  # consecutive calendar days
+    assert out["method"] == "additive_ticker_vol"
+    assert out["observations"] == 4
+    assert out["position"] == 2
+    assert [p["totalPnl"] for p in out["series"]] == [0.0, 20.0, 10.0, 30.0]
+    close_std = stdev([100.0, 110.0, 105.0, 115.0])
+    assert out["closeStdUsd"] == pytest.approx(close_std, abs=0.01)
+    gr = [110 / 100 - 1, 105 / 110 - 1, 115 / 105 - 1]
+    gr_std = stdev(gr)
+    assert out["growthRateStdPct"] == pytest.approx(gr_std * 100, abs=0.001)
+    # 1σ daily USD: |position| × last close × stdev(growth rates)
+    assert out["riskUsd"] == pytest.approx(2 * 115.0 * gr_std, abs=0.01)
 
 
-def test_pnl_risk_flat_days_excluded():
-    # Position opens on the 3rd close day; the flat-flat delta is excluded.
-    fills = [_fill("BTC", "BUY", 1, 100.0, 8)]
+def test_format_ticker_risk_telegram_text():
+    from app.pnl import format_ticker_risk, pnl_risk
+    fills = [_fill("BTC", "BUY", 2, 100.0, 10)]
     closes = [
         {"date": (NOW - timedelta(days=10 - i)).date().isoformat(), "close": c}
-        for i, c in enumerate([90.0, 95.0, 100.0, 110.0])
+        for i, c in enumerate([100.0, 110.0, 105.0, 115.0])
     ]
-    from app.pnl import pnl_risk
-    out = pnl_risk(fills, closes, "BTC")
-    # Only day2->day3 has prior exposure: delta 10 on exposure 100
-    assert out["observations"] == 1
-    assert "dailyStdUsd" not in out  # needs >= 2 observations
-
-
-def test_portfolio_risk_sums_symbols():
-    # A: long 1 @100; closes 100, 110, 105. B: long 2 @50; closes 50, 55, 45.
-    # Portfolio PnL: 0, 20, -5 -> deltas [20, -25]
-    # Exposure: d0 = 100 + 100 = 200, d1 = 110 + 110 = 220
-    from app.pnl import portfolio_risk
-    fills = [_fill("AAA", "BUY", 1, 100.0, 10), _fill("BBB", "BUY", 2, 50.0, 10)]
-    d = lambda i: (NOW - timedelta(days=10 - i)).date().isoformat()
-    closes = {
-        "AAA": [{"date": d(i), "close": c} for i, c in enumerate([100.0, 110.0, 105.0])],
-        "BBB": [{"date": d(i), "close": c} for i, c in enumerate([50.0, 55.0, 45.0])],
-    }
-    out = portfolio_risk(fills, closes)
-    assert out["symbols"] == ["AAA", "BBB"]
-    assert [p["totalPnl"] for p in out["series"]] == [0.0, 20.0, -5.0]
-    assert [p["grossExposure"] for p in out["series"]] == [200.0, 220.0, 195.0]
-    assert out["observations"] == 2
-    from statistics import stdev
-    assert out["dailyStdUsd"] == pytest.approx(stdev([20.0, -25.0]), abs=0.01)
-    assert out["dailyStdPct"] == pytest.approx(stdev([20 / 200, -25 / 220]) * 100, abs=0.001)
-
-
-def test_portfolio_risk_forward_fills_missing_close():
-    # B has no close on the last day; its last mark carries forward.
-    from app.pnl import portfolio_risk
-    fills = [_fill("AAA", "BUY", 1, 100.0, 10), _fill("BBB", "BUY", 2, 50.0, 10)]
-    d = lambda i: (NOW - timedelta(days=10 - i)).date().isoformat()
-    closes = {
-        "AAA": [{"date": d(i), "close": c} for i, c in enumerate([100.0, 110.0, 105.0])],
-        "BBB": [{"date": d(i), "close": c} for i, c in enumerate([50.0, 55.0])],
-    }
-    out = portfolio_risk(fills, closes)
-    # Last day: A pnl 5 + B carried at 55 (pnl 10) = 15
-    assert [p["totalPnl"] for p in out["series"]] == [0.0, 20.0, 15.0]
+    risk = pnl_risk(fills, closes, "BTC")
+    text = format_ticker_risk("BTC", risk)
+    assert text == (
+        f"BTC risk\n"
+        f"pos 2.0\n"
+        f"σ ${risk['riskUsd']}\n"
+        f"close σ ${risk['closeStdUsd']}\n"
+        f"GR {risk['growthRatePct']}%\n"
+        f"RA GR {risk['riskAdjustedGrowthRate']}\n"
+        f"GR σ {risk['growthRateStdPct']}%\n"
+        f"var {risk['variance']:.6f}"
+    )

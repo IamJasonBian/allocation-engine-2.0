@@ -14,3 +14,4 @@ robinhood-mcp
 data/*.sqlite3
 *.log
 .env
+.env.local

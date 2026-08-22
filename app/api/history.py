@@ -2,7 +2,8 @@
 
 from flask import Blueprint, jsonify, request, current_app
 from app.brokers import get_broker
-from app.pnl import cost_basis_series, pnl_risk, portfolio_risk
+from app.pnl import cost_basis_series, format_ticker_risk, pnl_risk, portfolio_risk
+from app.slack import notify as telegram_notify
 
 bp = Blueprint("history", __name__)
 
@@ -47,7 +48,7 @@ def pnl(broker_name=None):
 
 @bp.route("/pnl/risk")
 def pnl_portfolio_risk():
-    """Portfolio volatility across all traded symbols (?broker= to select)."""
+    """Additive portfolio risk: sum of per-ticker |position| x stdev(closes) (?broker= to select)."""
     broker_name = request.args.get("broker") or current_app.config["DEFAULT_BROKER"]
     try:
         broker = get_broker(broker_name)
@@ -65,14 +66,22 @@ def pnl_portfolio_risk():
 @bp.route("/pnl/risk/<symbol>")
 @bp.route("/pnl/risk/<symbol>/<broker_name>")
 def pnl_risk_series(symbol, broker_name=None):
-    """Daily mark-to-market P&L series with std-of-returns risk measure."""
+    """Per-ticker close/growth-rate volatility and position-scaled USD risk."""
     broker_name = broker_name or current_app.config["DEFAULT_BROKER"]
     try:
         broker = get_broker(broker_name)
         if not hasattr(broker, "trade_fills") or not hasattr(broker, "price_history"):
             return jsonify({"error": f"Broker {broker_name} does not support risk series"}), 400
         data = pnl_risk(broker.trade_fills(), broker.price_history(symbol), symbol)
-        return jsonify({"broker": broker_name, "symbol": symbol.upper(), **data})
+        text = format_ticker_risk(symbol.upper(), data)
+        if request.args.get("notify"):
+            telegram_notify(text)
+        return jsonify({
+            "broker": broker_name,
+            "symbol": symbol.upper(),
+            "text": text,
+            **data,
+        })
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 

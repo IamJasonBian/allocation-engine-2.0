@@ -8,8 +8,8 @@ realizes P&L versus the average cost at that moment. Position flips
 """
 
 from datetime import date, datetime, timedelta, timezone
-from math import sqrt
-from statistics import stdev
+from math import exp, log, sqrt
+from statistics import mean, stdev, variance
 
 
 class PnlSnapshot:
@@ -281,104 +281,172 @@ def _mark_series(fills: list[dict], closes: list[dict], symbol: str) -> list[dic
     return series
 
 
-def _std_stats(dates: list[str], deltas: list[float], returns: list[float]) -> dict:
-    """Std of daily P&L deltas / returns, annualized by sampling density."""
-    out: dict = {"observations": len(deltas)}
-    if len(deltas) >= 2:
-        daily_std_pct = stdev(returns) * 100
-        # Sampling frequency implies the annualization calendar: near-daily
-        # closes (crypto) => 365 periods/year, trading-day closes => 252.
-        span_days = (
-            date.fromisoformat(dates[-1]) - date.fromisoformat(dates[0])
-        ).days or 1
-        periods_per_year = 365 if len(dates) / span_days > 0.9 else 252
-        out.update({
-            "dailyStdUsd": round(stdev(deltas), 2),
-            "dailyStdPct": round(daily_std_pct, 4),
-            "annualizedStdPct": round(daily_std_pct * sqrt(periods_per_year), 2),
-            "periodsPerYear": periods_per_year,
-        })
-    return out
+def equity_log_series(points: list[dict]) -> dict:
+    """Daily log-equity path; variance and monthly growth from those samples.
 
-
-def pnl_risk(fills: list[dict], closes: list[dict], symbol: str) -> dict:
-    """Daily mark-to-market P&L series for one symbol, with std as the risk measure.
-
-    Replays fills day by day and marks the open position to each daily close,
-    so volatility while holding is captured — not just P&L at trade instants.
-    Std is computed over day-to-day P&L deltas, restricted to days with an
-    open position (flat days are zero by construction and would dilute it).
-    Percent returns are P&L delta over prior-day market exposure.
+    Each point is `{date, close, position}`. Equity is `|position| × close`.
+    `logReturn` is Δ log(equity) (None on the first day or a flat book).
+    Variance is the sample variance of those daily log returns. Monthly
+    growth is `exp(Σ logReturn) - 1` per calendar month.
     """
-    series = _mark_series(fills, closes, symbol)
-
-    deltas: list[float] = []
-    returns: list[float] = []
-    for prev, cur in zip(series, series[1:]):
-        exposure = abs(prev["position"]) * prev["close"]
-        if exposure < 1e-9:
-            continue
-        delta = cur["totalPnl"] - prev["totalPnl"]
-        deltas.append(delta)
-        returns.append(delta / exposure)
-
+    daily = []
+    prev_log = None
+    log_returns: list[float] = []
+    monthly_sum: dict[str, float] = {}
+    for p in sorted(points, key=lambda r: r["date"]):
+        equity = abs(float(p["position"])) * float(p["close"])
+        log_eq = log(equity) if equity > 1e-12 else None
+        log_ret = None
+        if log_eq is not None and prev_log is not None:
+            log_ret = log_eq - prev_log
+            log_returns.append(log_ret)
+            month = str(p["date"])[:7]
+            monthly_sum[month] = monthly_sum.get(month, 0.0) + log_ret
+        if log_eq is not None:
+            prev_log = log_eq
+        daily.append({
+            "date": p["date"],
+            "close": float(p["close"]),
+            "equity": equity,
+            "logEquity": log_eq,
+            "logReturn": log_ret,
+        })
+    monthly = [
+        {"month": m, "growthRatePct": round((exp(s) - 1) * 100, 4)}
+        for m, s in monthly_sum.items()
+    ]
     return {
-        "method": "daily_mark_to_market",
-        "series": series,
-        **_std_stats([p["date"] for p in series], deltas, returns),
+        "daily": daily,
+        "variance": variance(log_returns) if len(log_returns) >= 2 else None,
+        "monthlyGrowth": monthly,
     }
 
 
-def portfolio_risk(fills: list[dict], closes_by_symbol: dict[str, list[dict]]) -> dict:
-    """Portfolio volatility: per-symbol mark-to-market P&L summed per day.
+def ticker_risk_model(closes: list[float]) -> dict:
+    """Ticker risk: price stdev and standardized daily growth rates.
 
-    Each symbol is marked on its own close calendar, then summed on the union
-    of dates; a symbol without a close on a given date carries its last mark
-    forward. Percent returns divide the daily P&L delta by prior-day gross
-    exposure (sum of |position| x close across symbols).
+    Growth rate is `close_t / close_t-1 - 1`. Standardization is the
+    sample z-score `(g - mean(g)) / stdev(g)`. `growthRateZ` is the
+    latest day; `growthRateZSeries` is the full z path.
     """
-    per_symbol: dict[str, list[dict]] = {}
-    for sym, closes in closes_by_symbol.items():
-        marks = _mark_series(fills, closes, sym)
-        if marks:
-            per_symbol[sym.upper()] = marks
+    if len(closes) < 2:
+        return {}
+    growth = [cur / prev - 1 for prev, cur in zip(closes, closes[1:])]
+    out = {"closeStdUsd": round(stdev(closes), 4)}
+    if len(growth) < 2:
+        gr_pct = round(growth[0] * 100, 4)
+        out["growthRatePct"] = gr_pct
+        out["growthRateMeanPct"] = gr_pct
+        return out
+    mu = mean(growth)
+    sig = stdev(growth)
+    z_series = (
+        [0.0] * len(growth) if sig < 1e-12
+        else [(g - mu) / sig for g in growth]
+    )
+    downside = sqrt(sum(min(g, 0) ** 2 for g in growth) / len(growth))
+    gr_pct = round(mu * 100, 4)
+    out.update({
+        "growthRatePct": gr_pct,
+        "growthRateMeanPct": gr_pct,
+        "growthRateStdPct": round(sig * 100, 4),
+        "riskAdjustedGrowthRate": round(mu / sig, 4) if sig >= 1e-12 else 0.0,
+        "growthRateZ": round(z_series[-1], 4),
+        "growthRateZSeries": [round(z, 4) for z in z_series],
+        "downsideGrowthRateStdPct": round(downside * 100, 4),
+    })
+    return out
 
-    dates = sorted({p["date"] for marks in per_symbol.values() for p in marks})
-    cursor = dict.fromkeys(per_symbol, 0)
-    series: list[dict] = []
-    for day in dates:
-        pnl = 0.0
-        exposure = 0.0
-        for sym, marks in per_symbol.items():
-            i = cursor[sym]
-            while i + 1 < len(marks) and marks[i + 1]["date"] <= day:
-                i += 1
-            cursor[sym] = i
-            point = marks[i]
-            if point["date"] > day:  # symbol has no close yet
-                continue
-            pnl += point["totalPnl"]
-            exposure += abs(point["position"]) * point["close"]
-        series.append({
-            "date": day,
-            "totalPnl": round(pnl, 2),
-            "grossExposure": round(exposure, 2),
-        })
 
-    deltas: list[float] = []
-    returns: list[float] = []
-    for prev, cur in zip(series, series[1:]):
-        if prev["grossExposure"] < 1e-9:
-            continue
-        delta = cur["totalPnl"] - prev["totalPnl"]
-        deltas.append(delta)
-        returns.append(delta / prev["grossExposure"])
+def _ticker_vol(closes: list[float]) -> dict:
+    return ticker_risk_model(closes)
 
-    return {
-        "method": "daily_mark_to_market_portfolio",
-        "symbols": sorted(per_symbol),
+
+def pnl_risk(fills: list[dict], closes: list[dict], symbol: str) -> dict:
+    """Per-ticker volatility with a position-scaled USD risk contribution.
+
+    Price volatility is the sample std of daily closes; growth-rate
+    volatility is the sample std of `close_t / close_t-1 - 1`.
+    `riskUsd` is the 1σ daily dollar move:
+    `|position| × last close × stdev(growth rates)`.
+    """
+    series = _mark_series(fills, closes, symbol)
+    position = series[-1]["position"] if series else 0
+    last_close = series[-1]["close"] if series else 0
+    out = {
+        "method": "additive_ticker_vol",
         "series": series,
-        **_std_stats(dates, deltas, returns),
+        "observations": len(series),
+        "position": position,
+        **_ticker_vol([p["close"] for p in series]),
+    }
+    if "growthRateStdPct" in out:
+        out["riskUsd"] = round(
+            abs(position) * last_close * out["growthRateStdPct"] / 100, 2
+        )
+    path = equity_log_series([
+        {"date": p["date"], "close": p["close"], "position": p["position"]}
+        for p in series
+    ])
+    out["variance"] = path["variance"]
+    out["monthlyGrowth"] = path["monthlyGrowth"]
+    out["equitySeries"] = path["daily"]
+    return out
+
+
+def format_ticker_risk(symbol: str, risk: dict) -> str:
+    """Telegram-ready one-ticker risk line. Missing vol → insufficient closes."""
+    if "closeStdUsd" not in risk:
+        return f"{symbol}: insufficient closes"
+    lines = [
+        f"{symbol} risk",
+        f"pos {risk['position']}",
+        f"σ ${risk['riskUsd']}",
+        f"close σ ${risk['closeStdUsd']}",
+        f"GR {risk['growthRatePct']}%",
+        f"RA GR {risk['riskAdjustedGrowthRate']}",
+        f"GR σ {risk['growthRateStdPct']}%",
+    ]
+    if risk.get("variance") is not None:
+        lines.append(f"var {risk['variance']:.6f}")
+    return "\n".join(lines)
+
+
+def format_portfolio_risk(portfolio: dict) -> str:
+    """Telegram-ready whole-book 1σ line."""
+    n = len(portfolio.get("symbols") or [])
+    return (
+        f"portfolio σ ${portfolio['riskUsd']}\n"
+        f"{n} ticker{'s' if n != 1 else ''}"
+    )
+
+
+def portfolio_risk(fills: list[dict], closes_by_symbol: dict[str, list[dict]]) -> dict:
+    """Whole-book 1σ: sum of per-ticker `|position| × last close × GR σ`.
+
+    Tickers without enough closes for a std are omitted. `totalRiskUsd` is
+    the additive (perfectly correlated) upper bound; `uncorrelatedRiskUsd`
+    is sqrt of the sum of squares. True portfolio std lies between.
+    """
+    tickers = []
+    for sym in sorted(closes_by_symbol):
+        risk = pnl_risk(fills, closes_by_symbol[sym], sym)
+        if "riskUsd" not in risk:
+            continue
+        tickers.append({
+            "symbol": sym.upper(),
+            "position": risk["position"],
+            "closeStdUsd": risk["closeStdUsd"],
+            "growthRateStdPct": risk["growthRateStdPct"],
+            "downsideGrowthRateStdPct": risk["downsideGrowthRateStdPct"],
+            "riskUsd": risk["riskUsd"],
+        })
+    return {
+        "method": "additive_ticker_vol_portfolio",
+        "symbols": [t["symbol"] for t in tickers],
+        "tickers": tickers,
+        "totalRiskUsd": round(sum(t["riskUsd"] for t in tickers), 2),
+        "uncorrelatedRiskUsd": round(sqrt(sum(t["riskUsd"] ** 2 for t in tickers)), 2),
     }
 
 
