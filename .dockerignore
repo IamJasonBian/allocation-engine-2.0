@@ -7,7 +7,8 @@ __pycache__
 tests
 node_modules
 mobile
-dashboard
+dashboard/*
+!dashboard/*.html
 market-data-service
 auth-service
 robinhood-mcp
