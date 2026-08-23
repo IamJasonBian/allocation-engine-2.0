@@ -90,6 +90,30 @@ Broker defaults to `DEFAULT_BROKER` env var. Append `/alpaca` or `/robinhood` to
 | `ENGINE_BROKER` | Broker for engine reconciliation | `alpaca` |
 | `PORT` | Server port | `10000` |
 
+## Tests
+
+Tests are tiered with pytest markers (`pytest.ini`, enforced with `strict_markers`):
+
+| Tier | Marker | What it touches | Runs when |
+|---|---|---|---|
+| unit | (none) | pure code, mocks | always |
+| smoke | `@pytest.mark.smoke` | Flask client over the real blueprints, no network | always |
+| integration | `@pytest.mark.integration` | real local resources (sqlite, files), no network | `--integration` or `INTEGRATION_TESTS=1` |
+| live | `@pytest.mark.live` | Render API, auth-service box — read-only | `--live` or `LIVE_TESTS=1` |
+
+```bash
+pytest                       # unit + smoke; integration/live are skipped, not hidden
+pytest -m smoke              # boot checks only
+pytest --integration         # add local-resource tests
+LIVE_API_URL=https://allocation-engine-api.onrender.com pytest --live -m live
+```
+
+Live tests skip individually when their service isn't configured
+(`LIVE_API_URL`, `AUTH_SERVICE_URL` + `RH_AUTH_SERVICE_REQUEST_TOKEN`). The box
+admits Render egress IPs only, so from a laptop port-forward first
+(`gcloud compute ssh ... -- -L 8443:localhost:8080`). Nothing in the live tier
+mutates state or prints a secret.
+
 ## Service boundaries
 
 This repo holds two independently-operated services plus a local tool:
