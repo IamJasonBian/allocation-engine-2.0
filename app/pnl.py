@@ -8,7 +8,7 @@ realizes P&L versus the average cost at that moment. Position flips
 """
 
 from datetime import date, datetime, timedelta, timezone
-from math import exp, log, sqrt
+from math import sqrt
 from statistics import mean, stdev, variance
 
 
@@ -281,43 +281,117 @@ def _mark_series(fills: list[dict], closes: list[dict], symbol: str) -> list[dic
     return series
 
 
-def equity_log_series(points: list[dict]) -> dict:
-    """Daily log-equity path; variance and monthly growth from those samples.
+def today_walk(
+    book: list[dict],
+    fills: list[dict],
+    day: date,
+    *,
+    skip_symbols: frozenset[str] = frozenset({"BTC.SHADOW"}),
+) -> dict:
+    """EOD recon for one calendar day: live qty minus that day's signed fills.
 
-    Each point is `{date, close, position}`. Equity is `|position| × close`.
-    `logReturn` is Δ log(equity) (None on the first day or a flat book).
-    Variance is the sample variance of those daily log returns. Monthly
-    growth is `exp(Σ logReturn) - 1` per calendar month.
+    `book` rows need `symbol`, `quantity` (or `qty`), and `current_price`.
+    `fills` are `{symbol, side, qty, ts}`. Start-of-day qty is
+    `nowQty - Σ signed fills on day` (BUY +, SELL −). Synthetic names like
+    BTC.SHADOW are dropped.
+    """
+    day_s = day.isoformat() if isinstance(day, date) else str(day)[:10]
+    signed: dict[str, float] = {}
+    counts: dict[str, int] = {}
+    for f in fills:
+        if _fill_date(f["ts"]) != day_s:
+            continue
+        sym = str(f["symbol"]).upper()
+        q = float(f["qty"])
+        signed[sym] = signed.get(sym, 0.0) + (q if f["side"] == "BUY" else -q)
+        counts[sym] = counts.get(sym, 0) + 1
+    out = {}
+    for row in book:
+        sym = str(row["symbol"]).upper()
+        if sym in skip_symbols:
+            continue
+        now = float(row.get("quantity") if row.get("quantity") is not None else row.get("qty") or 0)
+        last = float(row.get("current_price") or row.get("last") or 0)
+        net = signed.get(sym, 0.0)
+        sod = now - net
+        out[sym] = {
+            "date": day_s,
+            "sodQty": sod,
+            "nowQty": now,
+            "fills": counts.get(sym, 0),
+            "netFillQty": net,
+            "last": last,
+            "position": abs(now) * last,
+            "sodPosition": abs(sod) * last,
+        }
+    return out
+
+
+def risk_from_today_walk(
+    walk: dict,
+    closes: list[float],
+    dates: list[str] | None = None,
+) -> dict:
+    """Ticker risk scaled to live book qty from `today_walk`, not fill replay."""
+    qty = float(walk["nowQty"])
+    last = float(walk.get("last") or (closes[-1] if closes else 0))
+    out = {
+        "position": qty,
+        **ticker_risk_model(closes),
+    }
+    if "growthRateStdPct" in out:
+        out["riskUsd"] = round(abs(qty) * last * out["growthRateStdPct"] / 100, 2)
+    if dates and len(dates) == len(closes):
+        path = position_series([
+            {"date": d, "close": c, "position": qty} for d, c in zip(dates, closes)
+        ])
+        out["variance"] = path["variance"]
+        out["monthlyGrowth"] = path["monthlyGrowth"]
+        out["positionSeries"] = path["daily"]
+    return out
+
+
+def position_series(mark: list[dict]) -> dict:
+    """Daily USD position held from an engine mark series.
+
+    Input rows are `_mark_series` output: `{date, close, position}` where
+    `position` is signed share count. Output `position` is `|shares| × close`;
+    `positionReturn` is the simple day-to-day change (None on day 1 or flat).
+    Variance is sample variance of those returns; monthly growth is last/first
+    position USD in each calendar month.
     """
     daily = []
-    prev_log = None
-    log_returns: list[float] = []
-    monthly_sum: dict[str, float] = {}
-    for p in sorted(points, key=lambda r: r["date"]):
-        equity = abs(float(p["position"])) * float(p["close"])
-        log_eq = log(equity) if equity > 1e-12 else None
-        log_ret = None
-        if log_eq is not None and prev_log is not None:
-            log_ret = log_eq - prev_log
-            log_returns.append(log_ret)
+    prev_usd = None
+    returns: list[float] = []
+    monthly_first: dict[str, float] = {}
+    monthly_last: dict[str, float] = {}
+    for p in sorted(mark, key=lambda r: r["date"]):
+        usd = abs(float(p["position"])) * float(p["close"])
+        ret = None
+        if usd > 1e-12 and prev_usd is not None and prev_usd > 1e-12:
+            ret = usd / prev_usd - 1
+            returns.append(ret)
+        if usd > 1e-12:
+            prev_usd = usd
             month = str(p["date"])[:7]
-            monthly_sum[month] = monthly_sum.get(month, 0.0) + log_ret
-        if log_eq is not None:
-            prev_log = log_eq
+            monthly_first.setdefault(month, usd)
+            monthly_last[month] = usd
         daily.append({
             "date": p["date"],
             "close": float(p["close"]),
-            "equity": equity,
-            "logEquity": log_eq,
-            "logReturn": log_ret,
+            "position": usd,
+            "positionReturn": ret,
         })
     monthly = [
-        {"month": m, "growthRatePct": round((exp(s) - 1) * 100, 4)}
-        for m, s in monthly_sum.items()
+        {
+            "month": m,
+            "growthRatePct": round((monthly_last[m] / monthly_first[m] - 1) * 100, 4),
+        }
+        for m in monthly_first
     ]
     return {
         "daily": daily,
-        "variance": variance(log_returns) if len(log_returns) >= 2 else None,
+        "variance": variance(returns) if len(returns) >= 2 else None,
         "monthlyGrowth": monthly,
     }
 
@@ -384,13 +458,10 @@ def pnl_risk(fills: list[dict], closes: list[dict], symbol: str) -> dict:
         out["riskUsd"] = round(
             abs(position) * last_close * out["growthRateStdPct"] / 100, 2
         )
-    path = equity_log_series([
-        {"date": p["date"], "close": p["close"], "position": p["position"]}
-        for p in series
-    ])
+    path = position_series(series)
     out["variance"] = path["variance"]
     out["monthlyGrowth"] = path["monthlyGrowth"]
-    out["equitySeries"] = path["daily"]
+    out["positionSeries"] = path["daily"]
     return out
 
 

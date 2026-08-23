@@ -48,7 +48,8 @@ def test_price_history_seeds_and_reads(storage_dir):
 
 def test_risk_profile_seeds_from_fills(storage_dir):
     from app.pnl import format_ticker_risk, pnl_risk
-    local.read_trade_fills()  # seeds orders + closes, then risk JSON
+    local.read_trade_fills()  # seeds orders + closes into SQLite
+    local.rebuild_artifacts()
     path = storage_dir / "risk_profile.json"
     payload = json.loads(path.read_text())
     expected = pnl_risk(local.read_trade_fills(), local.read_price_history("BTC"), "BTC")

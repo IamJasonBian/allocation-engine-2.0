@@ -57,6 +57,24 @@ def test_failures_never_raise():
         assert tdb.post_bot_activity([{"order_id": "x", "status": "s"}]) is None
 
 
+def test_fills_from_orders_keeps_partial_cancel_drops_unfilled():
+    payload = {"data": {
+        "historical_orders": [
+            {"symbol": "CRDO", "side": "BUY", "filled_quantity": 10,
+             "average_price": 225, "updated_at": "2026-08-21T14:20:00Z"},
+            {"symbol": "NBIS", "side": "BUY", "filled_quantity": 0,
+             "average_price": None, "updated_at": "2026-08-21T20:00:00Z"},
+        ],
+        "open_orders": [],
+        "untracked_orders": [],
+    }}
+    fills = tdb.fills_from_orders(payload)
+    assert len(fills) == 1
+    assert fills[0]["symbol"] == "CRDO"
+    assert fills[0]["qty"] == 10
+    assert fills[0]["price"] == 225
+
+
 def test_token_header_when_configured(monkeypatch):
     monkeypatch.setattr(tdb.Config, "TRADING_DB_TOKEN", "sekret")
     with mock.patch.object(tdb.requests, "post", return_value=_ok_response()) as p:
