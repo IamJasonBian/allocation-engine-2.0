@@ -17,3 +17,6 @@ market-data-service/build/
 
 # Local Netlify folder
 .netlify
+
+# local runtime env (app.env.example is the template)
+app.env
