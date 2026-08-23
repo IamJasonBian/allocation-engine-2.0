@@ -10,6 +10,7 @@ in [mcp] token / MCP_TOKEN (or a Secret Manager name via MCP_TOKEN_SECRET).
 Without it the MCP returns 401, which we relay unchanged.
 """
 
+import json
 import logging
 
 import requests
@@ -51,3 +52,47 @@ def relay(payload: dict, token: str | None = None,
     if not r.ok:
         out["error_code"] = f"MCP_HTTP_{r.status_code}"
     return out
+
+
+def parse_jsonrpc_result(relay_out: dict) -> dict | list | None:
+    """Pull the JSON-RPC ``result`` from a relay response (JSON or SSE body)."""
+    raw = relay_out.get("result")
+    if isinstance(raw, dict):
+        if "result" in raw:
+            return raw["result"]
+        if "error" in raw:
+            return raw
+        return raw
+    body = relay_out.get("body") or ""
+    for line in body.splitlines():
+        line = line.strip()
+        if not line.startswith("data:"):
+            continue
+        chunk = line[5:].strip()
+        if not chunk:
+            continue
+        try:
+            msg = json.loads(chunk)
+        except json.JSONDecodeError:
+            continue
+        if "result" in msg:
+            return msg["result"]
+        if "error" in msg:
+            return msg
+    return None
+
+
+def unwrap_tool_content(parsed: dict | list | None):
+    """MCP tools/call often wraps JSON in content[].text — decode when present."""
+    if not isinstance(parsed, dict):
+        return parsed
+    content = parsed.get("content")
+    if not isinstance(content, list) or not content:
+        return parsed
+    text = content[0].get("text") if isinstance(content[0], dict) else None
+    if not isinstance(text, str):
+        return parsed
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return text
