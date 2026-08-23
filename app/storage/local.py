@@ -11,8 +11,8 @@ sqlite3 CLI) can run the same query shapes as the real Trading DB:
 A `price_history` table (symbol, date, close) holds daily closes for the
 risk/volatility series, seeded from samples alongside stock_orders.
 
-`risk_profile.json` is a local-only parse dump (not a store): flat
-{symbol: {...}, "portfolio": {symbols, riskUsd, uncorrelatedRiskUsd, text}}.
+`risk_profile.json` and `position_series.json` are local-only parse dumps (not
+stores): flat ticker risk plus per-symbol `{daily, variance, monthlyGrowth}`.
 
 SQLite has no schemas, so drop the `public.` prefix. Fill semantics match
 docs/sql/pnl_shapes.sql: a fill is any row with filled_quantity > 0 and a
@@ -95,8 +95,12 @@ def risk_profile_path() -> Path:
     return _storage_dir() / "risk_profile.json"
 
 
-def equity_series_path() -> Path:
-    return _storage_dir() / "equity_series.json"
+def position_series_path() -> Path:
+    return _storage_dir() / "position_series.json"
+
+
+def today_walk_path() -> Path:
+    return _storage_dir() / "today_walk.json"
 
 
 def _parse_ts(raw) -> datetime:
@@ -141,11 +145,6 @@ def _seed_if_empty(conn: sqlite3.Connection) -> None:
     if cur.rowcount:
         conn.commit()
         log.info("[storage] seeded %d sample closes into %s", cur.rowcount, db_path())
-    if not risk_profile_path().exists():
-        profile = _profile_from_conn(conn)
-        if profile:
-            path = _write_risk_json(profile)
-            log.info("[storage] seeded %d tickers into %s", len(profile), path)
 
 
 def _ticker_risk_flat(symbol: str, fills: list[dict], closes: list[dict]) -> tuple[dict, dict] | None:
@@ -166,7 +165,7 @@ def _ticker_risk_flat(symbol: str, fills: list[dict], closes: list[dict]) -> tup
         "monthlyGrowth": risk.get("monthlyGrowth") or [],
         "text": format_ticker_risk(symbol.upper(), risk),
     }, {
-        "daily": risk.get("equitySeries") or [],
+        "daily": risk.get("positionSeries") or [],
         "variance": risk.get("variance"),
         "monthlyGrowth": risk.get("monthlyGrowth") or [],
     }
@@ -185,8 +184,8 @@ def _portfolio_flat(tickers: dict) -> dict:
     return row
 
 
-def _write_equity_series(series_by_symbol: dict) -> Path:
-    path = equity_series_path()
+def _write_position_series(series_by_symbol: dict) -> Path:
+    path = position_series_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(series_by_symbol, indent=2) + "\n")
     return path
@@ -205,7 +204,7 @@ def _build_profile(fills: list[dict], closes_by_symbol: dict[str, list[dict]]) -
         series_by_symbol[sym] = series
     if profile:
         profile["portfolio"] = _portfolio_flat(profile)
-        _write_equity_series(series_by_symbol)
+        _write_position_series(series_by_symbol)
     return profile
 
 
@@ -309,12 +308,133 @@ def write_trade_fills(fills: list[dict]) -> Path:
     return db_path()
 
 
+def write_price_history(symbol: str, closes: list[dict]) -> None:
+    """Replace daily closes for one symbol."""
+    sym = symbol.upper()
+    with closing(_connect()) as conn, conn:
+        conn.execute("DELETE FROM price_history WHERE symbol = ?", (sym,))
+        conn.executemany(
+            "INSERT INTO price_history (symbol, date, close) VALUES (?, ?, ?)",
+            [(sym, row["date"], float(row["close"])) for row in closes],
+        )
+
+
+def rebuild_artifacts() -> dict:
+    """Rebuild risk_profile.json and position_series.json from local SQLite."""
+    with closing(_connect()) as conn:
+        profile = _profile_from_conn(conn)
+    if profile:
+        _write_risk_json(profile)
+    return profile
+
+
+def sync_from_broker(broker) -> dict:
+    """Pull live fills + closes from the broker, persist, rebuild JSON dumps."""
+    from app.storage.fills import save_trade_fills
+    save_trade_fills(broker)
+    fills = read_trade_fills()
+    for sym in sorted({f["symbol"].upper() for f in fills}):
+        write_price_history(sym, broker._fetch_live_price_history(sym))
+    return rebuild_artifacts()
+
+
+def _yahoo_symbol(symbol: str) -> str:
+    return symbol.replace(".", "-")
+
+
+def fetch_daily_closes(symbol: str, range_: str = "1y") -> tuple[list[str], list[float]]:
+    """Yahoo daily closes. Does not map BTC → BTC-USD (this book is the ETF)."""
+    import urllib.request
+    ysym = _yahoo_symbol(symbol)
+    url = (
+        f"https://query1.finance.yahoo.com/v8/finance/chart/{ysym}"
+        f"?range={range_}&interval=1d"
+    )
+    req = urllib.request.Request(url, headers={"User-Agent": "allocation-engine/2.0"})
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        body = json.loads(resp.read().decode())
+    result = (body.get("chart") or {}).get("result") or []
+    if not result:
+        return [], []
+    row = result[0]
+    ts = row.get("timestamp") or []
+    raw = ((row.get("indicators") or {}).get("quote") or [{}])[0].get("close") or []
+    dates, closes = [], []
+    for t, c in zip(ts, raw):
+        if c is None:
+            continue
+        dates.append(datetime.fromtimestamp(t, tz=timezone.utc).date().isoformat())
+        closes.append(float(c))
+    return dates, closes
+
+
+def rebuild_risk_from_today_walk(walk: dict | None = None) -> dict:
+    """Fill risk_profile.json from the live today-walk + Yahoo closes."""
+    from app.pnl import format_ticker_risk, risk_from_today_walk
+    from app.trading_db import today_walk_from_db
+    walk = walk or today_walk_from_db()
+    write_today_walk(walk)
+    profile = {}
+    series_by_symbol = {}
+    missing = []
+    for sym, row in walk["tickers"].items():
+        try:
+            dates, closes = fetch_daily_closes(sym)
+        except Exception as exc:
+            log.warning("[storage] yahoo closes failed for %s: %s", sym, exc)
+            missing.append(sym)
+            continue
+        if len(closes) < 3:
+            missing.append(sym)
+            continue
+        risk = risk_from_today_walk(row, closes, dates=dates)
+        if "riskUsd" not in risk:
+            missing.append(sym)
+            continue
+        profile[sym] = {
+            "position": risk["position"],
+            "closeStdUsd": risk["closeStdUsd"],
+            "growthRatePct": risk["growthRatePct"],
+            "growthRateMeanPct": risk["growthRateMeanPct"],
+            "growthRateStdPct": risk["growthRateStdPct"],
+            "riskAdjustedGrowthRate": risk["riskAdjustedGrowthRate"],
+            "growthRateZ": risk.get("growthRateZ"),
+            "riskUsd": risk["riskUsd"],
+            "variance": risk.get("variance"),
+            "monthlyGrowth": risk.get("monthlyGrowth") or [],
+            "sodQty": row["sodQty"],
+            "nowQty": row["nowQty"],
+            "last": row["last"],
+            "text": format_ticker_risk(sym, risk),
+        }
+        series_by_symbol[sym] = {
+            "daily": risk.get("positionSeries") or [],
+            "variance": risk.get("variance"),
+            "monthlyGrowth": risk.get("monthlyGrowth") or [],
+        }
+    if profile:
+        profile["portfolio"] = _portfolio_flat(
+            {k: v for k, v in profile.items() if k != "portfolio"}
+        )
+        if missing:
+            profile["portfolio"]["missing"] = missing
+        _write_risk_json(profile)
+        _write_position_series(series_by_symbol)
+    return profile
+
+
+def write_today_walk(payload: dict) -> Path:
+    path = today_walk_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, indent=2) + "\n")
+    return path
+
+
 def read_risk_profile() -> dict:
     """Flat ticker-risk JSON: {symbol: {position, closeStdUsd, ...}}."""
     path = risk_profile_path()
     if not path.exists():
-        with closing(_connect()):
-            pass  # seed via _seed_if_empty
+        rebuild_artifacts()
     if not path.exists():
         return {}
     return json.loads(path.read_text())

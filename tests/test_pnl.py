@@ -129,31 +129,27 @@ def test_compute_pnl_total_with_mark_prices():
     assert sym["markPrice"] == pytest.approx(15.0)
 
 
-def test_equity_log_series_variance_and_monthly_growth():
-    from math import exp, log
+def test_position_series_variance_and_monthly_growth():
     from statistics import variance
-    from app.pnl import equity_log_series
-    points = [
+    from app.pnl import position_series
+    mark = [
         {"date": "2026-01-30", "close": 100.0, "position": 2.0},
         {"date": "2026-01-31", "close": 110.0, "position": 2.0},
         {"date": "2026-02-01", "close": 105.0, "position": 2.0},
         {"date": "2026-02-02", "close": 115.0, "position": 2.0},
     ]
-    out = equity_log_series(points)
-    equities = [200.0, 220.0, 210.0, 230.0]
-    dlog = [log(equities[i] / equities[i - 1]) for i in range(1, 4)]
+    out = position_series(mark)
+    usd = [200.0, 220.0, 210.0, 230.0]
+    rets = [usd[i] / usd[i - 1] - 1 for i in range(1, 4)]
     daily = out["daily"]
-    assert [p["date"] for p in daily] == [p["date"] for p in points]
-    assert [p["equity"] for p in daily] == equities
-    assert daily[0]["logReturn"] is None
-    assert [p["logReturn"] for p in daily[1:]] == pytest.approx(dlog, abs=1e-9)
-    assert out["variance"] == pytest.approx(variance(dlog), abs=1e-9)
-    # Jan: only 100->110; Feb: 110->105->115
-    jan = log(220 / 200)
-    feb = log(210 / 220) + log(230 / 210)
+    assert [p["date"] for p in daily] == [p["date"] for p in mark]
+    assert [p["position"] for p in daily] == usd
+    assert daily[0]["positionReturn"] is None
+    assert [p["positionReturn"] for p in daily[1:]] == pytest.approx(rets, abs=1e-9)
+    assert out["variance"] == pytest.approx(variance(rets), abs=1e-9)
     months = {m["month"]: m["growthRatePct"] for m in out["monthlyGrowth"]}
-    assert months["2026-01"] == pytest.approx((exp(jan) - 1) * 100, abs=0.001)
-    assert months["2026-02"] == pytest.approx((exp(feb) - 1) * 100, abs=0.001)
+    assert months["2026-01"] == pytest.approx((220 / 200 - 1) * 100, abs=0.001)
+    assert months["2026-02"] == pytest.approx((230 / 210 - 1) * 100, abs=0.001)
 
 
 def test_ticker_risk_model_std_and_standardized_growth():
@@ -214,3 +210,44 @@ def test_format_ticker_risk_telegram_text():
         f"GR σ {risk['growthRateStdPct']}%\n"
         f"var {risk['variance']:.6f}"
     )
+
+
+def test_today_walk_backs_out_todays_fills_from_live_book():
+    from datetime import date
+    from app.pnl import today_walk
+    day = date(2026, 8, 21)
+    book = [
+        {"symbol": "CRDO", "quantity": 22.0, "current_price": 216.41},
+        {"symbol": "NBIS", "quantity": 89.01, "current_price": 190.49},
+        {"symbol": "BTC.SHADOW", "quantity": 498.0, "current_price": 34.22},
+    ]
+    fills = [
+        {"symbol": "CRDO", "side": "BUY", "qty": 10.0, "price": 225.0,
+         "ts": datetime(2026, 8, 21, 14, 20, tzinfo=timezone.utc)},
+        {"symbol": "NBIS", "side": "BUY", "qty": 12.0, "price": 225.0,
+         "ts": datetime(2026, 8, 20, 8, 30, tzinfo=timezone.utc)},
+    ]
+    out = today_walk(book, fills, day)
+    crdo = out["CRDO"]
+    assert crdo["nowQty"] == pytest.approx(22.0)
+    assert crdo["sodQty"] == pytest.approx(12.0)
+    assert crdo["position"] == pytest.approx(22.0 * 216.41)
+    assert crdo["fills"] == 1
+    nbis = out["NBIS"]
+    assert nbis["nowQty"] == pytest.approx(89.01)
+    assert nbis["sodQty"] == pytest.approx(89.01)
+    assert nbis["fills"] == 0
+    assert "BTC.SHADOW" not in out
+
+
+def test_risk_from_today_walk_scales_live_qty():
+    from statistics import stdev
+    from app.pnl import risk_from_today_walk
+    closes = [100.0, 110.0, 105.0, 115.0]
+    walk = {"nowQty": 22.0, "last": 115.0, "date": "2026-08-21"}
+    dates = ["2026-08-18", "2026-08-19", "2026-08-20", "2026-08-21"]
+    out = risk_from_today_walk(walk, closes, dates=dates)
+    gr = [110 / 100 - 1, 105 / 110 - 1, 115 / 105 - 1]
+    assert out["position"] == 22.0
+    assert out["riskUsd"] == pytest.approx(22 * 115.0 * stdev(gr), abs=0.01)
+    assert out["closeStdUsd"] == pytest.approx(stdev(closes), abs=0.01)

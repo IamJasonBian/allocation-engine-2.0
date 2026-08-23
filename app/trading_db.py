@@ -31,6 +31,21 @@ def _headers():
     return h
 
 
+def _get(path):
+    url = f"{Config.TRADING_DB_URL.rstrip('/')}{path}"
+    try:
+        r = requests.get(url, headers=_headers(), timeout=20)
+        data = r.json() if r.content else {}
+        if not r.ok or data.get("ok") is False:
+            log.warning("[trading-db] GET %s -> %s %s", path, r.status_code,
+                        str(data)[:300])
+            return None
+        return data
+    except Exception as e:  # noqa: BLE001
+        log.warning("[trading-db] GET %s failed: %s", path, e)
+        return None
+
+
 def _post(path, body):
     url = f"{Config.TRADING_DB_URL.rstrip('/')}{path}"
     try:
@@ -90,6 +105,60 @@ def post_positions(positions=None, option_positions=None, account=None):
     if account:
         body["account"] = dict(account)
     return _post("/db-positions", body)
+
+
+def get_orders():
+    """List stock/option orders from the Trading DB."""
+    return _get("/db-orders")
+
+
+def get_positions():
+    """List the current position book from the Trading DB."""
+    return _get("/db-positions")
+
+
+def fills_from_orders(payload: dict) -> list[dict]:
+    """Normalize db-orders rows into pnl fill dicts."""
+    data = (payload or {}).get("data") or {}
+    rows = []
+    for key in ("historical_orders", "untracked_orders", "open_orders"):
+        rows.extend(data.get(key) or [])
+    fills = []
+    for o in rows:
+        qty = o.get("filled_quantity")
+        px = o.get("average_price")
+        if not qty or px in (None, ""):
+            continue
+        ts = o.get("updated_at") or o.get("created_at")
+        if not ts:
+            continue
+        fills.append({
+            "symbol": o["symbol"],
+            "side": o["side"],
+            "qty": float(qty),
+            "price": float(px),
+            "ts": ts,
+        })
+    return fills
+
+
+def today_walk_from_db(day=None) -> dict:
+    """Live book + today's fills from Trading DB GETs (not the box)."""
+    from datetime import date as date_cls, datetime, timezone
+    from app.pnl import today_walk
+    if day is None:
+        day = datetime.now(timezone.utc).date()
+    elif isinstance(day, str):
+        day = date_cls.fromisoformat(day[:10])
+    pos = get_positions() or {}
+    orders = get_orders() or {}
+    book = ((pos.get("data") or {}).get("positions") or [])
+    return {
+        "asOf": (pos.get("data") or {}).get("updated_at") or pos.get("as_of"),
+        "day": day.isoformat(),
+        "account": (pos.get("data") or {}).get("account"),
+        "tickers": today_walk(book, fills_from_orders(orders), day),
+    }
 
 
 def post_bot_activity(events):
