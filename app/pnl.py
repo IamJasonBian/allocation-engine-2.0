@@ -7,7 +7,9 @@ realizes P&L versus the average cost at that moment. Position flips
 (close-and-open) reset the average to the flip price.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
+from math import exp, log, sqrt
+from statistics import mean, stdev, variance
 
 
 class PnlSnapshot:
@@ -239,6 +241,213 @@ def compute_pnl(
         out["totalPnL"] = round(total_realized + total_unrealized, 2)
 
     return out
+
+
+def _fill_date(ts) -> str:
+    if isinstance(ts, datetime):
+        return ts.date().isoformat()
+    if isinstance(ts, date):
+        return ts.isoformat()
+    return str(ts)[:10]
+
+
+def _mark_series(fills: list[dict], closes: list[dict], symbol: str) -> list[dict]:
+    """Daily mark-to-market series for one symbol: fills replayed day by day,
+    open position marked to each daily close."""
+    sym = symbol.upper()
+    sym_fills = sorted(
+        (f for f in fills if f["symbol"].upper() == sym), key=lambda f: f["ts"]
+    )
+    closes = sorted(closes, key=lambda c: c["date"])
+
+    snap = PnlSnapshot(sym)
+    series: list[dict] = []
+    i = 0
+    for row in closes:
+        day, close = row["date"], float(row["close"])
+        while i < len(sym_fills) and _fill_date(sym_fills[i]["ts"]) <= day:
+            f = sym_fills[i]
+            snap.update_by_tradefeed(
+                1 if f["side"] == "BUY" else 2, f["price"], f["qty"]
+            )
+            i += 1
+        snap.update_by_marketdata(close)
+        series.append({
+            "date": day,
+            "close": close,
+            "position": round(snap.m_net_position, 8),
+            "totalPnl": round(snap.m_total_pnl, 2),
+        })
+    return series
+
+
+def equity_log_series(points: list[dict]) -> dict:
+    """Daily log-equity path; variance and monthly growth from those samples.
+
+    Each point is `{date, close, position}`. Equity is `|position| × close`.
+    `logReturn` is Δ log(equity) (None on the first day or a flat book).
+    Variance is the sample variance of those daily log returns. Monthly
+    growth is `exp(Σ logReturn) - 1` per calendar month.
+    """
+    daily = []
+    prev_log = None
+    log_returns: list[float] = []
+    monthly_sum: dict[str, float] = {}
+    for p in sorted(points, key=lambda r: r["date"]):
+        equity = abs(float(p["position"])) * float(p["close"])
+        log_eq = log(equity) if equity > 1e-12 else None
+        log_ret = None
+        if log_eq is not None and prev_log is not None:
+            log_ret = log_eq - prev_log
+            log_returns.append(log_ret)
+            month = str(p["date"])[:7]
+            monthly_sum[month] = monthly_sum.get(month, 0.0) + log_ret
+        if log_eq is not None:
+            prev_log = log_eq
+        daily.append({
+            "date": p["date"],
+            "close": float(p["close"]),
+            "equity": equity,
+            "logEquity": log_eq,
+            "logReturn": log_ret,
+        })
+    monthly = [
+        {"month": m, "growthRatePct": round((exp(s) - 1) * 100, 4)}
+        for m, s in monthly_sum.items()
+    ]
+    return {
+        "daily": daily,
+        "variance": variance(log_returns) if len(log_returns) >= 2 else None,
+        "monthlyGrowth": monthly,
+    }
+
+
+def ticker_risk_model(closes: list[float]) -> dict:
+    """Ticker risk: price stdev and standardized daily growth rates.
+
+    Growth rate is `close_t / close_t-1 - 1`. Standardization is the
+    sample z-score `(g - mean(g)) / stdev(g)`. `growthRateZ` is the
+    latest day; `growthRateZSeries` is the full z path.
+    """
+    if len(closes) < 2:
+        return {}
+    growth = [cur / prev - 1 for prev, cur in zip(closes, closes[1:])]
+    out = {"closeStdUsd": round(stdev(closes), 4)}
+    if len(growth) < 2:
+        gr_pct = round(growth[0] * 100, 4)
+        out["growthRatePct"] = gr_pct
+        out["growthRateMeanPct"] = gr_pct
+        return out
+    mu = mean(growth)
+    sig = stdev(growth)
+    z_series = (
+        [0.0] * len(growth) if sig < 1e-12
+        else [(g - mu) / sig for g in growth]
+    )
+    downside = sqrt(sum(min(g, 0) ** 2 for g in growth) / len(growth))
+    gr_pct = round(mu * 100, 4)
+    out.update({
+        "growthRatePct": gr_pct,
+        "growthRateMeanPct": gr_pct,
+        "growthRateStdPct": round(sig * 100, 4),
+        "riskAdjustedGrowthRate": round(mu / sig, 4) if sig >= 1e-12 else 0.0,
+        "growthRateZ": round(z_series[-1], 4),
+        "growthRateZSeries": [round(z, 4) for z in z_series],
+        "downsideGrowthRateStdPct": round(downside * 100, 4),
+    })
+    return out
+
+
+def _ticker_vol(closes: list[float]) -> dict:
+    return ticker_risk_model(closes)
+
+
+def pnl_risk(fills: list[dict], closes: list[dict], symbol: str) -> dict:
+    """Per-ticker volatility with a position-scaled USD risk contribution.
+
+    Price volatility is the sample std of daily closes; growth-rate
+    volatility is the sample std of `close_t / close_t-1 - 1`.
+    `riskUsd` is the 1σ daily dollar move:
+    `|position| × last close × stdev(growth rates)`.
+    """
+    series = _mark_series(fills, closes, symbol)
+    position = series[-1]["position"] if series else 0
+    last_close = series[-1]["close"] if series else 0
+    out = {
+        "method": "additive_ticker_vol",
+        "series": series,
+        "observations": len(series),
+        "position": position,
+        **_ticker_vol([p["close"] for p in series]),
+    }
+    if "growthRateStdPct" in out:
+        out["riskUsd"] = round(
+            abs(position) * last_close * out["growthRateStdPct"] / 100, 2
+        )
+    path = equity_log_series([
+        {"date": p["date"], "close": p["close"], "position": p["position"]}
+        for p in series
+    ])
+    out["variance"] = path["variance"]
+    out["monthlyGrowth"] = path["monthlyGrowth"]
+    out["equitySeries"] = path["daily"]
+    return out
+
+
+def format_ticker_risk(symbol: str, risk: dict) -> str:
+    """Telegram-ready one-ticker risk line. Missing vol → insufficient closes."""
+    if "closeStdUsd" not in risk:
+        return f"{symbol}: insufficient closes"
+    lines = [
+        f"{symbol} risk",
+        f"pos {risk['position']}",
+        f"σ ${risk['riskUsd']}",
+        f"close σ ${risk['closeStdUsd']}",
+        f"GR {risk['growthRatePct']}%",
+        f"RA GR {risk['riskAdjustedGrowthRate']}",
+        f"GR σ {risk['growthRateStdPct']}%",
+    ]
+    if risk.get("variance") is not None:
+        lines.append(f"var {risk['variance']:.6f}")
+    return "\n".join(lines)
+
+
+def format_portfolio_risk(portfolio: dict) -> str:
+    """Telegram-ready whole-book 1σ line."""
+    n = len(portfolio.get("symbols") or [])
+    return (
+        f"portfolio σ ${portfolio['riskUsd']}\n"
+        f"{n} ticker{'s' if n != 1 else ''}"
+    )
+
+
+def portfolio_risk(fills: list[dict], closes_by_symbol: dict[str, list[dict]]) -> dict:
+    """Whole-book 1σ: sum of per-ticker `|position| × last close × GR σ`.
+
+    Tickers without enough closes for a std are omitted. `totalRiskUsd` is
+    the additive (perfectly correlated) upper bound; `uncorrelatedRiskUsd`
+    is sqrt of the sum of squares. True portfolio std lies between.
+    """
+    tickers = []
+    for sym in sorted(closes_by_symbol):
+        risk = pnl_risk(fills, closes_by_symbol[sym], sym)
+        if "riskUsd" not in risk:
+            continue
+        tickers.append({
+            "symbol": sym.upper(),
+            "position": risk["position"],
+            "closeStdUsd": risk["closeStdUsd"],
+            "growthRateStdPct": risk["growthRateStdPct"],
+            "downsideGrowthRateStdPct": risk["downsideGrowthRateStdPct"],
+            "riskUsd": risk["riskUsd"],
+        })
+    return {
+        "method": "additive_ticker_vol_portfolio",
+        "symbols": [t["symbol"] for t in tickers],
+        "tickers": tickers,
+        "totalRiskUsd": round(sum(t["riskUsd"] for t in tickers), 2),
+        "uncorrelatedRiskUsd": round(sqrt(sum(t["riskUsd"] ** 2 for t in tickers)), 2),
+    }
 
 
 def cost_basis_series(fills: list[dict], symbol: str) -> list[dict]:

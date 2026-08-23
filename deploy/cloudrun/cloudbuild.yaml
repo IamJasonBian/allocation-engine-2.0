@@ -1,0 +1,20 @@
+# gcloud builds submit --config deploy/cloudrun/cloudbuild.yaml --substitutions _TAG=<tag> .
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -f
+      - deploy/cloudrun/Dockerfile
+      - -t
+      - ${_IMAGE}:${_TAG}
+      - -t
+      - ${_IMAGE}:latest
+      - .
+images:
+  - ${_IMAGE}:${_TAG}
+  - ${_IMAGE}:latest
+substitutions:
+  _IMAGE: us-central1-docker.pkg.dev/route-manager-prod/allocation-engine/risk-service
+  _TAG: manual
+options:
+  logging: CLOUD_LOGGING_ONLY

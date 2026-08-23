@@ -1,0 +1,3002 @@
+[
+  {
+"symbol": "BTC",
+"date": "2026-04-22",
+"close": 42000.0
+},
+  {
+"symbol": "BTC",
+"date": "2026-04-23",
+"close": 42159.03
+},
+  {
+"symbol": "BTC",
+"date": "2026-04-24",
+"close": 42364.17
+},
+  {
+"symbol": "BTC",
+"date": "2026-04-25",
+"close": 42605.47
+},
+  {
+"symbol": "BTC",
+"date": "2026-04-26",
+"close": 43147.46
+},
+  {
+"symbol": "BTC",
+"date": "2026-04-27",
+"close": 43032.3
+},
+  {
+"symbol": "BTC",
+"date": "2026-04-28",
+"close": 42701.06
+},
+  {
+"symbol": "BTC",
+"date": "2026-04-29",
+"close": 43649.59
+},
+  {
+"symbol": "BTC",
+"date": "2026-04-30",
+"close": 43626.4
+},
+  {
+"symbol": "BTC",
+"date": "2026-05-01",
+"close": 43863.22
+},
+  {
+"symbol": "BTC",
+"date": "2026-05-02",
+"close": 44213.02
+},
+  {
+"symbol": "BTC",
+"date": "2026-05-03",
+"close": 44476.25
+},
+  {
+"symbol": "BTC",
+"date": "2026-05-04",
+"close": 45065.42
+},
+  {
+"symbol": "BTC",
+"date": "2026-05-05",
+"close": 45079.32
+},
+  {
+"symbol": "BTC",
+"date": "2026-05-06",
+"close": 45077.54
+},
+  {
+"symbol": "BTC",
+"date": "2026-05-07",
+"close": 44954.67
+},
+  {
+"symbol": "BTC",
+"date": "2026-05-08",
+"close": 45060.8
+},
+  {
+"symbol": "BTC",
+"date": "2026-05-09",
+"close": 45781.87
+},
+  {
+"symbol": "BTC",
+"date": "2026-05-10",
+"close": 46424.43
+},
+  {
+"symbol": "BTC",
+"date": "2026-05-11",
+"close": 46133.33
+},
+  {
+"symbol": "BTC",
+"date": "2026-05-12",
+"close": 46290.8
+},
+  {
+"symbol": "BTC",
+"date": "2026-05-13",
+"close": 46762.71
+},
+  {
+"symbol": "BTC",
+"date": "2026-05-14",
+"close": 46185.25
+},
+  {
+"symbol": "BTC",
+"date": "2026-05-15",
+"close": 46858.42
+},
+  {
+"symbol": "BTC",
+"date": "2026-05-16",
+"close": 47396.15
+},
+  {
+"symbol": "BTC",
+"date": "2026-05-17",
+"close": 47766.03
+},
+  {
+"symbol": "BTC",
+"date": "2026-05-18",
+"close": 47537.08
+},
+  {
+"symbol": "BTC",
+"date": "2026-05-19",
+"close": 48000.64
+},
+  {
+"symbol": "BTC",
+"date": "2026-05-20",
+"close": 48165.95
+},
+  {
+"symbol": "BTC",
+"date": "2026-05-21",
+"close": 48596.26
+},
+  {
+"symbol": "BTC",
+"date": "2026-05-22",
+"close": 48054.71
+},
+  {
+"symbol": "BTC",
+"date": "2026-05-23",
+"close": 48943.97
+},
+  {
+"symbol": "BTC",
+"date": "2026-05-24",
+"close": 48327.53
+},
+  {
+"symbol": "BTC",
+"date": "2026-05-25",
+"close": 48102.02
+},
+  {
+"symbol": "BTC",
+"date": "2026-05-26",
+"close": 49123.91
+},
+  {
+"symbol": "BTC",
+"date": "2026-05-27",
+"close": 49217.01
+},
+  {
+"symbol": "BTC",
+"date": "2026-05-28",
+"close": 50150.4
+},
+  {
+"symbol": "BTC",
+"date": "2026-05-29",
+"close": 50282.37
+},
+  {
+"symbol": "BTC",
+"date": "2026-05-30",
+"close": 49745.7
+},
+  {
+"symbol": "BTC",
+"date": "2026-05-31",
+"close": 50788.94
+},
+  {
+"symbol": "BTC",
+"date": "2026-06-01",
+"close": 50265.79
+},
+  {
+"symbol": "BTC",
+"date": "2026-06-02",
+"close": 50848.84
+},
+  {
+"symbol": "BTC",
+"date": "2026-06-03",
+"close": 50982.44
+},
+  {
+"symbol": "BTC",
+"date": "2026-06-04",
+"close": 51362.43
+},
+  {
+"symbol": "BTC",
+"date": "2026-06-05",
+"close": 51860.79
+},
+  {
+"symbol": "BTC",
+"date": "2026-06-06",
+"close": 52005.37
+},
+  {
+"symbol": "BTC",
+"date": "2026-06-07",
+"close": 52106.62
+},
+  {
+"symbol": "BTC",
+"date": "2026-06-08",
+"close": 52443.31
+},
+  {
+"symbol": "BTC",
+"date": "2026-06-09",
+"close": 52591.4
+},
+  {
+"symbol": "BTC",
+"date": "2026-06-10",
+"close": 52365.87
+},
+  {
+"symbol": "BTC",
+"date": "2026-06-11",
+"close": 52546.38
+},
+  {
+"symbol": "BTC",
+"date": "2026-06-12",
+"close": 52862.01
+},
+  {
+"symbol": "BTC",
+"date": "2026-06-13",
+"close": 53466.4
+},
+  {
+"symbol": "BTC",
+"date": "2026-06-14",
+"close": 53383.29
+},
+  {
+"symbol": "BTC",
+"date": "2026-06-15",
+"close": 54634.3
+},
+  {
+"symbol": "BTC",
+"date": "2026-06-16",
+"close": 53588.95
+},
+  {
+"symbol": "BTC",
+"date": "2026-06-17",
+"close": 53693.78
+},
+  {
+"symbol": "BTC",
+"date": "2026-06-18",
+"close": 54657.39
+},
+  {
+"symbol": "BTC",
+"date": "2026-06-19",
+"close": 55135.41
+},
+  {
+"symbol": "BTC",
+"date": "2026-06-20",
+"close": 54985.61
+},
+  {
+"symbol": "BTC",
+"date": "2026-06-21",
+"close": 55000.0
+},
+  {
+"symbol": "BTC",
+"date": "2026-06-22",
+"close": 55634.33
+},
+  {
+"symbol": "BTC",
+"date": "2026-06-23",
+"close": 56170.54
+},
+  {
+"symbol": "BTC",
+"date": "2026-06-24",
+"close": 55862.39
+},
+  {
+"symbol": "BTC",
+"date": "2026-06-25",
+"close": 55630.82
+},
+  {
+"symbol": "BTC",
+"date": "2026-06-26",
+"close": 56287.17
+},
+  {
+"symbol": "BTC",
+"date": "2026-06-27",
+"close": 57181.16
+},
+  {
+"symbol": "BTC",
+"date": "2026-06-28",
+"close": 56522.53
+},
+  {
+"symbol": "BTC",
+"date": "2026-06-29",
+"close": 57413.41
+},
+  {
+"symbol": "BTC",
+"date": "2026-06-30",
+"close": 57801.29
+},
+  {
+"symbol": "BTC",
+"date": "2026-07-01",
+"close": 57873.76
+},
+  {
+"symbol": "BTC",
+"date": "2026-07-02",
+"close": 58589.45
+},
+  {
+"symbol": "BTC",
+"date": "2026-07-03",
+"close": 58832.31
+},
+  {
+"symbol": "BTC",
+"date": "2026-07-04",
+"close": 59828.56
+},
+  {
+"symbol": "BTC",
+"date": "2026-07-05",
+"close": 59447.99
+},
+  {
+"symbol": "BTC",
+"date": "2026-07-06",
+"close": 59256.24
+},
+  {
+"symbol": "BTC",
+"date": "2026-07-07",
+"close": 59575.28
+},
+  {
+"symbol": "BTC",
+"date": "2026-07-08",
+"close": 59767.37
+},
+  {
+"symbol": "BTC",
+"date": "2026-07-09",
+"close": 60780.91
+},
+  {
+"symbol": "BTC",
+"date": "2026-07-10",
+"close": 60473.27
+},
+  {
+"symbol": "BTC",
+"date": "2026-07-11",
+"close": 60971.9
+},
+  {
+"symbol": "BTC",
+"date": "2026-07-12",
+"close": 61599.72
+},
+  {
+"symbol": "BTC",
+"date": "2026-07-13",
+"close": 61310.61
+},
+  {
+"symbol": "BTC",
+"date": "2026-07-14",
+"close": 61782.54
+},
+  {
+"symbol": "BTC",
+"date": "2026-07-15",
+"close": 61463.49
+},
+  {
+"symbol": "BTC",
+"date": "2026-07-16",
+"close": 62067.01
+},
+  {
+"symbol": "BTC",
+"date": "2026-07-17",
+"close": 62572.91
+},
+  {
+"symbol": "BTC",
+"date": "2026-07-18",
+"close": 63266.3
+},
+  {
+"symbol": "BTC",
+"date": "2026-07-19",
+"close": 63877.4
+},
+  {
+"symbol": "BTC",
+"date": "2026-07-20",
+"close": 63692.61
+},
+  {
+"symbol": "BTC",
+"date": "2026-07-21",
+"close": 64104.55
+},
+  {
+"symbol": "BTC",
+"date": "2026-07-22",
+"close": 64367.19
+},
+  {
+"symbol": "BTC",
+"date": "2026-07-23",
+"close": 65033.9
+},
+  {
+"symbol": "BTC",
+"date": "2026-07-24",
+"close": 65257.34
+},
+  {
+"symbol": "BTC",
+"date": "2026-07-25",
+"close": 65309.48
+},
+  {
+"symbol": "BTC",
+"date": "2026-07-26",
+"close": 65095.62
+},
+  {
+"symbol": "BTC",
+"date": "2026-07-27",
+"close": 66161.35
+},
+  {
+"symbol": "BTC",
+"date": "2026-07-28",
+"close": 66252.42
+},
+  {
+"symbol": "BTC",
+"date": "2026-07-29",
+"close": 66890.78
+},
+  {
+"symbol": "BTC",
+"date": "2026-07-30",
+"close": 66688.04
+},
+  {
+"symbol": "BTC",
+"date": "2026-07-31",
+"close": 67781.24
+},
+  {
+"symbol": "BTC",
+"date": "2026-08-01",
+"close": 67156.45
+},
+  {
+"symbol": "BTC",
+"date": "2026-08-02",
+"close": 68237.22
+},
+  {
+"symbol": "BTC",
+"date": "2026-08-03",
+"close": 67946.05
+},
+  {
+"symbol": "BTC",
+"date": "2026-08-04",
+"close": 67993.49
+},
+  {
+"symbol": "BTC",
+"date": "2026-08-05",
+"close": 68048.62
+},
+  {
+"symbol": "BTC",
+"date": "2026-08-06",
+"close": 68739.59
+},
+  {
+"symbol": "BTC",
+"date": "2026-08-07",
+"close": 69669.33
+},
+  {
+"symbol": "BTC",
+"date": "2026-08-08",
+"close": 69726.55
+},
+  {
+"symbol": "BTC",
+"date": "2026-08-09",
+"close": 69975.55
+},
+  {
+"symbol": "BTC",
+"date": "2026-08-10",
+"close": 70000.0
+},
+  {
+"symbol": "BTC",
+"date": "2026-08-11",
+"close": 68424.65
+},
+  {
+"symbol": "BTC",
+"date": "2026-08-12",
+"close": 69034.39
+},
+  {
+"symbol": "BTC",
+"date": "2026-08-13",
+"close": 68347.34
+},
+  {
+"symbol": "BTC",
+"date": "2026-08-14",
+"close": 67280.03
+},
+  {
+"symbol": "BTC",
+"date": "2026-08-15",
+"close": 66624.05
+},
+  {
+"symbol": "BTC",
+"date": "2026-08-16",
+"close": 66249.08
+},
+  {
+"symbol": "BTC",
+"date": "2026-08-17",
+"close": 66314.95
+},
+  {
+"symbol": "BTC",
+"date": "2026-08-18",
+"close": 65000.0
+},
+  {
+"symbol": "BTC",
+"date": "2026-08-19",
+"close": 66000.0
+},
+  {
+"symbol": "ETH",
+"date": "2026-04-22",
+"close": 2200.0
+},
+  {
+"symbol": "ETH",
+"date": "2026-04-23",
+"close": 2157.94
+},
+  {
+"symbol": "ETH",
+"date": "2026-04-24",
+"close": 2163.32
+},
+  {
+"symbol": "ETH",
+"date": "2026-04-25",
+"close": 2124.64
+},
+  {
+"symbol": "ETH",
+"date": "2026-04-26",
+"close": 2089.7
+},
+  {
+"symbol": "ETH",
+"date": "2026-04-27",
+"close": 2054.86
+},
+  {
+"symbol": "ETH",
+"date": "2026-04-28",
+"close": 2077.54
+},
+  {
+"symbol": "ETH",
+"date": "2026-04-29",
+"close": 2155.07
+},
+  {
+"symbol": "ETH",
+"date": "2026-04-30",
+"close": 2096.38
+},
+  {
+"symbol": "ETH",
+"date": "2026-05-01",
+"close": 2178.7
+},
+  {
+"symbol": "ETH",
+"date": "2026-05-02",
+"close": 2163.81
+},
+  {
+"symbol": "ETH",
+"date": "2026-05-03",
+"close": 2201.51
+},
+  {
+"symbol": "ETH",
+"date": "2026-05-04",
+"close": 2205.61
+},
+  {
+"symbol": "ETH",
+"date": "2026-05-05",
+"close": 2196.66
+},
+  {
+"symbol": "ETH",
+"date": "2026-05-06",
+"close": 2139.58
+},
+  {
+"symbol": "ETH",
+"date": "2026-05-07",
+"close": 2161.63
+},
+  {
+"symbol": "ETH",
+"date": "2026-05-08",
+"close": 2205.94
+},
+  {
+"symbol": "ETH",
+"date": "2026-05-09",
+"close": 2240.92
+},
+  {
+"symbol": "ETH",
+"date": "2026-05-10",
+"close": 2282.99
+},
+  {
+"symbol": "ETH",
+"date": "2026-05-11",
+"close": 2238.89
+},
+  {
+"symbol": "ETH",
+"date": "2026-05-12",
+"close": 2259.07
+},
+  {
+"symbol": "ETH",
+"date": "2026-05-13",
+"close": 2229.12
+},
+  {
+"symbol": "ETH",
+"date": "2026-05-14",
+"close": 2169.01
+},
+  {
+"symbol": "ETH",
+"date": "2026-05-15",
+"close": 2156.69
+},
+  {
+"symbol": "ETH",
+"date": "2026-05-16",
+"close": 2281.9
+},
+  {
+"symbol": "ETH",
+"date": "2026-05-17",
+"close": 2316.65
+},
+  {
+"symbol": "ETH",
+"date": "2026-05-18",
+"close": 2288.6
+},
+  {
+"symbol": "ETH",
+"date": "2026-05-19",
+"close": 2245.48
+},
+  {
+"symbol": "ETH",
+"date": "2026-05-20",
+"close": 2301.04
+},
+  {
+"symbol": "ETH",
+"date": "2026-05-21",
+"close": 2352.53
+},
+  {
+"symbol": "ETH",
+"date": "2026-05-22",
+"close": 2303.27
+},
+  {
+"symbol": "ETH",
+"date": "2026-05-23",
+"close": 2417.58
+},
+  {
+"symbol": "ETH",
+"date": "2026-05-24",
+"close": 2407.51
+},
+  {
+"symbol": "ETH",
+"date": "2026-05-25",
+"close": 2384.94
+},
+  {
+"symbol": "ETH",
+"date": "2026-05-26",
+"close": 2417.12
+},
+  {
+"symbol": "ETH",
+"date": "2026-05-27",
+"close": 2454.04
+},
+  {
+"symbol": "ETH",
+"date": "2026-05-28",
+"close": 2484.83
+},
+  {
+"symbol": "ETH",
+"date": "2026-05-29",
+"close": 2519.27
+},
+  {
+"symbol": "ETH",
+"date": "2026-05-30",
+"close": 2469.48
+},
+  {
+"symbol": "ETH",
+"date": "2026-05-31",
+"close": 2536.82
+},
+  {
+"symbol": "ETH",
+"date": "2026-06-01",
+"close": 2539.02
+},
+  {
+"symbol": "ETH",
+"date": "2026-06-02",
+"close": 2583.47
+},
+  {
+"symbol": "ETH",
+"date": "2026-06-03",
+"close": 2658.43
+},
+  {
+"symbol": "ETH",
+"date": "2026-06-04",
+"close": 2708.61
+},
+  {
+"symbol": "ETH",
+"date": "2026-06-05",
+"close": 2811.75
+},
+  {
+"symbol": "ETH",
+"date": "2026-06-06",
+"close": 2787.16
+},
+  {
+"symbol": "ETH",
+"date": "2026-06-07",
+"close": 2745.36
+},
+  {
+"symbol": "ETH",
+"date": "2026-06-08",
+"close": 2676.2
+},
+  {
+"symbol": "ETH",
+"date": "2026-06-09",
+"close": 2768.29
+},
+  {
+"symbol": "ETH",
+"date": "2026-06-10",
+"close": 2780.29
+},
+  {
+"symbol": "ETH",
+"date": "2026-06-11",
+"close": 2760.96
+},
+  {
+"symbol": "ETH",
+"date": "2026-06-12",
+"close": 2730.19
+},
+  {
+"symbol": "ETH",
+"date": "2026-06-13",
+"close": 2760.23
+},
+  {
+"symbol": "ETH",
+"date": "2026-06-14",
+"close": 2817.75
+},
+  {
+"symbol": "ETH",
+"date": "2026-06-15",
+"close": 2884.47
+},
+  {
+"symbol": "ETH",
+"date": "2026-06-16",
+"close": 2907.74
+},
+  {
+"symbol": "ETH",
+"date": "2026-06-17",
+"close": 2937.09
+},
+  {
+"symbol": "ETH",
+"date": "2026-06-18",
+"close": 3020.98
+},
+  {
+"symbol": "ETH",
+"date": "2026-06-19",
+"close": 3002.66
+},
+  {
+"symbol": "ETH",
+"date": "2026-06-20",
+"close": 2977.63
+},
+  {
+"symbol": "ETH",
+"date": "2026-06-21",
+"close": 3117.78
+},
+  {
+"symbol": "ETH",
+"date": "2026-06-22",
+"close": 3136.81
+},
+  {
+"symbol": "ETH",
+"date": "2026-06-23",
+"close": 3207.86
+},
+  {
+"symbol": "ETH",
+"date": "2026-06-24",
+"close": 3239.68
+},
+  {
+"symbol": "ETH",
+"date": "2026-06-25",
+"close": 3246.18
+},
+  {
+"symbol": "ETH",
+"date": "2026-06-26",
+"close": 3350.81
+},
+  {
+"symbol": "ETH",
+"date": "2026-06-27",
+"close": 3424.06
+},
+  {
+"symbol": "ETH",
+"date": "2026-06-28",
+"close": 3479.43
+},
+  {
+"symbol": "ETH",
+"date": "2026-06-29",
+"close": 3634.97
+},
+  {
+"symbol": "ETH",
+"date": "2026-06-30",
+"close": 3676.91
+},
+  {
+"symbol": "ETH",
+"date": "2026-07-01",
+"close": 3773.91
+},
+  {
+"symbol": "ETH",
+"date": "2026-07-02",
+"close": 3883.82
+},
+  {
+"symbol": "ETH",
+"date": "2026-07-03",
+"close": 3834.19
+},
+  {
+"symbol": "ETH",
+"date": "2026-07-04",
+"close": 3820.88
+},
+  {
+"symbol": "ETH",
+"date": "2026-07-05",
+"close": 3847.34
+},
+  {
+"symbol": "ETH",
+"date": "2026-07-06",
+"close": 3850.15
+},
+  {
+"symbol": "ETH",
+"date": "2026-07-07",
+"close": 3886.89
+},
+  {
+"symbol": "ETH",
+"date": "2026-07-08",
+"close": 3916.73
+},
+  {
+"symbol": "ETH",
+"date": "2026-07-09",
+"close": 3928.72
+},
+  {
+"symbol": "ETH",
+"date": "2026-07-10",
+"close": 3916.74
+},
+  {
+"symbol": "ETH",
+"date": "2026-07-11",
+"close": 3899.82
+},
+  {
+"symbol": "ETH",
+"date": "2026-07-12",
+"close": 3937.27
+},
+  {
+"symbol": "ETH",
+"date": "2026-07-13",
+"close": 3989.97
+},
+  {
+"symbol": "ETH",
+"date": "2026-07-14",
+"close": 4073.12
+},
+  {
+"symbol": "ETH",
+"date": "2026-07-15",
+"close": 4055.01
+},
+  {
+"symbol": "ETH",
+"date": "2026-07-16",
+"close": 4195.32
+},
+  {
+"symbol": "ETH",
+"date": "2026-07-17",
+"close": 4254.51
+},
+  {
+"symbol": "ETH",
+"date": "2026-07-18",
+"close": 4443.63
+},
+  {
+"symbol": "ETH",
+"date": "2026-07-19",
+"close": 4554.0
+},
+  {
+"symbol": "ETH",
+"date": "2026-07-20",
+"close": 4510.79
+},
+  {
+"symbol": "ETH",
+"date": "2026-07-21",
+"close": 4483.07
+},
+  {
+"symbol": "ETH",
+"date": "2026-07-22",
+"close": 4498.43
+},
+  {
+"symbol": "ETH",
+"date": "2026-07-23",
+"close": 4438.25
+},
+  {
+"symbol": "ETH",
+"date": "2026-07-24",
+"close": 4456.93
+},
+  {
+"symbol": "ETH",
+"date": "2026-07-25",
+"close": 4459.99
+},
+  {
+"symbol": "ETH",
+"date": "2026-07-26",
+"close": 4440.05
+},
+  {
+"symbol": "ETH",
+"date": "2026-07-27",
+"close": 4644.25
+},
+  {
+"symbol": "ETH",
+"date": "2026-07-28",
+"close": 4670.46
+},
+  {
+"symbol": "ETH",
+"date": "2026-07-29",
+"close": 4890.1
+},
+  {
+"symbol": "ETH",
+"date": "2026-07-30",
+"close": 4992.27
+},
+  {
+"symbol": "ETH",
+"date": "2026-07-31",
+"close": 5088.66
+},
+  {
+"symbol": "ETH",
+"date": "2026-08-01",
+"close": 4988.84
+},
+  {
+"symbol": "ETH",
+"date": "2026-08-02",
+"close": 5011.98
+},
+  {
+"symbol": "ETH",
+"date": "2026-08-03",
+"close": 4864.66
+},
+  {
+"symbol": "ETH",
+"date": "2026-08-04",
+"close": 4696.98
+},
+  {
+"symbol": "ETH",
+"date": "2026-08-05",
+"close": 4661.84
+},
+  {
+"symbol": "ETH",
+"date": "2026-08-06",
+"close": 4693.78
+},
+  {
+"symbol": "ETH",
+"date": "2026-08-07",
+"close": 4745.03
+},
+  {
+"symbol": "ETH",
+"date": "2026-08-08",
+"close": 4736.88
+},
+  {
+"symbol": "ETH",
+"date": "2026-08-09",
+"close": 4712.65
+},
+  {
+"symbol": "ETH",
+"date": "2026-08-10",
+"close": 4636.43
+},
+  {
+"symbol": "ETH",
+"date": "2026-08-11",
+"close": 4419.05
+},
+  {
+"symbol": "ETH",
+"date": "2026-08-12",
+"close": 4473.0
+},
+  {
+"symbol": "ETH",
+"date": "2026-08-13",
+"close": 4419.46
+},
+  {
+"symbol": "ETH",
+"date": "2026-08-14",
+"close": 4305.97
+},
+  {
+"symbol": "ETH",
+"date": "2026-08-15",
+"close": 4346.67
+},
+  {
+"symbol": "ETH",
+"date": "2026-08-16",
+"close": 4455.41
+},
+  {
+"symbol": "ETH",
+"date": "2026-08-17",
+"close": 4391.09
+},
+  {
+"symbol": "ETH",
+"date": "2026-08-18",
+"close": 4337.35
+},
+  {
+"symbol": "ETH",
+"date": "2026-08-19",
+"close": 4478.64
+},
+  {
+"symbol": "SOL",
+"date": "2026-04-22",
+"close": 140.0
+},
+  {
+"symbol": "SOL",
+"date": "2026-04-23",
+"close": 136.87
+},
+  {
+"symbol": "SOL",
+"date": "2026-04-24",
+"close": 131.62
+},
+  {
+"symbol": "SOL",
+"date": "2026-04-25",
+"close": 136.88
+},
+  {
+"symbol": "SOL",
+"date": "2026-04-26",
+"close": 138.98
+},
+  {
+"symbol": "SOL",
+"date": "2026-04-27",
+"close": 136.04
+},
+  {
+"symbol": "SOL",
+"date": "2026-04-28",
+"close": 137.47
+},
+  {
+"symbol": "SOL",
+"date": "2026-04-29",
+"close": 147.13
+},
+  {
+"symbol": "SOL",
+"date": "2026-04-30",
+"close": 152.08
+},
+  {
+"symbol": "SOL",
+"date": "2026-05-01",
+"close": 151.91
+},
+  {
+"symbol": "SOL",
+"date": "2026-05-02",
+"close": 160.53
+},
+  {
+"symbol": "SOL",
+"date": "2026-05-03",
+"close": 157.86
+},
+  {
+"symbol": "SOL",
+"date": "2026-05-04",
+"close": 158.25
+},
+  {
+"symbol": "SOL",
+"date": "2026-05-05",
+"close": 158.26
+},
+  {
+"symbol": "SOL",
+"date": "2026-05-06",
+"close": 159.99
+},
+  {
+"symbol": "SOL",
+"date": "2026-05-07",
+"close": 160.78
+},
+  {
+"symbol": "SOL",
+"date": "2026-05-08",
+"close": 156.44
+},
+  {
+"symbol": "SOL",
+"date": "2026-05-09",
+"close": 165.19
+},
+  {
+"symbol": "SOL",
+"date": "2026-05-10",
+"close": 167.87
+},
+  {
+"symbol": "SOL",
+"date": "2026-05-11",
+"close": 159.34
+},
+  {
+"symbol": "SOL",
+"date": "2026-05-12",
+"close": 155.29
+},
+  {
+"symbol": "SOL",
+"date": "2026-05-13",
+"close": 158.56
+},
+  {
+"symbol": "SOL",
+"date": "2026-05-14",
+"close": 153.01
+},
+  {
+"symbol": "SOL",
+"date": "2026-05-15",
+"close": 149.36
+},
+  {
+"symbol": "SOL",
+"date": "2026-05-16",
+"close": 144.18
+},
+  {
+"symbol": "SOL",
+"date": "2026-05-17",
+"close": 153.11
+},
+  {
+"symbol": "SOL",
+"date": "2026-05-18",
+"close": 151.27
+},
+  {
+"symbol": "SOL",
+"date": "2026-05-19",
+"close": 155.87
+},
+  {
+"symbol": "SOL",
+"date": "2026-05-20",
+"close": 160.16
+},
+  {
+"symbol": "SOL",
+"date": "2026-05-21",
+"close": 166.77
+},
+  {
+"symbol": "SOL",
+"date": "2026-05-22",
+"close": 166.05
+},
+  {
+"symbol": "SOL",
+"date": "2026-05-23",
+"close": 169.17
+},
+  {
+"symbol": "SOL",
+"date": "2026-05-24",
+"close": 166.39
+},
+  {
+"symbol": "SOL",
+"date": "2026-05-25",
+"close": 166.8
+},
+  {
+"symbol": "SOL",
+"date": "2026-05-26",
+"close": 169.6
+},
+  {
+"symbol": "SOL",
+"date": "2026-05-27",
+"close": 163.74
+},
+  {
+"symbol": "SOL",
+"date": "2026-05-28",
+"close": 161.92
+},
+  {
+"symbol": "SOL",
+"date": "2026-05-29",
+"close": 160.9
+},
+  {
+"symbol": "SOL",
+"date": "2026-05-30",
+"close": 153.0
+},
+  {
+"symbol": "SOL",
+"date": "2026-05-31",
+"close": 155.1
+},
+  {
+"symbol": "SOL",
+"date": "2026-06-01",
+"close": 144.4
+},
+  {
+"symbol": "SOL",
+"date": "2026-06-02",
+"close": 154.48
+},
+  {
+"symbol": "SOL",
+"date": "2026-06-03",
+"close": 150.52
+},
+  {
+"symbol": "SOL",
+"date": "2026-06-04",
+"close": 150.0
+},
+  {
+"symbol": "SOL",
+"date": "2026-06-05",
+"close": 156.11
+},
+  {
+"symbol": "SOL",
+"date": "2026-06-06",
+"close": 164.8
+},
+  {
+"symbol": "SOL",
+"date": "2026-06-07",
+"close": 174.34
+},
+  {
+"symbol": "SOL",
+"date": "2026-06-08",
+"close": 179.96
+},
+  {
+"symbol": "SOL",
+"date": "2026-06-09",
+"close": 168.86
+},
+  {
+"symbol": "SOL",
+"date": "2026-06-10",
+"close": 164.02
+},
+  {
+"symbol": "SOL",
+"date": "2026-06-11",
+"close": 164.53
+},
+  {
+"symbol": "SOL",
+"date": "2026-06-12",
+"close": 161.81
+},
+  {
+"symbol": "SOL",
+"date": "2026-06-13",
+"close": 170.22
+},
+  {
+"symbol": "SOL",
+"date": "2026-06-14",
+"close": 161.98
+},
+  {
+"symbol": "SOL",
+"date": "2026-06-15",
+"close": 163.13
+},
+  {
+"symbol": "SOL",
+"date": "2026-06-16",
+"close": 160.29
+},
+  {
+"symbol": "SOL",
+"date": "2026-06-17",
+"close": 162.2
+},
+  {
+"symbol": "SOL",
+"date": "2026-06-18",
+"close": 163.51
+},
+  {
+"symbol": "SOL",
+"date": "2026-06-19",
+"close": 167.56
+},
+  {
+"symbol": "SOL",
+"date": "2026-06-20",
+"close": 163.78
+},
+  {
+"symbol": "SOL",
+"date": "2026-06-21",
+"close": 153.37
+},
+  {
+"symbol": "SOL",
+"date": "2026-06-22",
+"close": 152.9
+},
+  {
+"symbol": "SOL",
+"date": "2026-06-23",
+"close": 150.33
+},
+  {
+"symbol": "SOL",
+"date": "2026-06-24",
+"close": 147.42
+},
+  {
+"symbol": "SOL",
+"date": "2026-06-25",
+"close": 152.15
+},
+  {
+"symbol": "SOL",
+"date": "2026-06-26",
+"close": 162.28
+},
+  {
+"symbol": "SOL",
+"date": "2026-06-27",
+"close": 173.76
+},
+  {
+"symbol": "SOL",
+"date": "2026-06-28",
+"close": 166.44
+},
+  {
+"symbol": "SOL",
+"date": "2026-06-29",
+"close": 172.49
+},
+  {
+"symbol": "SOL",
+"date": "2026-06-30",
+"close": 175.43
+},
+  {
+"symbol": "SOL",
+"date": "2026-07-01",
+"close": 147.36
+},
+  {
+"symbol": "SOL",
+"date": "2026-07-02",
+"close": 178.62
+},
+  {
+"symbol": "SOL",
+"date": "2026-07-03",
+"close": 179.6
+},
+  {
+"symbol": "SOL",
+"date": "2026-07-04",
+"close": 191.84
+},
+  {
+"symbol": "SOL",
+"date": "2026-07-05",
+"close": 185.86
+},
+  {
+"symbol": "SOL",
+"date": "2026-07-06",
+"close": 186.33
+},
+  {
+"symbol": "SOL",
+"date": "2026-07-07",
+"close": 189.24
+},
+  {
+"symbol": "SOL",
+"date": "2026-07-08",
+"close": 175.02
+},
+  {
+"symbol": "SOL",
+"date": "2026-07-09",
+"close": 198.15
+},
+  {
+"symbol": "SOL",
+"date": "2026-07-10",
+"close": 201.41
+},
+  {
+"symbol": "SOL",
+"date": "2026-07-11",
+"close": 208.99
+},
+  {
+"symbol": "SOL",
+"date": "2026-07-12",
+"close": 214.67
+},
+  {
+"symbol": "SOL",
+"date": "2026-07-13",
+"close": 206.19
+},
+  {
+"symbol": "SOL",
+"date": "2026-07-14",
+"close": 208.79
+},
+  {
+"symbol": "SOL",
+"date": "2026-07-15",
+"close": 213.77
+},
+  {
+"symbol": "SOL",
+"date": "2026-07-16",
+"close": 213.89
+},
+  {
+"symbol": "SOL",
+"date": "2026-07-17",
+"close": 225.43
+},
+  {
+"symbol": "SOL",
+"date": "2026-07-18",
+"close": 216.99
+},
+  {
+"symbol": "SOL",
+"date": "2026-07-19",
+"close": 226.11
+},
+  {
+"symbol": "SOL",
+"date": "2026-07-20",
+"close": 234.75
+},
+  {
+"symbol": "SOL",
+"date": "2026-07-21",
+"close": 247.95
+},
+  {
+"symbol": "SOL",
+"date": "2026-07-22",
+"close": 245.76
+},
+  {
+"symbol": "SOL",
+"date": "2026-07-23",
+"close": 239.73
+},
+  {
+"symbol": "SOL",
+"date": "2026-07-24",
+"close": 241.26
+},
+  {
+"symbol": "SOL",
+"date": "2026-07-25",
+"close": 243.85
+},
+  {
+"symbol": "SOL",
+"date": "2026-07-26",
+"close": 247.54
+},
+  {
+"symbol": "SOL",
+"date": "2026-07-27",
+"close": 258.08
+},
+  {
+"symbol": "SOL",
+"date": "2026-07-28",
+"close": 257.69
+},
+  {
+"symbol": "SOL",
+"date": "2026-07-29",
+"close": 258.83
+},
+  {
+"symbol": "SOL",
+"date": "2026-07-30",
+"close": 257.27
+},
+  {
+"symbol": "SOL",
+"date": "2026-07-31",
+"close": 256.61
+},
+  {
+"symbol": "SOL",
+"date": "2026-08-01",
+"close": 239.17
+},
+  {
+"symbol": "SOL",
+"date": "2026-08-02",
+"close": 241.98
+},
+  {
+"symbol": "SOL",
+"date": "2026-08-03",
+"close": 246.31
+},
+  {
+"symbol": "SOL",
+"date": "2026-08-04",
+"close": 240.2
+},
+  {
+"symbol": "SOL",
+"date": "2026-08-05",
+"close": 242.14
+},
+  {
+"symbol": "SOL",
+"date": "2026-08-06",
+"close": 247.7
+},
+  {
+"symbol": "SOL",
+"date": "2026-08-07",
+"close": 250.48
+},
+  {
+"symbol": "SOL",
+"date": "2026-08-08",
+"close": 252.8
+},
+  {
+"symbol": "SOL",
+"date": "2026-08-09",
+"close": 267.69
+},
+  {
+"symbol": "SOL",
+"date": "2026-08-10",
+"close": 280.55
+},
+  {
+"symbol": "SOL",
+"date": "2026-08-11",
+"close": 269.5
+},
+  {
+"symbol": "SOL",
+"date": "2026-08-12",
+"close": 265.46
+},
+  {
+"symbol": "SOL",
+"date": "2026-08-13",
+"close": 256.96
+},
+  {
+"symbol": "SOL",
+"date": "2026-08-14",
+"close": 257.13
+},
+  {
+"symbol": "SOL",
+"date": "2026-08-15",
+"close": 255.59
+},
+  {
+"symbol": "SOL",
+"date": "2026-08-16",
+"close": 253.55
+},
+  {
+"symbol": "SOL",
+"date": "2026-08-17",
+"close": 253.23
+},
+  {
+"symbol": "SOL",
+"date": "2026-08-18",
+"close": 244.94
+},
+  {
+"symbol": "SOL",
+"date": "2026-08-19",
+"close": 247.1
+},
+  {
+"symbol": "NVDA",
+"date": "2026-04-22",
+"close": 118.0
+},
+  {
+"symbol": "NVDA",
+"date": "2026-04-23",
+"close": 116.27
+},
+  {
+"symbol": "NVDA",
+"date": "2026-04-24",
+"close": 114.61
+},
+  {
+"symbol": "NVDA",
+"date": "2026-04-25",
+"close": 114.7
+},
+  {
+"symbol": "NVDA",
+"date": "2026-04-26",
+"close": 114.69
+},
+  {
+"symbol": "NVDA",
+"date": "2026-04-27",
+"close": 114.29
+},
+  {
+"symbol": "NVDA",
+"date": "2026-04-28",
+"close": 114.27
+},
+  {
+"symbol": "NVDA",
+"date": "2026-04-29",
+"close": 114.21
+},
+  {
+"symbol": "NVDA",
+"date": "2026-04-30",
+"close": 117.06
+},
+  {
+"symbol": "NVDA",
+"date": "2026-05-01",
+"close": 120.33
+},
+  {
+"symbol": "NVDA",
+"date": "2026-05-02",
+"close": 119.37
+},
+  {
+"symbol": "NVDA",
+"date": "2026-05-03",
+"close": 118.65
+},
+  {
+"symbol": "NVDA",
+"date": "2026-05-04",
+"close": 116.89
+},
+  {
+"symbol": "NVDA",
+"date": "2026-05-05",
+"close": 119.22
+},
+  {
+"symbol": "NVDA",
+"date": "2026-05-06",
+"close": 118.49
+},
+  {
+"symbol": "NVDA",
+"date": "2026-05-07",
+"close": 115.66
+},
+  {
+"symbol": "NVDA",
+"date": "2026-05-08",
+"close": 116.18
+},
+  {
+"symbol": "NVDA",
+"date": "2026-05-09",
+"close": 115.58
+},
+  {
+"symbol": "NVDA",
+"date": "2026-05-10",
+"close": 115.71
+},
+  {
+"symbol": "NVDA",
+"date": "2026-05-11",
+"close": 117.19
+},
+  {
+"symbol": "NVDA",
+"date": "2026-05-12",
+"close": 116.68
+},
+  {
+"symbol": "NVDA",
+"date": "2026-05-13",
+"close": 117.1
+},
+  {
+"symbol": "NVDA",
+"date": "2026-05-14",
+"close": 114.97
+},
+  {
+"symbol": "NVDA",
+"date": "2026-05-15",
+"close": 115.72
+},
+  {
+"symbol": "NVDA",
+"date": "2026-05-16",
+"close": 115.6
+},
+  {
+"symbol": "NVDA",
+"date": "2026-05-17",
+"close": 114.73
+},
+  {
+"symbol": "NVDA",
+"date": "2026-05-18",
+"close": 113.97
+},
+  {
+"symbol": "NVDA",
+"date": "2026-05-19",
+"close": 114.02
+},
+  {
+"symbol": "NVDA",
+"date": "2026-05-20",
+"close": 113.66
+},
+  {
+"symbol": "NVDA",
+"date": "2026-05-21",
+"close": 115.8
+},
+  {
+"symbol": "NVDA",
+"date": "2026-05-22",
+"close": 116.94
+},
+  {
+"symbol": "NVDA",
+"date": "2026-05-23",
+"close": 114.47
+},
+  {
+"symbol": "NVDA",
+"date": "2026-05-24",
+"close": 116.08
+},
+  {
+"symbol": "NVDA",
+"date": "2026-05-25",
+"close": 117.22
+},
+  {
+"symbol": "NVDA",
+"date": "2026-05-26",
+"close": 116.35
+},
+  {
+"symbol": "NVDA",
+"date": "2026-05-27",
+"close": 113.38
+},
+  {
+"symbol": "NVDA",
+"date": "2026-05-28",
+"close": 115.0
+},
+  {
+"symbol": "NVDA",
+"date": "2026-05-29",
+"close": 114.08
+},
+  {
+"symbol": "NVDA",
+"date": "2026-05-30",
+"close": 116.02
+},
+  {
+"symbol": "NVDA",
+"date": "2026-05-31",
+"close": 118.75
+},
+  {
+"symbol": "NVDA",
+"date": "2026-06-01",
+"close": 121.23
+},
+  {
+"symbol": "NVDA",
+"date": "2026-06-02",
+"close": 124.39
+},
+  {
+"symbol": "NVDA",
+"date": "2026-06-03",
+"close": 127.38
+},
+  {
+"symbol": "NVDA",
+"date": "2026-06-04",
+"close": 124.62
+},
+  {
+"symbol": "NVDA",
+"date": "2026-06-05",
+"close": 128.71
+},
+  {
+"symbol": "NVDA",
+"date": "2026-06-06",
+"close": 131.12
+},
+  {
+"symbol": "NVDA",
+"date": "2026-06-07",
+"close": 133.06
+},
+  {
+"symbol": "NVDA",
+"date": "2026-06-08",
+"close": 134.69
+},
+  {
+"symbol": "NVDA",
+"date": "2026-06-09",
+"close": 135.58
+},
+  {
+"symbol": "NVDA",
+"date": "2026-06-10",
+"close": 137.87
+},
+  {
+"symbol": "NVDA",
+"date": "2026-06-11",
+"close": 141.07
+},
+  {
+"symbol": "NVDA",
+"date": "2026-06-12",
+"close": 141.81
+},
+  {
+"symbol": "NVDA",
+"date": "2026-06-13",
+"close": 144.27
+},
+  {
+"symbol": "NVDA",
+"date": "2026-06-14",
+"close": 147.18
+},
+  {
+"symbol": "NVDA",
+"date": "2026-06-15",
+"close": 145.31
+},
+  {
+"symbol": "NVDA",
+"date": "2026-06-16",
+"close": 158.39
+},
+  {
+"symbol": "NVDA",
+"date": "2026-06-17",
+"close": 150.89
+},
+  {
+"symbol": "NVDA",
+"date": "2026-06-18",
+"close": 156.5
+},
+  {
+"symbol": "NVDA",
+"date": "2026-06-19",
+"close": 155.62
+},
+  {
+"symbol": "NVDA",
+"date": "2026-06-20",
+"close": 155.76
+},
+  {
+"symbol": "NVDA",
+"date": "2026-06-21",
+"close": 153.71
+},
+  {
+"symbol": "NVDA",
+"date": "2026-06-22",
+"close": 156.76
+},
+  {
+"symbol": "NVDA",
+"date": "2026-06-23",
+"close": 159.11
+},
+  {
+"symbol": "NVDA",
+"date": "2026-06-24",
+"close": 161.88
+},
+  {
+"symbol": "NVDA",
+"date": "2026-06-25",
+"close": 165.2
+},
+  {
+"symbol": "NVDA",
+"date": "2026-06-26",
+"close": 169.28
+},
+  {
+"symbol": "NVDA",
+"date": "2026-06-27",
+"close": 167.64
+},
+  {
+"symbol": "NVDA",
+"date": "2026-06-28",
+"close": 168.73
+},
+  {
+"symbol": "NVDA",
+"date": "2026-06-29",
+"close": 167.48
+},
+  {
+"symbol": "NVDA",
+"date": "2026-06-30",
+"close": 172.16
+},
+  {
+"symbol": "NVDA",
+"date": "2026-07-01",
+"close": 172.75
+},
+  {
+"symbol": "NVDA",
+"date": "2026-07-02",
+"close": 174.8
+},
+  {
+"symbol": "NVDA",
+"date": "2026-07-03",
+"close": 172.76
+},
+  {
+"symbol": "NVDA",
+"date": "2026-07-04",
+"close": 170.86
+},
+  {
+"symbol": "NVDA",
+"date": "2026-07-05",
+"close": 165.41
+},
+  {
+"symbol": "NVDA",
+"date": "2026-07-06",
+"close": 166.75
+},
+  {
+"symbol": "NVDA",
+"date": "2026-07-07",
+"close": 167.36
+},
+  {
+"symbol": "NVDA",
+"date": "2026-07-08",
+"close": 169.19
+},
+  {
+"symbol": "NVDA",
+"date": "2026-07-09",
+"close": 171.47
+},
+  {
+"symbol": "NVDA",
+"date": "2026-07-10",
+"close": 176.3
+},
+  {
+"symbol": "NVDA",
+"date": "2026-07-11",
+"close": 180.01
+},
+  {
+"symbol": "NVDA",
+"date": "2026-07-12",
+"close": 183.92
+},
+  {
+"symbol": "NVDA",
+"date": "2026-07-13",
+"close": 183.23
+},
+  {
+"symbol": "NVDA",
+"date": "2026-07-14",
+"close": 188.24
+},
+  {
+"symbol": "NVDA",
+"date": "2026-07-15",
+"close": 191.55
+},
+  {
+"symbol": "NVDA",
+"date": "2026-07-16",
+"close": 190.98
+},
+  {
+"symbol": "NVDA",
+"date": "2026-07-17",
+"close": 187.2
+},
+  {
+"symbol": "NVDA",
+"date": "2026-07-18",
+"close": 185.92
+},
+  {
+"symbol": "NVDA",
+"date": "2026-07-19",
+"close": 191.96
+},
+  {
+"symbol": "NVDA",
+"date": "2026-07-20",
+"close": 186.52
+},
+  {
+"symbol": "NVDA",
+"date": "2026-07-21",
+"close": 192.95
+},
+  {
+"symbol": "NVDA",
+"date": "2026-07-22",
+"close": 199.57
+},
+  {
+"symbol": "NVDA",
+"date": "2026-07-23",
+"close": 206.23
+},
+  {
+"symbol": "NVDA",
+"date": "2026-07-24",
+"close": 207.19
+},
+  {
+"symbol": "NVDA",
+"date": "2026-07-25",
+"close": 210.67
+},
+  {
+"symbol": "NVDA",
+"date": "2026-07-26",
+"close": 215.68
+},
+  {
+"symbol": "NVDA",
+"date": "2026-07-27",
+"close": 220.93
+},
+  {
+"symbol": "NVDA",
+"date": "2026-07-28",
+"close": 220.26
+},
+  {
+"symbol": "NVDA",
+"date": "2026-07-29",
+"close": 222.02
+},
+  {
+"symbol": "NVDA",
+"date": "2026-07-30",
+"close": 219.02
+},
+  {
+"symbol": "NVDA",
+"date": "2026-07-31",
+"close": 219.86
+},
+  {
+"symbol": "NVDA",
+"date": "2026-08-01",
+"close": 212.27
+},
+  {
+"symbol": "NVDA",
+"date": "2026-08-02",
+"close": 215.16
+},
+  {
+"symbol": "NVDA",
+"date": "2026-08-03",
+"close": 220.13
+},
+  {
+"symbol": "NVDA",
+"date": "2026-08-04",
+"close": 213.51
+},
+  {
+"symbol": "NVDA",
+"date": "2026-08-05",
+"close": 211.74
+},
+  {
+"symbol": "NVDA",
+"date": "2026-08-06",
+"close": 210.46
+},
+  {
+"symbol": "NVDA",
+"date": "2026-08-07",
+"close": 209.37
+},
+  {
+"symbol": "NVDA",
+"date": "2026-08-08",
+"close": 212.61
+},
+  {
+"symbol": "NVDA",
+"date": "2026-08-09",
+"close": 213.51
+},
+  {
+"symbol": "NVDA",
+"date": "2026-08-10",
+"close": 210.5
+},
+  {
+"symbol": "NVDA",
+"date": "2026-08-11",
+"close": 207.84
+},
+  {
+"symbol": "NVDA",
+"date": "2026-08-12",
+"close": 209.76
+},
+  {
+"symbol": "NVDA",
+"date": "2026-08-13",
+"close": 207.99
+},
+  {
+"symbol": "NVDA",
+"date": "2026-08-14",
+"close": 208.58
+},
+  {
+"symbol": "NVDA",
+"date": "2026-08-15",
+"close": 207.96
+},
+  {
+"symbol": "NVDA",
+"date": "2026-08-16",
+"close": 209.91
+},
+  {
+"symbol": "NVDA",
+"date": "2026-08-17",
+"close": 214.99
+},
+  {
+"symbol": "NVDA",
+"date": "2026-08-18",
+"close": 215.62
+},
+  {
+"symbol": "NVDA",
+"date": "2026-08-19",
+"close": 219.24
+},
+  {
+"symbol": "TLT",
+"date": "2026-04-22",
+"close": 92.0
+},
+  {
+"symbol": "TLT",
+"date": "2026-04-23",
+"close": 92.18
+},
+  {
+"symbol": "TLT",
+"date": "2026-04-24",
+"close": 92.2
+},
+  {
+"symbol": "TLT",
+"date": "2026-04-25",
+"close": 91.3
+},
+  {
+"symbol": "TLT",
+"date": "2026-04-26",
+"close": 91.98
+},
+  {
+"symbol": "TLT",
+"date": "2026-04-27",
+"close": 92.54
+},
+  {
+"symbol": "TLT",
+"date": "2026-04-28",
+"close": 93.09
+},
+  {
+"symbol": "TLT",
+"date": "2026-04-29",
+"close": 92.93
+},
+  {
+"symbol": "TLT",
+"date": "2026-04-30",
+"close": 92.83
+},
+  {
+"symbol": "TLT",
+"date": "2026-05-01",
+"close": 92.12
+},
+  {
+"symbol": "TLT",
+"date": "2026-05-02",
+"close": 92.19
+},
+  {
+"symbol": "TLT",
+"date": "2026-05-03",
+"close": 92.58
+},
+  {
+"symbol": "TLT",
+"date": "2026-05-04",
+"close": 92.15
+},
+  {
+"symbol": "TLT",
+"date": "2026-05-05",
+"close": 91.84
+},
+  {
+"symbol": "TLT",
+"date": "2026-05-06",
+"close": 92.1
+},
+  {
+"symbol": "TLT",
+"date": "2026-05-07",
+"close": 92.97
+},
+  {
+"symbol": "TLT",
+"date": "2026-05-08",
+"close": 92.64
+},
+  {
+"symbol": "TLT",
+"date": "2026-05-09",
+"close": 92.74
+},
+  {
+"symbol": "TLT",
+"date": "2026-05-10",
+"close": 93.48
+},
+  {
+"symbol": "TLT",
+"date": "2026-05-11",
+"close": 92.59
+},
+  {
+"symbol": "TLT",
+"date": "2026-05-12",
+"close": 92.68
+},
+  {
+"symbol": "TLT",
+"date": "2026-05-13",
+"close": 92.98
+},
+  {
+"symbol": "TLT",
+"date": "2026-05-14",
+"close": 92.86
+},
+  {
+"symbol": "TLT",
+"date": "2026-05-15",
+"close": 92.41
+},
+  {
+"symbol": "TLT",
+"date": "2026-05-16",
+"close": 92.4
+},
+  {
+"symbol": "TLT",
+"date": "2026-05-17",
+"close": 93.16
+},
+  {
+"symbol": "TLT",
+"date": "2026-05-18",
+"close": 92.98
+},
+  {
+"symbol": "TLT",
+"date": "2026-05-19",
+"close": 92.62
+},
+  {
+"symbol": "TLT",
+"date": "2026-05-20",
+"close": 92.1
+},
+  {
+"symbol": "TLT",
+"date": "2026-05-21",
+"close": 92.06
+},
+  {
+"symbol": "TLT",
+"date": "2026-05-22",
+"close": 92.54
+},
+  {
+"symbol": "TLT",
+"date": "2026-05-23",
+"close": 92.8
+},
+  {
+"symbol": "TLT",
+"date": "2026-05-24",
+"close": 92.86
+},
+  {
+"symbol": "TLT",
+"date": "2026-05-25",
+"close": 92.67
+},
+  {
+"symbol": "TLT",
+"date": "2026-05-26",
+"close": 92.99
+},
+  {
+"symbol": "TLT",
+"date": "2026-05-27",
+"close": 93.24
+},
+  {
+"symbol": "TLT",
+"date": "2026-05-28",
+"close": 92.57
+},
+  {
+"symbol": "TLT",
+"date": "2026-05-29",
+"close": 92.49
+},
+  {
+"symbol": "TLT",
+"date": "2026-05-30",
+"close": 91.93
+},
+  {
+"symbol": "TLT",
+"date": "2026-05-31",
+"close": 91.38
+},
+  {
+"symbol": "TLT",
+"date": "2026-06-01",
+"close": 91.91
+},
+  {
+"symbol": "TLT",
+"date": "2026-06-02",
+"close": 92.14
+},
+  {
+"symbol": "TLT",
+"date": "2026-06-03",
+"close": 92.37
+},
+  {
+"symbol": "TLT",
+"date": "2026-06-04",
+"close": 92.78
+},
+  {
+"symbol": "TLT",
+"date": "2026-06-05",
+"close": 93.29
+},
+  {
+"symbol": "TLT",
+"date": "2026-06-06",
+"close": 93.41
+},
+  {
+"symbol": "TLT",
+"date": "2026-06-07",
+"close": 93.14
+},
+  {
+"symbol": "TLT",
+"date": "2026-06-08",
+"close": 93.11
+},
+  {
+"symbol": "TLT",
+"date": "2026-06-09",
+"close": 93.85
+},
+  {
+"symbol": "TLT",
+"date": "2026-06-10",
+"close": 94.37
+},
+  {
+"symbol": "TLT",
+"date": "2026-06-11",
+"close": 94.04
+},
+  {
+"symbol": "TLT",
+"date": "2026-06-12",
+"close": 94.0
+},
+  {
+"symbol": "TLT",
+"date": "2026-06-13",
+"close": 93.2
+},
+  {
+"symbol": "TLT",
+"date": "2026-06-14",
+"close": 93.07
+},
+  {
+"symbol": "TLT",
+"date": "2026-06-15",
+"close": 93.31
+},
+  {
+"symbol": "TLT",
+"date": "2026-06-16",
+"close": 92.85
+},
+  {
+"symbol": "TLT",
+"date": "2026-06-17",
+"close": 93.15
+},
+  {
+"symbol": "TLT",
+"date": "2026-06-18",
+"close": 92.53
+},
+  {
+"symbol": "TLT",
+"date": "2026-06-19",
+"close": 92.5
+},
+  {
+"symbol": "TLT",
+"date": "2026-06-20",
+"close": 92.26
+},
+  {
+"symbol": "TLT",
+"date": "2026-06-21",
+"close": 91.37
+},
+  {
+"symbol": "TLT",
+"date": "2026-06-22",
+"close": 90.62
+},
+  {
+"symbol": "TLT",
+"date": "2026-06-23",
+"close": 90.96
+},
+  {
+"symbol": "TLT",
+"date": "2026-06-24",
+"close": 90.5
+},
+  {
+"symbol": "TLT",
+"date": "2026-06-25",
+"close": 91.28
+},
+  {
+"symbol": "TLT",
+"date": "2026-06-26",
+"close": 91.43
+},
+  {
+"symbol": "TLT",
+"date": "2026-06-27",
+"close": 91.75
+},
+  {
+"symbol": "TLT",
+"date": "2026-06-28",
+"close": 91.74
+},
+  {
+"symbol": "TLT",
+"date": "2026-06-29",
+"close": 91.69
+},
+  {
+"symbol": "TLT",
+"date": "2026-06-30",
+"close": 91.94
+},
+  {
+"symbol": "TLT",
+"date": "2026-07-01",
+"close": 91.54
+},
+  {
+"symbol": "TLT",
+"date": "2026-07-02",
+"close": 91.43
+},
+  {
+"symbol": "TLT",
+"date": "2026-07-03",
+"close": 90.82
+},
+  {
+"symbol": "TLT",
+"date": "2026-07-04",
+"close": 90.99
+},
+  {
+"symbol": "TLT",
+"date": "2026-07-05",
+"close": 90.65
+},
+  {
+"symbol": "TLT",
+"date": "2026-07-06",
+"close": 89.52
+},
+  {
+"symbol": "TLT",
+"date": "2026-07-07",
+"close": 88.68
+},
+  {
+"symbol": "TLT",
+"date": "2026-07-08",
+"close": 88.71
+},
+  {
+"symbol": "TLT",
+"date": "2026-07-09",
+"close": 89.02
+},
+  {
+"symbol": "TLT",
+"date": "2026-07-10",
+"close": 89.53
+},
+  {
+"symbol": "TLT",
+"date": "2026-07-11",
+"close": 90.6
+},
+  {
+"symbol": "TLT",
+"date": "2026-07-12",
+"close": 91.3
+},
+  {
+"symbol": "TLT",
+"date": "2026-07-13",
+"close": 91.41
+},
+  {
+"symbol": "TLT",
+"date": "2026-07-14",
+"close": 91.55
+},
+  {
+"symbol": "TLT",
+"date": "2026-07-15",
+"close": 91.58
+},
+  {
+"symbol": "TLT",
+"date": "2026-07-16",
+"close": 92.4
+},
+  {
+"symbol": "TLT",
+"date": "2026-07-17",
+"close": 92.47
+},
+  {
+"symbol": "TLT",
+"date": "2026-07-18",
+"close": 92.48
+},
+  {
+"symbol": "TLT",
+"date": "2026-07-19",
+"close": 92.01
+},
+  {
+"symbol": "TLT",
+"date": "2026-07-20",
+"close": 91.63
+},
+  {
+"symbol": "TLT",
+"date": "2026-07-21",
+"close": 91.95
+},
+  {
+"symbol": "TLT",
+"date": "2026-07-22",
+"close": 92.03
+},
+  {
+"symbol": "TLT",
+"date": "2026-07-23",
+"close": 92.16
+},
+  {
+"symbol": "TLT",
+"date": "2026-07-24",
+"close": 92.61
+},
+  {
+"symbol": "TLT",
+"date": "2026-07-25",
+"close": 92.43
+},
+  {
+"symbol": "TLT",
+"date": "2026-07-26",
+"close": 92.95
+},
+  {
+"symbol": "TLT",
+"date": "2026-07-27",
+"close": 92.69
+},
+  {
+"symbol": "TLT",
+"date": "2026-07-28",
+"close": 92.92
+},
+  {
+"symbol": "TLT",
+"date": "2026-07-29",
+"close": 92.6
+},
+  {
+"symbol": "TLT",
+"date": "2026-07-30",
+"close": 92.1
+},
+  {
+"symbol": "TLT",
+"date": "2026-07-31",
+"close": 92.55
+},
+  {
+"symbol": "TLT",
+"date": "2026-08-01",
+"close": 91.81
+},
+  {
+"symbol": "TLT",
+"date": "2026-08-02",
+"close": 92.13
+},
+  {
+"symbol": "TLT",
+"date": "2026-08-03",
+"close": 91.9
+},
+  {
+"symbol": "TLT",
+"date": "2026-08-04",
+"close": 90.93
+},
+  {
+"symbol": "TLT",
+"date": "2026-08-05",
+"close": 90.75
+},
+  {
+"symbol": "TLT",
+"date": "2026-08-06",
+"close": 91.21
+},
+  {
+"symbol": "TLT",
+"date": "2026-08-07",
+"close": 90.75
+},
+  {
+"symbol": "TLT",
+"date": "2026-08-08",
+"close": 90.31
+},
+  {
+"symbol": "TLT",
+"date": "2026-08-09",
+"close": 89.5
+},
+  {
+"symbol": "TLT",
+"date": "2026-08-10",
+"close": 89.07
+},
+  {
+"symbol": "TLT",
+"date": "2026-08-11",
+"close": 89.07
+},
+  {
+"symbol": "TLT",
+"date": "2026-08-12",
+"close": 88.91
+},
+  {
+"symbol": "TLT",
+"date": "2026-08-13",
+"close": 89.67
+},
+  {
+"symbol": "TLT",
+"date": "2026-08-14",
+"close": 89.44
+},
+  {
+"symbol": "TLT",
+"date": "2026-08-15",
+"close": 89.93
+},
+  {
+"symbol": "TLT",
+"date": "2026-08-16",
+"close": 90.76
+},
+  {
+"symbol": "TLT",
+"date": "2026-08-17",
+"close": 91.92
+},
+  {
+"symbol": "TLT",
+"date": "2026-08-18",
+"close": 92.48
+},
+  {
+"symbol": "TLT",
+"date": "2026-08-19",
+"close": 93.3
+}
+]

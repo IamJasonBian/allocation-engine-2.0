@@ -20,7 +20,7 @@ def storage_dir(tmp_path, monkeypatch):
 
 def test_read_seeds_from_samples(storage_dir):
     fills = local.read_trade_fills()
-    assert len(fills) == 4
+    assert len(fills) == 12
     assert fills[0]["symbol"] == "BTC"
     assert fills[0]["ts"].tzinfo is not None
     assert (storage_dir / "trading.db").exists()
@@ -37,6 +37,43 @@ def test_write_roundtrip(storage_dir):
     assert fills[0]["ts"] == ts
 
 
+def test_price_history_seeds_and_reads(storage_dir):
+    closes = local.read_price_history("btc")
+    assert len(closes) == 120
+    assert closes[0]["date"] == "2026-04-22"
+    assert closes[0]["close"] == 42000.0
+    assert closes == sorted(closes, key=lambda c: c["date"])
+    assert local.read_price_history("UNKNOWN") == []
+
+
+def test_risk_profile_seeds_from_fills(storage_dir):
+    from app.pnl import format_ticker_risk, pnl_risk
+    local.read_trade_fills()  # seeds orders + closes, then risk JSON
+    path = storage_dir / "risk_profile.json"
+    payload = json.loads(path.read_text())
+    expected = pnl_risk(local.read_trade_fills(), local.read_price_history("BTC"), "BTC")
+    btc = {
+        "position": expected["position"],
+        "closeStdUsd": expected["closeStdUsd"],
+        "growthRatePct": expected["growthRatePct"],
+        "growthRateMeanPct": expected["growthRateMeanPct"],
+        "growthRateStdPct": expected["growthRateStdPct"],
+        "riskAdjustedGrowthRate": expected["riskAdjustedGrowthRate"],
+        "growthRateZ": expected["growthRateZ"],
+        "riskUsd": expected["riskUsd"],
+        "variance": expected["variance"],
+        "monthlyGrowth": expected["monthlyGrowth"],
+        "text": format_ticker_risk("BTC", expected),
+    }
+    assert payload["BTC"] == btc
+    assert "BTC" in payload["portfolio"]["symbols"]
+    ticker_risk = sum(
+        payload[s]["riskUsd"] for s in payload["portfolio"]["symbols"]
+    )
+    assert payload["portfolio"]["riskUsd"] == pytest.approx(ticker_risk, abs=0.01)
+    assert local.read_risk_profile() == payload
+
+
 def test_stock_orders_queryable_in_trading_db_shape(storage_dir):
     """The exact Trading DB column list works against the local SQLite db."""
     local.read_trade_fills()  # triggers seed
@@ -46,9 +83,9 @@ def test_stock_orders_queryable_in_trading_db_shape(storage_dir):
             " quantity, limit_price, stop_price, filled_quantity, average_price,"
             " created_at, updated_at, raw, ingested_at FROM stock_orders"
         ).fetchall()
-    assert len(rows) == 4
+    assert len(rows) == 12
     order_ids = {r[0] for r in rows}
-    assert order_ids == {"sample-0001", "sample-0002", "sample-0003", "sample-0004"}
+    assert order_ids == {f"sample-{i:04d}" for i in range(1, 13)}
     assert all(json.loads(r[13]) is not None for r in rows)  # raw column is JSON
 
 

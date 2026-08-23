@@ -127,3 +127,90 @@ def test_compute_pnl_total_with_mark_prices():
     assert sym["unrealizedPnL"] == pytest.approx(250.0)
     assert sym["totalPnL"] == pytest.approx(750.0)
     assert sym["markPrice"] == pytest.approx(15.0)
+
+
+def test_equity_log_series_variance_and_monthly_growth():
+    from math import exp, log
+    from statistics import variance
+    from app.pnl import equity_log_series
+    points = [
+        {"date": "2026-01-30", "close": 100.0, "position": 2.0},
+        {"date": "2026-01-31", "close": 110.0, "position": 2.0},
+        {"date": "2026-02-01", "close": 105.0, "position": 2.0},
+        {"date": "2026-02-02", "close": 115.0, "position": 2.0},
+    ]
+    out = equity_log_series(points)
+    equities = [200.0, 220.0, 210.0, 230.0]
+    dlog = [log(equities[i] / equities[i - 1]) for i in range(1, 4)]
+    daily = out["daily"]
+    assert [p["date"] for p in daily] == [p["date"] for p in points]
+    assert [p["equity"] for p in daily] == equities
+    assert daily[0]["logReturn"] is None
+    assert [p["logReturn"] for p in daily[1:]] == pytest.approx(dlog, abs=1e-9)
+    assert out["variance"] == pytest.approx(variance(dlog), abs=1e-9)
+    # Jan: only 100->110; Feb: 110->105->115
+    jan = log(220 / 200)
+    feb = log(210 / 220) + log(230 / 210)
+    months = {m["month"]: m["growthRatePct"] for m in out["monthlyGrowth"]}
+    assert months["2026-01"] == pytest.approx((exp(jan) - 1) * 100, abs=0.001)
+    assert months["2026-02"] == pytest.approx((exp(feb) - 1) * 100, abs=0.001)
+
+
+def test_ticker_risk_model_std_and_standardized_growth():
+    from statistics import mean, stdev
+    from app.pnl import ticker_risk_model
+    out = ticker_risk_model([100.0, 110.0, 105.0, 115.0])
+    gr = [110 / 100 - 1, 105 / 110 - 1, 115 / 105 - 1]
+    mu, sig = mean(gr), stdev(gr)
+    z = [(g - mu) / sig for g in gr]
+    assert out["closeStdUsd"] == pytest.approx(stdev([100.0, 110.0, 105.0, 115.0]), abs=0.01)
+    assert out["growthRatePct"] == pytest.approx(mu * 100, abs=0.001)
+    assert out["growthRateMeanPct"] == pytest.approx(mu * 100, abs=0.001)
+    assert out["growthRateStdPct"] == pytest.approx(sig * 100, abs=0.001)
+    assert out["riskAdjustedGrowthRate"] == pytest.approx(mu / sig, abs=0.001)
+    assert out["growthRateZ"] == pytest.approx(z[-1], abs=0.001)
+    assert out["growthRateZSeries"] == pytest.approx(z, abs=0.001)
+
+
+def test_pnl_risk_ticker_close_and_growth_rate_std():
+    # Long 2 units from day 1 at 100; closes 100, 110, 105, 115.
+    from statistics import stdev
+    from app.pnl import pnl_risk
+    fills = [_fill("BTC", "BUY", 2, 100.0, 10)]
+    closes = [
+        {"date": (NOW - timedelta(days=10 - i)).date().isoformat(), "close": c}
+        for i, c in enumerate([100.0, 110.0, 105.0, 115.0])
+    ]
+    out = pnl_risk(fills, closes, "BTC")
+    assert out["method"] == "additive_ticker_vol"
+    assert out["observations"] == 4
+    assert out["position"] == 2
+    assert [p["totalPnl"] for p in out["series"]] == [0.0, 20.0, 10.0, 30.0]
+    close_std = stdev([100.0, 110.0, 105.0, 115.0])
+    assert out["closeStdUsd"] == pytest.approx(close_std, abs=0.01)
+    gr = [110 / 100 - 1, 105 / 110 - 1, 115 / 105 - 1]
+    gr_std = stdev(gr)
+    assert out["growthRateStdPct"] == pytest.approx(gr_std * 100, abs=0.001)
+    # 1σ daily USD: |position| × last close × stdev(growth rates)
+    assert out["riskUsd"] == pytest.approx(2 * 115.0 * gr_std, abs=0.01)
+
+
+def test_format_ticker_risk_telegram_text():
+    from app.pnl import format_ticker_risk, pnl_risk
+    fills = [_fill("BTC", "BUY", 2, 100.0, 10)]
+    closes = [
+        {"date": (NOW - timedelta(days=10 - i)).date().isoformat(), "close": c}
+        for i, c in enumerate([100.0, 110.0, 105.0, 115.0])
+    ]
+    risk = pnl_risk(fills, closes, "BTC")
+    text = format_ticker_risk("BTC", risk)
+    assert text == (
+        f"BTC risk\n"
+        f"pos 2.0\n"
+        f"σ ${risk['riskUsd']}\n"
+        f"close σ ${risk['closeStdUsd']}\n"
+        f"GR {risk['growthRatePct']}%\n"
+        f"RA GR {risk['riskAdjustedGrowthRate']}\n"
+        f"GR σ {risk['growthRateStdPct']}%\n"
+        f"var {risk['variance']:.6f}"
+    )

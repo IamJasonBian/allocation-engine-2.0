@@ -13,7 +13,9 @@
     "average_price": 42000.0,
     "created_at": "2026-04-22T00:00:00+00:00",
     "updated_at": "2026-04-22T00:00:00+00:00",
-    "raw": {"source": "sample"},
+    "raw": {
+      "source": "sample"
+    },
     "ingested_at": "2026-04-22T00:00:00+00:00"
   },
   {
@@ -30,7 +32,9 @@
     "average_price": 55000.0,
     "created_at": "2026-06-21T00:00:00+00:00",
     "updated_at": "2026-06-21T00:00:00+00:00",
-    "raw": {"source": "sample"},
+    "raw": {
+      "source": "sample"
+    },
     "ingested_at": "2026-06-21T00:00:00+00:00"
   },
   {
@@ -47,7 +51,9 @@
     "average_price": 70000.0,
     "created_at": "2026-08-10T00:00:00+00:00",
     "updated_at": "2026-08-10T00:00:00+00:00",
-    "raw": {"source": "sample"},
+    "raw": {
+      "source": "sample"
+    },
     "ingested_at": "2026-08-10T00:00:00+00:00"
   },
   {
@@ -64,7 +70,161 @@
     "average_price": 65000.0,
     "created_at": "2026-08-18T00:00:00+00:00",
     "updated_at": "2026-08-18T00:00:00+00:00",
-    "raw": {"source": "sample"},
+    "raw": {
+      "source": "sample"
+    },
     "ingested_at": "2026-08-18T00:00:00+00:00"
+  },
+  {
+    "order_id": "sample-0005",
+    "symbol": "ETH",
+    "side": "BUY",
+    "order_type": "market",
+    "trigger_type": "immediate",
+    "state": "filled",
+    "quantity": 1.5,
+    "limit_price": null,
+    "stop_price": null,
+    "filled_quantity": 1.5,
+    "average_price": 2124.64,
+    "created_at": "2026-04-25T00:00:00+00:00",
+    "updated_at": "2026-04-25T00:00:00+00:00",
+    "raw": {
+      "source": "sample"
+    },
+    "ingested_at": "2026-04-25T00:00:00+00:00"
+  },
+  {
+    "order_id": "sample-0006",
+    "symbol": "ETH",
+    "side": "BUY",
+    "order_type": "market",
+    "trigger_type": "immediate",
+    "state": "filled",
+    "quantity": 1.0,
+    "limit_price": null,
+    "stop_price": null,
+    "filled_quantity": 1.0,
+    "average_price": 2539.02,
+    "created_at": "2026-06-01T00:00:00+00:00",
+    "updated_at": "2026-06-01T00:00:00+00:00",
+    "raw": {
+      "source": "sample"
+    },
+    "ingested_at": "2026-06-01T00:00:00+00:00"
+  },
+  {
+    "order_id": "sample-0007",
+    "symbol": "SOL",
+    "side": "BUY",
+    "order_type": "market",
+    "trigger_type": "immediate",
+    "state": "filled",
+    "quantity": 40,
+    "limit_price": null,
+    "stop_price": null,
+    "filled_quantity": 40,
+    "average_price": 160.53,
+    "created_at": "2026-05-02T00:00:00+00:00",
+    "updated_at": "2026-05-02T00:00:00+00:00",
+    "raw": {
+      "source": "sample"
+    },
+    "ingested_at": "2026-05-02T00:00:00+00:00"
+  },
+  {
+    "order_id": "sample-0008",
+    "symbol": "SOL",
+    "side": "SELL",
+    "order_type": "market",
+    "trigger_type": "immediate",
+    "state": "filled",
+    "quantity": 15,
+    "limit_price": null,
+    "stop_price": null,
+    "filled_quantity": 15,
+    "average_price": 208.99,
+    "created_at": "2026-07-11T00:00:00+00:00",
+    "updated_at": "2026-07-11T00:00:00+00:00",
+    "raw": {
+      "source": "sample"
+    },
+    "ingested_at": "2026-07-11T00:00:00+00:00"
+  },
+  {
+    "order_id": "sample-0009",
+    "symbol": "NVDA",
+    "side": "BUY",
+    "order_type": "market",
+    "trigger_type": "immediate",
+    "state": "filled",
+    "quantity": 60,
+    "limit_price": null,
+    "stop_price": null,
+    "filled_quantity": 60,
+    "average_price": 114.29,
+    "created_at": "2026-04-27T00:00:00+00:00",
+    "updated_at": "2026-04-27T00:00:00+00:00",
+    "raw": {
+      "source": "sample"
+    },
+    "ingested_at": "2026-04-27T00:00:00+00:00"
+  },
+  {
+    "order_id": "sample-0010",
+    "symbol": "NVDA",
+    "side": "SELL",
+    "order_type": "market",
+    "trigger_type": "immediate",
+    "state": "filled",
+    "quantity": 60,
+    "limit_price": null,
+    "stop_price": null,
+    "filled_quantity": 60,
+    "average_price": 153.71,
+    "created_at": "2026-06-21T00:00:00+00:00",
+    "updated_at": "2026-06-21T00:00:00+00:00",
+    "raw": {
+      "source": "sample"
+    },
+    "ingested_at": "2026-06-21T00:00:00+00:00"
+  },
+  {
+    "order_id": "sample-0011",
+    "symbol": "NVDA",
+    "side": "BUY",
+    "order_type": "market",
+    "trigger_type": "immediate",
+    "state": "filled",
+    "quantity": 45,
+    "limit_price": null,
+    "stop_price": null,
+    "filled_quantity": 45,
+    "average_price": 166.75,
+    "created_at": "2026-07-06T00:00:00+00:00",
+    "updated_at": "2026-07-06T00:00:00+00:00",
+    "raw": {
+      "source": "sample"
+    },
+    "ingested_at": "2026-07-06T00:00:00+00:00"
+  },
+  {
+    "order_id": "sample-0012",
+    "symbol": "TLT",
+    "side": "SELL",
+    "order_type": "market",
+    "trigger_type": "immediate",
+    "state": "filled",
+    "quantity": 120,
+    "limit_price": null,
+    "stop_price": null,
+    "filled_quantity": 120,
+    "average_price": 92.68,
+    "created_at": "2026-05-12T00:00:00+00:00",
+    "updated_at": "2026-05-12T00:00:00+00:00",
+    "raw": {
+      "source": "sample"
+    },
+    "ingested_at": "2026-05-12T00:00:00+00:00"
   }
 ]

@@ -14,7 +14,7 @@ import robin_stocks.robinhood as rh
 from app.brokers.base import BrokerClient
 from app.enums import OrderType
 from app.pnl import compute_pnl
-from app.storage import get_trade_fills
+from app.storage import get_price_history, get_trade_fills
 
 log = logging.getLogger(__name__)
 
@@ -333,6 +333,28 @@ class RobinhoodTrader(BrokerClient):
                 "price": float(avg_price),
                 "ts": ts,
             })
+
+    def price_history(self, symbol: str) -> list[dict]:
+        """Daily closes [{date, close}] for the risk series."""
+        return get_price_history(self, symbol)
+
+    def _fetch_live_price_history(self, symbol: str, span: str = "year") -> list[dict]:
+        """Pull daily closes from Robinhood (stock first, then crypto)."""
+        self._ensure_auth()
+        rows = rh.stocks.get_stock_historicals(symbol, interval="day", span=span) or []
+        rows = [r for r in rows if isinstance(r, dict)]
+        if not rows:
+            rows = rh.crypto.get_crypto_historicals(symbol, interval="day", span=span) or []
+        closes: list[dict] = []
+        for r in rows:
+            if not isinstance(r, dict):
+                continue
+            ts = r.get("begins_at") or ""
+            close = r.get("close_price")
+            if len(ts) < 10 or not close:
+                continue
+            closes.append({"date": ts[:10], "close": float(close)})
+        return closes
 
     def mark_prices_from_positions(self) -> dict[str, float]:
         """Current mark prices for open stock positions."""

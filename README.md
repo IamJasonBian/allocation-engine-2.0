@@ -32,6 +32,8 @@ gunicorn app.wsgi:application
 cp .env.local.example .env.local   # laptop overrides (gitignored)
 python main.py serve               # http://localhost:10000
 curl -s http://localhost:10000/api/pnl/basis/BTC/robinhood | python3 -m json.tool
+curl -s http://localhost:10000/api/pnl/risk/BTC/robinhood | python3 -m json.tool
+curl -s http://localhost:10000/api/pnl/risk | python3 -m json.tool   # portfolio vol
 ```
 
 App modes live in `configs/config.json` (`dev` / `prod`), each declaring its
@@ -68,8 +70,28 @@ python main.py --broker alpaca run
 | GET | `/api/portfolio[/<broker>]` | Account + positions combined |
 | GET | `/api/engine/status` | Background engine loop status |
 | POST | `/api/engine/tick` | Manually trigger reconciliation |
+| GET | `/api/risk/report` | Full metrics & risk report (what `/risk` renders) |
+| GET | `/api/risk/summary` | Headline numbers + plain-English flags |
+| GET | `/api/risk/<section>` | `performance` · `drawdown` · `exposure` · `covariance` · `tail` · `stress` · `symbols` · `curve` |
+| GET | `/api/risk/symbol/<symbol>` | One ticker's risk model + daily mark series |
+| GET | `/risk` | **Risk Desk** — the metrics & risk site |
 
 Broker defaults to `DEFAULT_BROKER` env var. Append `/alpaca` or `/robinhood` to target a specific broker.
+
+## Risk Desk (metrics & risk server)
+
+`/risk` is a self-contained site served by this API; `/api/risk/*` is the
+JSON behind it. The library lives in `app/risk/` (pure stdlib — no numpy) and
+runs over the two inputs the engine already has: normalized fills and daily
+closes per symbol. Definitions, formulas and the Cloud Run deploy are in
+[docs/RISK_DESK.md](docs/RISK_DESK.md).
+
+```bash
+APP_MODE=dev python main.py serve            # 5-symbol sample book, seeded from app/storage/samples/
+open http://localhost:10000/risk
+curl -s localhost:10000/api/risk/summary | python3 -m json.tool
+deploy/cloudrun/deploy.sh                    # build + deploy the risk-service to Cloud Run (route-manager-prod)
+```
 
 ## Environment Variables
 
