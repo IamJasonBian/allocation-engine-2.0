@@ -24,6 +24,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import config
 import guardrails
 import mcp_client
+import mcp_oauth
 import robinhood
 import session as session_mgr
 from gcp_secrets import get_secret
@@ -52,10 +53,10 @@ def _exec_token() -> str:
 
 
 def _mcp_token() -> str:
-    if config.MCP_TOKEN_SECRET:
-        return get_secret(config.MCP_TOKEN_SECRET, config.GCP_PROJECT_ID)
-    if config.MCP_TOKEN:
-        return config.MCP_TOKEN
+    if config.MCP_TOKEN_SECRET or config.MCP_TOKEN:
+        token = mcp_oauth.get_access_token()
+        if token:
+            return token
     # Fall back to the live RH bearer from our device-authenticated session.
     result = session_mgr.get_session(config.DEFAULT_PROFILE)
     if result.status == "OK" and result.session is not None:
@@ -350,6 +351,7 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     server = ThreadingHTTPServer(("0.0.0.0", config.PORT), Handler)
+    mcp_oauth.start_refresh_loop()
     log.info("auth-service listening on :%d", config.PORT)
     try:
         server.serve_forever()

@@ -21,6 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("AUTH_SERVICE_ENV", "/nonexistent-env-for-tests")
 
 import config  # noqa: E402
+import mcp_oauth  # noqa: E402
 import robinhood  # noqa: E402
 import server  # noqa: E402
 from models import AuthResult, Session  # noqa: E402
@@ -244,6 +245,16 @@ class ServerTestCase(unittest.TestCase):
         self.assertTrue(body["ok"])
         # MCP_TOKEN unset -> the live session bearer is attached instead.
         self.assertEqual(self.relay.call_args.kwargs["token"], "fake-access-token")
+
+    def test_mcp_token_secret_uses_mcp_oauth(self):
+        with mock.patch.object(mcp_oauth, "get_access_token", return_value="mcp-jwt"), \
+             mock.patch.object(config, "MCP_TOKEN_SECRET", "rh-mcp-oauth-token"):
+            status, body = self.request(
+                "POST", "/exec/mcp",
+                body={"payload": {"jsonrpc": "2.0", "id": 1, "method": "tools/list"}})
+        self.assertEqual(status, 200)
+        self.assertTrue(body["ok"])
+        self.assertEqual(self.relay.call_args.kwargs["token"], "mcp-jwt")
 
     def test_mcp_read_tool_call_relayed(self):
         status, _ = self.request(

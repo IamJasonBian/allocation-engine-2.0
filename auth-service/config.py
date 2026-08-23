@@ -60,6 +60,18 @@ MCP_TOKEN_SECRET = os.getenv("MCP_TOKEN_SECRET", _get("mcp", "token_secret"))
 # Comma-separated tool names exempt from the destructive-verb guardrail
 # (see guardrails.py). Empty = only trailing-stop tools may mutate.
 MCP_ALLOWED_TOOLS = os.getenv("MCP_ALLOWED_TOOLS", _get("mcp", "allowed_tools"))
+# Refresh the OAuth bundle this many seconds before access-token expiry. Robinhood
+# rotates refresh tokens on every use (single-use chain), and the access TTL varies
+# (~4-9 days observed), so refresh well ahead rather than at the edge.
+MCP_REFRESH_LEAD_SECONDS = int(
+    os.getenv("MCP_REFRESH_LEAD_SECONDS", _get("mcp", "refresh_lead_seconds", "172800"))
+)
+# Background timestamp check cadence; keeps the chain alive while no /exec/mcp
+# traffic arrives. This box is the ONLY refresher — other consumers read the
+# secret's `latest` version and never call the token endpoint.
+MCP_REFRESH_INTERVAL_SECONDS = int(
+    os.getenv("MCP_REFRESH_INTERVAL_SECONDS", _get("mcp", "refresh_interval_seconds", "3600"))
+)
 
 # --- Server ---
 PORT = int(os.getenv("PORT", _get("server", "port", "8080")))
