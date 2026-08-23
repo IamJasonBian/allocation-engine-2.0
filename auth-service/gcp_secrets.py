@@ -64,3 +64,22 @@ def get_secret(name: str, project_id: str = "", version: str = "latest") -> str:
     resp.raise_for_status()
     payload = resp.json()["payload"]["data"]
     return base64.b64decode(payload).decode("utf-8")
+
+
+def add_secret_version(name: str, value: str, project_id: str = "") -> str:
+    """Append a new Secret Manager version and return its resource name."""
+    if name.startswith("projects/"):
+        parent = name.split("/versions/")[0] if "/versions/" in name else name
+    else:
+        project = _project_id(project_id)
+        parent = f"projects/{project}/secrets/{name}"
+
+    url = f"https://secretmanager.googleapis.com/v1/{parent}:addVersion"
+    resp = requests.post(
+        url,
+        json={"payload": {"data": base64.b64encode(value.encode("utf-8")).decode("ascii")}},
+        headers={"Authorization": f"Bearer {_access_token()}"},
+        timeout=15,
+    )
+    resp.raise_for_status()
+    return resp.json()["name"]
