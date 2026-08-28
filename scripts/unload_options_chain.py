@@ -6,7 +6,7 @@ Redis keys:
   options-chain:{SYMBOL}          (latest read)
 
 Env: REDIS_HOST, REDIS_PASSWORD, NETLIFY_API_TOKEN, NETLIFY_SITE_ID,
-     OPTIONS_SYMBOLS (default NBIS,AVGO,SPY,IWN,MU)
+     OPTIONS_SYMBOLS (default NBIS,AVGO,SPY,IWN,MU,CRWD)
 
 Emits a ``[cost]`` JSON line and appends to ``GITHUB_STEP_SUMMARY`` when set.
 """
@@ -27,7 +27,7 @@ BLOBS_URL = "https://api.netlify.com/api/v1/blobs"
 STORE_NAME = "options-chain"
 FEED_STORES = ("options-chain", "market-quotes")
 DEFAULT_RETENTION_DAYS = 14
-DEFAULT_SYMBOLS = "NBIS,AVGO,SPY,IWN,MU"
+DEFAULT_SYMBOLS = "NBIS,AVGO,SPY,IWN,MU,CRWD"
 BATCH_SIZE = 1000
 # Private-repo Linux minutes ≈ $0.008/min on GitHub's metered tier (reference only).
 GH_MINUTE_USD = 0.008
