@@ -18,13 +18,15 @@ import os
 import sys
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import redis
 import requests
 
 BLOBS_URL = "https://api.netlify.com/api/v1/blobs"
 STORE_NAME = "options-chain"
+FEED_STORES = ("options-chain", "market-quotes")
+DEFAULT_RETENTION_DAYS = 60
 DEFAULT_SYMBOLS = "NBIS,AVGO,SPY,IWN,MU"
 BATCH_SIZE = 1000
 # Private-repo Linux minutes ≈ $0.008/min on GitHub's metered tier (reference only).
@@ -40,6 +42,7 @@ class RunCost:
     bytes_uploaded: int = 0
     history_drained: int = 0
     redis_ops: int = 0
+    blobs_deleted: int = 0
     errors: list[str] = field(default_factory=list)
 
     def finish(self, t0: float) -> None:
@@ -64,6 +67,7 @@ class RunCost:
             "bytes_uploaded": self.bytes_uploaded,
             "history_drained": self.history_drained,
             "redis_ops": self.redis_ops,
+            "blobs_deleted": self.blobs_deleted,
             "errors": self.errors,
             "github_run_id": os.getenv("GITHUB_RUN_ID"),
             "github_workflow": os.getenv("GITHUB_WORKFLOW"),
@@ -155,7 +159,7 @@ def unload_symbol(
     print(f"\n[unloader] Processing {symbol}")
 
     history_key = f"options-chain:history:{symbol}"
-    entries = drain_history(client, history_key)
+    entries = drain_history(client, history_key, cost)
     cost.history_drained += len(entries)
     print(f"  Drained {len(entries)} history entries")
 
@@ -181,6 +185,64 @@ def unload_symbol(
     print(f"  Done: {len(entries)} history + {num_contracts} chain")
 
 
+def _blob_key_date(key: str) -> datetime | None:
+    """Parse YYYY-MM-DD from keys like IWN/2026-08-28T06-10-02 or 2026-08-21T23-04-34."""
+    segment = key.rsplit("/", 1)[-1]
+    try:
+        return datetime.strptime(segment[:10], "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+
+
+def _list_blob_keys(token: str, site_id: str, store: str) -> list[str]:
+    keys: list[str] = []
+    cursor: str | None = None
+    while True:
+        url = f"{BLOBS_URL}/{site_id}/{store}"
+        params: dict[str, str] = {}
+        if cursor:
+            params["cursor"] = cursor
+        resp = requests.get(
+            url,
+            headers={"Authorization": f"Bearer {token}"},
+            params=params,
+            timeout=30,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        keys.extend(b["key"] for b in data.get("blobs", []))
+        cursor = data.get("next_cursor")
+        if not cursor:
+            break
+    return keys
+
+
+def prune_old_feed_blobs(token: str, site_id: str, cost: RunCost) -> None:
+    retention_days = int(os.getenv("BLOB_RETENTION_DAYS", str(DEFAULT_RETENTION_DAYS)))
+    cutoff = datetime.now(timezone.utc) - timedelta(days=retention_days)
+    print(f"\n[prune] Deleting feed blobs older than {retention_days}d (before {cutoff.date()})")
+
+    for store in FEED_STORES:
+        keys = _list_blob_keys(token, site_id, store)
+        stale = []
+        for key in keys:
+            created = _blob_key_date(key)
+            if created is not None and created < cutoff:
+                stale.append(key)
+        print(f"  {store}: {len(stale)}/{len(keys)} to delete")
+        for key in sorted(stale):
+            encoded = "/".join(requests.utils.quote(part, safe="") for part in key.split("/"))
+            url = f"{BLOBS_URL}/{site_id}/{store}/{encoded}"
+            resp = requests.delete(url, headers={"Authorization": f"Bearer {token}"}, timeout=30)
+            if resp.status_code not in (200, 204, 404):
+                msg = f"prune {store}/{key}: {resp.status_code}"
+                cost.errors.append(msg)
+                print(f"  WARNING: {msg}")
+                continue
+            cost.blobs_deleted += 1
+            print(f"  deleted: {store}/{key}")
+
+
 def write_step_summary(cost: RunCost, job_sec: float | None) -> None:
     path = os.getenv("GITHUB_STEP_SUMMARY")
     if not path:
@@ -200,6 +262,7 @@ def write_step_summary(cost: RunCost, job_sec: float | None) -> None:
         f"| Blobs written | {cost.blobs_written} |",
         f"| Bytes uploaded | {cost.bytes_uploaded:,} |",
         f"| History drained | {cost.history_drained} |",
+        f"| Blobs deleted (prune) | {cost.blobs_deleted} |",
         f"| Redis ops | {cost.redis_ops} |",
         f"| Symbols | {', '.join(cost.symbols) or '—'} |",
     ])
@@ -239,6 +302,12 @@ def main() -> int:
             msg = f"{symbol}: {e}"
             cost.errors.append(msg)
             print(f"[unloader] ERROR processing {symbol}: {e}")
+
+    try:
+        prune_old_feed_blobs(token, site_id, cost)
+    except Exception as e:
+        cost.errors.append(f"prune: {e}")
+        print(f"[prune] ERROR: {e}")
 
     client.close()
     cost.finish(t0)
