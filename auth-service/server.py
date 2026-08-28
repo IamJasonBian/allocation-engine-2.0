@@ -9,7 +9,6 @@ Endpoints (all POSTs and order reads require Bearer EXEC_TOKEN):
   GET  /auth/status                   — auth state + error codes (for alerting)
   POST /login                         — trigger the login flow (device approval)
   GET  /orders/trailing_stop          — active percentage trailing-stop orders
-  GET  /robinhood/book                — live portfolio + positions (MCP for now)
   POST /orders/trailing_stop          — place one (dry_run defaults to true)
   POST /orders/trailing_stop/replace  — replace one (dry_run defaults to true)
   POST /exec                          — run an external command
@@ -131,8 +130,6 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_read_orders()
         elif self.path.rstrip("/") == "/token":
             self._handle_token()
-        elif self.path.rstrip("/") == "/robinhood/book":
-            self._handle_robinhood_book()
         else:
             self._send(404, {"error": "not found"})
 
@@ -293,31 +290,6 @@ class Handler(BaseHTTPRequestHandler):
             "device_token": s.device_token,
             "account_number": s.account_number,
         })
-
-    def _handle_robinhood_book(self):
-        if not self._authorized():
-            self._send(401, {"error": "unauthorized"})
-            return
-        token = _mcp_token()
-        if not token:
-            self._send(503, {
-                "error_code": "MCP_TOKEN_UNSET",
-                "detail": "MCP OAuth token not configured",
-            })
-            return
-        try:
-            self._send(200, robinhood.get_book(mcp_token=token))
-        except robinhood.McpBookError as e:
-            log.warning("robinhood book read failed at %s: %s", e.stage, e)
-            self._send(502, {
-                "error_code": "BOOK_READ_FAILED",
-                "stage": e.stage,
-                "detail": str(e),
-                "mcp": e.relay,
-            })
-        except Exception as e:  # noqa: BLE001
-            log.exception("robinhood book read failed")
-            self._send(502, {"error_code": "BOOK_READ_FAILED", "detail": str(e)})
 
     def _handle_mcp(self):
         # Relay a JSON-RPC call to the official Robinhood MCP — the "mcp exec"

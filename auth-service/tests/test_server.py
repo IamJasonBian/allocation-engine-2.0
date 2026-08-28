@@ -40,7 +40,6 @@ FAKE_SESSION = Session(
 
 PRIVILEGED = [
     ("GET", "/orders/trailing_stop"),
-    ("GET", "/robinhood/book"),
     ("GET", "/token"),
     ("POST", "/login"),
     ("POST", "/orders/trailing_stop"),
@@ -283,16 +282,6 @@ class ServerTestCase(unittest.TestCase):
                   "params": {"name": "place_trailing_stop_order", "arguments": {}}})
         self.assertEqual(status, 200)
         self.relay.assert_called_once()
-
-    def test_robinhood_book_returns_mcp_payload(self):
-        book = {"source": "mcp", "portfolio": {"equity": 1}, "positions": []}
-        with mock.patch.object(mcp_oauth, "get_access_token", return_value="mcp-jwt"), \
-             mock.patch.object(config, "MCP_TOKEN_SECRET", "rh-mcp-oauth-token"), \
-             mock.patch.object(robinhood, "get_book", return_value=book) as get_book:
-            status, body = self.request("GET", "/robinhood/book")
-        self.assertEqual(status, 200)
-        self.assertEqual(body, book)
-        get_book.assert_called_once_with(mcp_token="mcp-jwt")
 
     # ---- /exec guardrails over HTTP ----
 

@@ -19,7 +19,6 @@ import uuid
 import pyotp
 import requests
 
-import mcp_client
 from models import AuthResult, Credentials, Session
 
 log = logging.getLogger("robinhood")
@@ -362,84 +361,3 @@ def replace_trailing_stop(session: Session, order_id: str, payload: dict,
     http = _new_session()
     http.headers.update(session.headers())
     return _dump("orders (replace)", http.post(url, json=payload, timeout=15))
-
-
-# --------------------------------------------------------------------------- #
-# book reads — MCP for now
-# --------------------------------------------------------------------------- #
-
-class McpBookError(Exception):
-    """Robinhood MCP book read failed."""
-
-    def __init__(self, relay: dict, *, stage: str = ""):
-        self.relay = relay
-        self.stage = stage
-        code = relay.get("error_code") or stage or "MCP_BOOK_FAILED"
-        super().__init__(code)
-
-
-_MCP_RPC_ID = 0
-
-
-def _next_rpc_id() -> int:
-    global _MCP_RPC_ID
-    _MCP_RPC_ID += 1
-    return _MCP_RPC_ID
-
-
-def _mcp_open(token: str) -> str:
-    init = mcp_client.relay({
-        "jsonrpc": "2.0",
-        "id": _next_rpc_id(),
-        "method": "initialize",
-        "params": {
-            "protocolVersion": "2024-11-05",
-            "capabilities": {},
-            "clientInfo": {"name": "auth-service", "version": "1"},
-        },
-    }, token=token)
-    if not init.get("ok"):
-        raise McpBookError(init, stage="initialize")
-    session_id = init.get("session_id")
-    if not session_id:
-        raise McpBookError(init, stage="initialize_session")
-    mcp_client.relay({
-        "jsonrpc": "2.0",
-        "id": _next_rpc_id(),
-        "method": "notifications/initialized",
-        "params": {},
-    }, token=token, session_id=session_id)
-    return session_id
-
-
-def _mcp_tool(token: str, session_id: str, name: str, arguments: dict | None = None) -> object:
-    relay = mcp_client.relay({
-        "jsonrpc": "2.0",
-        "id": _next_rpc_id(),
-        "method": "tools/call",
-        "params": {"name": name, "arguments": arguments or {}},
-    }, token=token, session_id=session_id)
-    if not relay.get("ok"):
-        raise McpBookError(relay, stage=name)
-    parsed = mcp_client.parse_jsonrpc_result(relay)
-    if isinstance(parsed, dict) and parsed.get("error"):
-        raise McpBookError({"ok": False, "result": parsed, "error_code": "MCP_TOOL_ERROR"},
-                           stage=name)
-    return mcp_client.unwrap_tool_content(parsed)
-
-
-def get_book(*, mcp_token: str) -> dict:
-    """Return the live Robinhood book (portfolio + positions).
-
-    TODO: move off MCP — read via direct RH REST (password-session bearer:
-    GET /portfolios/, GET /positions/) once agentic OAuth is no longer the
-    read path for the engine.
-    """
-    session_id = _mcp_open(mcp_token)
-    portfolio = _mcp_tool(mcp_token, session_id, "get_portfolio")
-    positions = _mcp_tool(mcp_token, session_id, "get_positions")
-    return {
-        "source": "mcp",
-        "portfolio": portfolio,
-        "positions": positions,
-    }
