@@ -26,7 +26,7 @@ import requests
 BLOBS_URL = "https://api.netlify.com/api/v1/blobs"
 STORE_NAME = "options-chain"
 FEED_STORES = ("options-chain", "market-quotes")
-DEFAULT_RETENTION_DAYS = 60
+DEFAULT_RETENTION_DAYS = 14
 DEFAULT_SYMBOLS = "NBIS,AVGO,SPY,IWN,MU"
 BATCH_SIZE = 1000
 # Private-repo Linux minutes ≈ $0.008/min on GitHub's metered tier (reference only).
