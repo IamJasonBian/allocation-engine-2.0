@@ -26,6 +26,7 @@ import requests
 BLOBS_URL = "https://api.netlify.com/api/v1/blobs"
 STORE_NAME = "options-chain"
 DEFAULT_SYMBOLS = "NBIS,AVGO,SPY,IWN,MU"
+BATCH_SIZE = 1000
 # Private-repo Linux minutes ≈ $0.008/min on GitHub's metered tier (reference only).
 GH_MINUTE_USD = 0.008
 
