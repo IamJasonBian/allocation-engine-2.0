@@ -4,7 +4,6 @@
 Redis keys:
   options-chain:history:{SYMBOL}  (RPOP drain)
   options-chain:{SYMBOL}          (latest read)
-  options-bars:{SYMBOL}           (latest read)
 
 Env: REDIS_HOST, REDIS_PASSWORD, NETLIFY_API_TOKEN, NETLIFY_SITE_ID,
      OPTIONS_SYMBOLS (default NBIS,AVGO,SPY,IWN,MU)
@@ -163,11 +162,7 @@ def unload_symbol(
     num_contracts = len([k for k in latest_chain if k != "_meta"])
     print(f"  Latest chain: {num_contracts} contracts")
 
-    latest_bars = _read_hash(client, f"options-bars:{symbol}", cost)
-    num_bar_contracts = len([k for k in latest_bars if k != "_meta"])
-    print(f"  Latest bars: {num_bar_contracts} contracts with bars")
-
-    if not entries and not latest_chain and not latest_bars:
+    if not entries and not latest_chain:
         print(f"  No data for {symbol}. Skipping.")
         return
 
@@ -178,12 +173,11 @@ def unload_symbol(
         "underlying": symbol,
         "blob_key": blob_key,
         "latest_chain": latest_chain,
-        "latest_bars": latest_bars,
         "history_count": len(entries),
         "history": entries,
     }
     upload_to_blob(token, site_id, blob_key, payload, cost)
-    print(f"  Done: {len(entries)} history + {num_contracts} chain + {num_bar_contracts} bars")
+    print(f"  Done: {len(entries)} history + {num_contracts} chain")
 
 
 def write_step_summary(cost: RunCost, job_sec: float | None) -> None:
