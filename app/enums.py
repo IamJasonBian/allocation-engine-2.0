@@ -51,3 +51,5 @@ class RiskEventType(StrEnum):
     PRICE_DEPEG = "price_depeg"             # live price diverges from cached/stale price
     POSITION_LIMIT = "position_limit"       # position exceeds concentration limit
     ORDER_REJECTED = "order_rejected"       # broker rejected an order
+    ORDER_CAPPED = "order_capped"           # order shrunk by the qty/notional limit
+    ORDER_SKIPPED = "order_skipped"         # order dropped before submission
