@@ -333,21 +333,49 @@ class AllocationEngine:
     def _execute_option_orders(
         self, orders: list[dict], cancel_ids: list[str]
     ):
-        """Log option order actions. Execution not yet implemented — always dry-run."""
+        """Log stale option orders and submit new ones. Cancellation is logged-only."""
         if cancel_ids:
-            log.info("[OPTIONS] Found %d stale option order(s): %s", len(cancel_ids), cancel_ids)
+            log.info("[OPTIONS] Found %d stale option order(s) — cancellation disabled, "
+                     "skipping: %s", len(cancel_ids), cancel_ids)
 
+        cap = getattr(self, "max_option_order_qty", None) or self.max_order_qty
+
+        results = []
         for order in orders:
-            log.info(
-                "[OPTIONS DRY RUN] Would submit: %s %s %s %.2f %s qty=%g @ %s",
-                order.get("side", "?"),
-                order.get("chain_symbol", "?"),
-                order.get("option_type", "?"),
-                float(order.get("strike", 0)),
-                order.get("expiration", "?"),
-                float(order.get("quantity", 0)),
-                f"${order['limit_price']:,.2f}" if order.get("limit_price") else "MKT",
-            )
+            # Enforce max option order quantity
+            qty = order["quantity"]
+            if qty > cap:
+                log.warning(
+                    "Option order capped: %s %s qty %g -> %d (cap=%d)",
+                    order.get("side", "?"), order.get("chain_symbol", "?"),
+                    qty, cap, cap,
+                )
+                order["quantity"] = cap
+
+            if self.dry_run:
+                log.info(
+                    "[OPTIONS DRY RUN] Would submit: %s %s %s %.2f %s qty=%g @ %s",
+                    order.get("side", "?"),
+                    order.get("chain_symbol", "?"),
+                    order.get("option_type", "?"),
+                    float(order.get("strike", 0)),
+                    order.get("expiration", "?"),
+                    float(order.get("quantity", 0)),
+                    f"${order['limit_price']:,.2f}" if order.get("limit_price") else "MKT",
+                )
+            elif hasattr(self.trader, "submit_option_order"):
+                result = self.trader.submit_option_order(order)
+                log.info("[OPTIONS] Submitted option order: %s", result)
+                results.append(result)
+            else:
+                log.warning(
+                    "[OPTIONS] Broker %s cannot place option orders "
+                    "(no submit_option_order) — skipping %s %s",
+                    type(self.trader).__name__,
+                    order.get("side", "?"), order.get("chain_symbol", "?"),
+                )
+
+        return results
 
     # -- equity execution ----------------------------------------------------
 
