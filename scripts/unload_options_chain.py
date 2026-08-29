@@ -120,6 +120,32 @@ def drain_history(client: redis.Redis, history_key: str, cost: RunCost) -> list[
     return entries
 
 
+def _chain_quality(symbol: str, chain: dict) -> dict:
+    """Summarise a chain hash: contracts per expiry, quote/IV coverage, newest quote."""
+    by_expiry: dict[str, int] = {}
+    with_quote = with_iv = 0
+    newest_quote = ""
+    for field, snap in chain.items():
+        if field == "_meta" or not isinstance(snap, dict):
+            continue
+        expiry = field[len(symbol):len(symbol) + 6]
+        by_expiry[expiry] = by_expiry.get(expiry, 0) + 1
+        quote = snap.get("latest_quote") or {}
+        if quote:
+            with_quote += 1
+            newest_quote = max(newest_quote, str(quote.get("timestamp", "")))
+        if snap.get("implied_volatility"):
+            with_iv += 1
+    return {
+        "by_expiry": dict(sorted(by_expiry.items())),
+        "with_quote": with_quote,
+        "with_iv": with_iv,
+        "newest_quote": newest_quote or None,
+        "meta_updated_at": (chain.get("_meta") or {}).get("updated_at")
+        if isinstance(chain.get("_meta"), dict) else None,
+    }
+
+
 def _read_hash(client: redis.Redis, key: str, cost: RunCost) -> dict:
     cost.redis_ops += 1
     raw = client.hgetall(key)
@@ -166,6 +192,7 @@ def unload_symbol(
     latest_chain = _read_hash(client, f"options-chain:{symbol}", cost)
     num_contracts = len([k for k in latest_chain if k != "_meta"])
     print(f"  Latest chain: {num_contracts} contracts")
+    print(f"  Chain quality: {_chain_quality(symbol, latest_chain)}")
 
     if not entries and not latest_chain:
         print(f"  No data for {symbol}. Skipping.")
