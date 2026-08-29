@@ -55,6 +55,11 @@ class Config:
     # those routes refuse to run.
     DASHBOARD_REQUEST_TOKEN = os.getenv("DASHBOARD_REQUEST_TOKEN", "")
 
+    # Callers of /api/robinhood/* must present this token. Those routes relay
+    # to the box using OUR bearer, so without a gate anyone on the internet can
+    # place orders through them. Unset means the routes are closed, not open.
+    RH_PROXY_TOKEN = os.getenv("RH_PROXY_TOKEN", "")
+
     # -- Trailing-stop sweeper (runs in the background engine loop) --
     # Universe beyond current positions; comma-separated symbols.
     STOP_TICKERS = os.getenv("STOP_TICKERS", "")
