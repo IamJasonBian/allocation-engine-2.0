@@ -50,12 +50,18 @@ hw_stop_i       ← max(hw_stop_i, observed_stop_i)               (monotone, per
 on any write (place | renew | re-trail):
     target_stop = max(price × (1 − trail_pct/100), hw_stop_i)   ← floor applies
     peg_pct     = (1 − target_stop / price) × 100               ← back-solve
-    clamp peg_pct to [TRAIL_FLOOR, TRAIL_CAP] ∩ (0, 50]
+    peg_pct quantized DOWN, and held inside the hard (0, 50] guardrail
     payload.stop_price = target_stop; payload.trailing_peg.percentage = peg_pct
 ```
 
 Two properties matter:
 
+- **`TRAIL_FLOOR` loses to the floor on the tight side.** A high-water level
+  close to the price back-solves to a peg under `TRAIL_FLOOR` (8%). Clamping it
+  back up would lower a protective level already earned — the exact failure this
+  feature exists to prevent — so the mark wins and the result is flagged
+  `tight` instead. Only the hard `(0, 50]` guardrail is absolute. The peg is
+  quantized *down* for the same reason: rounding up sits the stop under the mark.
 - **RH only accepts a percentage peg.** `validate_trailing_stop_payload()`
   (`:88`) requires `trailing_peg.type == "percentage"` with the value in
   `(0, 50]`. So "anchor to the high-water level" is *implemented* as a
@@ -163,8 +169,8 @@ here — the remaining phases aren't worth their risk.
   ```sql
   CREATE TABLE IF NOT EXISTS stop_high_water (
     symbol       TEXT PRIMARY KEY,
-    hw_stop      REAL NOT NULL,
-    source       TEXT,            -- 'rh_order' | 'derived_peak'
+    hw_stop      REAL,            -- NULL after a reset: the row is the audit
+    source       TEXT,            -- which field answered, or 'derived_peak'
     observed_at  TEXT,
     reset_reason TEXT,            -- last invalidation, for audit
     reset_at     TEXT
@@ -214,10 +220,44 @@ here — the remaining phases aren't worth their risk.
 
 *Exit:* one renewal cycle live with no level regression and no wedged symbol.
 
+## Status — what has landed
+
+The **RH client read** and the **reconciliation engine** are implemented in
+`app/stop_sweeper.py`; the write path (Phase 3) is not, so live sweeps are
+unchanged.
+
+| Piece | Where | Note |
+|---|---|---|
+| `stop_level_of(order)` | `app/stop_sweeper.py` | Probes the candidate trigger fields in preference order and reports **which one answered**. Never derives a level from the peg — that fallback is the caller's to make explicitly. |
+| `read_stop_levels(orders)` | ″ | Per-symbol `{level, source, order_id, trail_percent}` view of the live book. |
+| `apply_high_water(price, pct, hw)` | ″ | Pure; returns `{stop_price, peg_percent, binding, tight, breach}`. |
+| `stop_high_water` table + `hw_observe` / `hw_reset` | `StopStore` | Monotone; `prune_missing()` does not touch it, so a mark outlives the order it was read from. |
+| `reconcile(client, store, …)` | `app/stop_sweeper.py` | Read-only against RH. Writes only local marks. |
+| CLI | `reconcile`, `hw-reset SYMBOL --reason …` | `list` now dumps the marks too. |
+
+`reconcile` doubles as the **Phase-1 live read**: run it against the real book
+and `source_counts` answers the open question below — a count under
+`stop_price` (or another field name) means source 1 exists and the level is
+real; everything landing under `derived_peak`, or `no_level` findings, means it
+does not.
+
+Findings it emits: `level_regression` (a live order sitting below the mark,
+with `verified: false` when the level was derived rather than read),
+`hw_breach`, `missing_stop` (held, unprotected), `orphan_high_water` (stale
+mark after an exit — reported as a reset candidate, never auto-cleared),
+`no_level`.
+
+Deliberately **not** done: no wiring into `background.py`, so the engine loop
+is byte-for-byte unchanged and `reconcile` runs only when invoked; no
+`STOP_HIGH_WATER` flag yet, since nothing on the write path reads one; and
+`renew()` still passes no price — that fix belongs with the write path.
+
 ## Open questions
 
-- [ ] **Does the RH order expose its ratcheted level?** Phase 1 blocks on this.
-      Everything downstream is cleaner if yes.
+- [ ] **Does the RH order expose its ratcheted level?** Still unconfirmed —
+      but now answerable by running `reconcile` against the live book and
+      reading `source_counts` (see Status). Everything downstream is cleaner
+      if yes.
 - [ ] **Corporate actions.** No source identified in this repo today. Without
       one, the first split wedges a symbol into permanent breach.
 - [ ] **Breach policy.** Skip-and-alert is assumed above. "Market-sell on
