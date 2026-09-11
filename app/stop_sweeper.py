@@ -12,8 +12,12 @@ One sweep at start of day:
 Between sweeps, other services read SQLite as the queue — RH is only
 consulted when SQLite says a stop is about to expire (then we re-read and
 renew via the replace/PUT path). If the DB is missing or empty, a sweep
-re-populates it. A weekly reconciliation sweeper (SQLite vs RH book) comes
-later.
+re-populates it.
+
+`reconcile` is the weekly pass over the same book: it records the high-water
+stop level per symbol and reports where the live orders have drifted below it
+(see docs/TRAILING_STOP_HIGH_WATER.md). It is read-only against RH — it
+writes only local marks and never touches an order.
 
 Transport:
   --via proxy  (default) — the deployed Render API's /api/robinhood/* proxy;
@@ -26,11 +30,14 @@ Usage:
   python scripts/stop_sweeper.py sweep --tickers AAPL,MSFT [--live]
   python scripts/stop_sweeper.py check SYMBOL     # queue read (sqlite-first)
   python scripts/stop_sweeper.py list             # dump sqlite state
+  python scripts/stop_sweeper.py reconcile        # high-water marks vs RH
+  python scripts/stop_sweeper.py hw-reset SYMBOL --reason filled
 """
 
 import argparse
 import json
 import logging
+import math
 import os
 import sqlite3
 import sys
@@ -233,6 +240,18 @@ CREATE TABLE IF NOT EXISTS stops (
   raw           TEXT
 );
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
+-- High-water stop levels. Deliberately NOT a column on `stops`: that table is
+-- pruned when a symbol leaves the RH book (prune_missing), and a mark has to
+-- outlive the order it was observed from. hw_stop is nullable so a reset keeps
+-- the row as an audit trail instead of erasing why the mark went away.
+CREATE TABLE IF NOT EXISTS stop_high_water (
+  symbol       TEXT PRIMARY KEY,
+  hw_stop      REAL,
+  source       TEXT,
+  observed_at  TEXT,
+  reset_reason TEXT,
+  reset_at     TEXT
+);
 """
 
 
@@ -293,6 +312,62 @@ class StopStore:
     def swept_today(self):
         last = self.get_meta("last_sweep_at")
         return bool(last) and last[:10] == _now_iso()[:10]
+
+    # --- high-water marks (see docs/TRAILING_STOP_HIGH_WATER.md) ---------- #
+
+    def hw_get(self, symbol):
+        row = self.db.execute("SELECT * FROM stop_high_water WHERE symbol=?",
+                              (symbol.upper(),)).fetchone()
+        return dict(row) if row else None
+
+    def hw_all(self):
+        return [dict(r) for r in self.db.execute(
+            "SELECT * FROM stop_high_water ORDER BY symbol")]
+
+    def hw_observe(self, symbol, level, source="rh_order"):
+        """Raise a symbol's high-water stop. Monotone: never lowers it.
+
+        Returns (hw_stop, raised); raised is True when this observation moved
+        the mark. A non-numeric or non-positive level is ignored rather than
+        written — a bad read must not be able to establish a floor.
+        """
+        sym = symbol.upper()
+        try:
+            level = float(level)
+        except (TypeError, ValueError):
+            return (self.hw_get(sym) or {}).get("hw_stop"), False
+        if level <= 0:
+            return (self.hw_get(sym) or {}).get("hw_stop"), False
+        current = (self.hw_get(sym) or {}).get("hw_stop")
+        if current is not None and float(current) >= level:
+            return float(current), False
+        self.db.execute(
+            """INSERT INTO stop_high_water(symbol, hw_stop, source, observed_at)
+               VALUES(?,?,?,?)
+               ON CONFLICT(symbol) DO UPDATE SET
+                 hw_stop=excluded.hw_stop, source=excluded.source,
+                 observed_at=excluded.observed_at""",
+            (sym, level, source, _now_iso()))
+        self.db.commit()
+        return level, True
+
+    def hw_reset(self, symbol, reason):
+        """Invalidate a mark (fill, re-entry, corporate action).
+
+        The row survives with the reason stamped: a mark that vanished without
+        explanation is indistinguishable from one that was never established.
+        """
+        sym = symbol.upper()
+        self.db.execute(
+            """INSERT INTO stop_high_water(symbol, hw_stop, source, observed_at,
+                                           reset_reason, reset_at)
+               VALUES(?,NULL,NULL,NULL,?,?)
+               ON CONFLICT(symbol) DO UPDATE SET
+                 hw_stop=NULL, source=NULL, observed_at=NULL,
+                 reset_reason=excluded.reset_reason, reset_at=excluded.reset_at""",
+            (sym, reason, _now_iso()))
+        self.db.commit()
+        return self.hw_get(sym)
 
 
 def _now_iso():
@@ -483,6 +558,123 @@ def compute_trail_percents(market_values, sigmas, budget=TRAIL_PERCENT,
     return out
 
 
+# --------------------------------------------------------------------------- #
+# high-water stop levels — reading the level off the RH book
+# --------------------------------------------------------------------------- #
+
+# An RH percentage peg ratchets, but only for the lifetime of one order; every
+# rewrite re-anchors to the mark at rewrite time. Which field on a live order
+# carries the ratcheted trigger is NOT confirmed (Phase 1 in
+# docs/TRAILING_STOP_HIGH_WATER.md), so probe the candidates in preference
+# order and report which one answered — a live `reconcile` run settles the
+# question instead of a guess baked into the write path.
+_STOP_LEVEL_PATHS = (
+    ("stop_price",),
+    ("stop_trigger_price",),
+    ("trigger_price",),
+    ("trailing_peg", "price"),
+    ("trailing_peg", "stop_price"),
+)
+
+
+def stop_level_of(order):
+    """Current trigger level of an RH trailing-stop order.
+
+    Returns (level, source_field); (None, "") when no candidate field carries
+    a usable number. Never guesses a level from the peg percentage — that is
+    the caller's fallback to make explicitly (see read_stop_levels' derived
+    path), because a derived level is materially weaker evidence.
+    """
+    for path in _STOP_LEVEL_PATHS:
+        node = order
+        for key in path:
+            node = (node or {}).get(key) if isinstance(node, dict) else None
+        if node in (None, ""):
+            continue
+        try:
+            level = float(node)
+        except (TypeError, ValueError):
+            continue
+        if level > 0:
+            return level, ".".join(path)
+    return None, ""
+
+
+def read_stop_levels(orders):
+    """Per-symbol view of the live trailing-stop book.
+
+    symbol -> {level, source, order_id, trail_percent}. `level` is None when
+    the order exposes no trigger level; `trail_percent` comes off the peg so
+    a caller can derive one from a price.
+    """
+    out = {}
+    for o in orders or []:
+        sym = _symbol_of(o)
+        if not sym:
+            continue
+        level, source = stop_level_of(o)
+        try:
+            pct = float((o.get("trailing_peg") or {}).get("percentage"))
+        except (TypeError, ValueError):
+            pct = None
+        out[sym] = {"level": level, "source": source, "order_id": o.get("id"),
+                    "trail_percent": pct}
+    return out
+
+
+def apply_high_water(price, trail_percent, hw_stop, quantum=TRAIL_QUANTUM):
+    """Floor the percentage-derived stop at the high-water level.
+
+    RH only accepts a percentage peg (validate_trailing_stop_payload), so the
+    level is expressed as a back-solved percentage plus an explicit
+    stop_price. The peg is quantized DOWN, because a smaller peg sits the stop
+    higher — rounding the other way would place it under the mark it is meant
+    to floor.
+
+    Returns {stop_price, peg_percent, binding, tight, breach}:
+      binding — the high-water floor moved the stop above the %-derived level.
+      tight   — the resulting peg is below TRAIL_FLOOR. The floor wins anyway:
+                honouring TRAIL_FLOOR here would lower a protective level that
+                was already earned, which is the exact failure this exists to
+                prevent. Reported so it stays visible.
+      breach  — price has fallen to or through the mark, so no placeable peg
+                exists. Callers must NOT re-anchor lower to get an order out.
+    """
+    flat = {"stop_price": None, "peg_percent": None, "binding": False,
+            "tight": False, "breach": True}
+    try:
+        price = float(price)
+        pct = float(trail_percent)
+    except (TypeError, ValueError):
+        return flat
+    if price <= 0 or not 0 < pct <= 50:
+        return flat
+
+    base = initial_stop_price(price, pct)
+    try:
+        hw = float(hw_stop) if hw_stop is not None else 0.0
+    except (TypeError, ValueError):
+        hw = 0.0
+    target = max(base, hw)
+    if target >= price:
+        return flat
+
+    peg = (1 - target / price) * 100
+    if quantum:
+        peg = round((peg // quantum) * quantum, 4)
+    if not 0 < peg <= 50:
+        # Within one quantum of the price (or beyond the hard guardrail):
+        # unplaceable, and rounding up would drop the stop below the mark.
+        return flat
+    stop = round(price * (1 - peg / 100), 2)
+    if hw and stop < hw:
+        # Rounding to the cent can shave a fraction off the level; when the
+        # mark is what we are honouring, round its way instead.
+        stop = math.ceil(hw * 100) / 100
+    return {"stop_price": stop, "peg_percent": peg, "binding": hw > base,
+            "tight": peg < TRAIL_FLOOR, "breach": False}
+
+
 def sweep(client, store, tickers, trail_percent=TRAIL_PERCENT, dry_run=True,
           qty_map=None, price_map=None, account_url="",
           instrument_resolver=resolve_instrument_url, trail_map=None):
@@ -614,6 +806,124 @@ def check(client, store, symbol):
 
 
 # --------------------------------------------------------------------------- #
+# reconciliation engine — local high-water marks vs the live RH book
+# --------------------------------------------------------------------------- #
+
+# Cents of slack before a level counts as having moved backwards; RH rounds
+# trigger prices to the cent, so an exact comparison reports float noise.
+HW_REGRESSION_TOLERANCE = 0.01
+
+
+def reconcile(client, store, price_map=None, qty_map=None,
+              trail_percent=TRAIL_PERCENT):
+    """Compare the local high-water marks against RH and report the drift.
+
+    Read-only against RH: it never places, replaces, or cancels an order. The
+    only writes are to `stop_high_water`, and they are monotone — an
+    observation can raise a mark, nothing here lowers one. Resets are a policy
+    call, so orphans are *reported* as candidates rather than cleared.
+
+    Level sources, in the order tried per symbol:
+      1. the order's own trigger field (stop_level_of) — the real ratcheted
+         level, if RH exposes one;
+      2. `price × (1 − peg/100)` from price_map — a derived level. Because
+         observations are monotone, repeated runs accumulate the peak, but a
+         single run only sees today's mark, so findings from this source are
+         flagged `verified: false`.
+
+    Args:
+        client: ProxyClient/BoxClient — only get_stops() is used.
+        price_map: symbol -> current price. Without it, breaches cannot be
+            detected and source 2 is unavailable.
+        qty_map: symbol -> held quantity; separates "held, unprotected" from
+            "position gone, stale mark".
+
+    Returns {checked, observed, findings, reset_candidates, source_counts}.
+    """
+    price_map = {k.upper(): v for k, v in (price_map or {}).items()}
+    qty_map = {k.upper(): v for k, v in (qty_map or {}).items()}
+
+    log.info("reconcile: reading active trailing stops from RH")
+    levels = read_stop_levels(client.get_stops())
+
+    observed, findings, source_counts = [], [], {}
+    for sym, info in sorted(levels.items()):
+        level, source = info["level"], info["source"]
+        pct = info["trail_percent"] or trail_percent
+        if level is None:
+            price = price_map.get(sym)
+            if price and info["trail_percent"]:
+                level, source = initial_stop_price(price, pct), "derived_peak"
+        if level is None:
+            findings.append({
+                "symbol": sym, "finding": "no_level", "order_id": info["order_id"],
+                "detail": "order exposes no trigger level and no price to "
+                          "derive one from"})
+            log.warning("reconcile: %s has no readable stop level", sym)
+            continue
+
+        source_counts[source] = source_counts.get(source, 0) + 1
+        hw, raised = store.hw_observe(sym, level, source)
+        observed.append({"symbol": sym, "level": level, "source": source,
+                         "hw_stop": hw, "raised": raised})
+
+        if hw is not None and level + HW_REGRESSION_TOLERANCE < hw:
+            verified = source != "derived_peak"
+            findings.append({
+                "symbol": sym, "finding": "level_regression",
+                "order_id": info["order_id"], "live_level": level,
+                "hw_stop": hw, "give_back": round(hw - level, 2),
+                "verified": verified})
+            log.warning("reconcile: %s live stop %.2f is %.2f below the "
+                        "high-water %.2f (verified=%s)",
+                        sym, level, hw - level, hw, verified)
+
+        price = price_map.get(sym)
+        if price and hw is not None:
+            plan = apply_high_water(price, pct, hw)
+            if plan["breach"]:
+                findings.append({
+                    "symbol": sym, "finding": "hw_breach", "hw_stop": hw,
+                    "price": float(price),
+                    "detail": "price is at or through the high-water level — "
+                              "no placeable peg; do not re-anchor lower"})
+                log.warning("reconcile: %s BREACH — price %.2f vs high-water "
+                            "%.2f", sym, float(price), hw)
+            elif plan["binding"]:
+                log.info("reconcile: %s high-water floor binds — %.2f vs "
+                         "%.1f%% at %.2f", sym, hw, pct,
+                         initial_stop_price(price, pct))
+
+    reset_candidates = []
+    for row in store.hw_all():
+        sym = row["symbol"]
+        if row.get("hw_stop") is None or sym in levels:
+            continue
+        held = float(qty_map.get(sym) or 0) > 0
+        if held:
+            findings.append({
+                "symbol": sym, "finding": "missing_stop",
+                "hw_stop": row["hw_stop"],
+                "detail": "position held with a mark but no live stop in RH"})
+            log.warning("reconcile: %s held with high-water %.2f but no live "
+                        "stop", sym, row["hw_stop"])
+        else:
+            reset_candidates.append({
+                "symbol": sym, "hw_stop": row["hw_stop"],
+                "reason": "no live stop and no position — stale after exit"})
+            findings.append({
+                "symbol": sym, "finding": "orphan_high_water",
+                "hw_stop": row["hw_stop"],
+                "detail": "reset candidate; a stale mark blocks a re-entry"})
+
+    store.set_meta("last_reconcile_at", _now_iso())
+    log.info("reconcile: %d symbols in book, %d findings, sources=%s",
+             len(levels), len(findings), source_counts or "none")
+    return {"checked": len(levels), "observed": observed, "findings": findings,
+            "reset_candidates": reset_candidates, "source_counts": source_counts}
+
+
+# --------------------------------------------------------------------------- #
 # options sweep — DRAFT (not wired into the engine loop yet)
 # --------------------------------------------------------------------------- #
 
@@ -667,13 +977,36 @@ def sweep_options(client, store, option_positions, trail_percent=TRAIL_PERCENT,
 # cli
 # --------------------------------------------------------------------------- #
 
+def _parse_pairs(raw):
+    """Parse a SYM=VALUE,... CLI argument into {SYMBOL: float}."""
+    out = {}
+    for part in (raw or "").split(","):
+        if "=" not in part:
+            continue
+        sym, _, val = part.partition("=")
+        try:
+            out[sym.strip().upper()] = float(val)
+        except ValueError:
+            continue
+    return out
+
+
 def main():
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s %(levelname)-7s %(name)s  %(message)s",
                         datefmt="%H:%M:%S")
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("command", choices=["sweep", "check", "list"])
-    ap.add_argument("symbol", nargs="?", help="symbol for 'check'")
+    ap.add_argument("command",
+                    choices=["sweep", "check", "list", "reconcile", "hw-reset"])
+    ap.add_argument("symbol", nargs="?", help="symbol for 'check' / 'hw-reset'")
+    ap.add_argument("--reason", default="",
+                    help="why the high-water mark is being reset (hw-reset)")
+    ap.add_argument("--prices", default="",
+                    help="reconcile: SYM=PRICE,... — enables breach detection "
+                         "and the derived-level fallback")
+    ap.add_argument("--qty", default="",
+                    help="reconcile: SYM=QTY,... — separates a held position "
+                         "with no stop from a stale mark after an exit")
     ap.add_argument("--tickers", default="", help="comma-separated universe for sweep")
     ap.add_argument("--via", choices=["proxy", "box"], default="proxy")
     ap.add_argument("--live", action="store_true", help="disable dry_run (real orders)")
@@ -690,9 +1023,21 @@ def main():
         if not args.symbol:
             ap.error("check requires a symbol")
         out = check(client, store, args.symbol)
+    elif args.command == "reconcile":
+        out = reconcile(client, store,
+                        price_map=_parse_pairs(args.prices),
+                        qty_map=_parse_pairs(args.qty))
+    elif args.command == "hw-reset":
+        if not args.symbol:
+            ap.error("hw-reset requires a symbol")
+        if not args.reason:
+            ap.error("hw-reset requires --reason (the row keeps it for audit)")
+        out = store.hw_reset(args.symbol, args.reason)
     else:
         out = {"db": os.path.abspath(args.db), "rows": store.all(),
-               "last_sweep_at": store.get_meta("last_sweep_at")}
+               "high_water": store.hw_all(),
+               "last_sweep_at": store.get_meta("last_sweep_at"),
+               "last_reconcile_at": store.get_meta("last_reconcile_at")}
 
     print(json.dumps(out, indent=2, default=str))
 

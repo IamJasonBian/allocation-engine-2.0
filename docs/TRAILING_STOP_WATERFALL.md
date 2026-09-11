@@ -26,6 +26,11 @@ subject to  Σ w_i · trail_i = TRAIL_PERCENT      (the invariant)
             floor ≤ trail_i ≤ cap                (clamp, then renormalize)
 ```
 
+> **See also** `TRAILING_STOP_HIGH_WATER.md`, which anchors the stop *level*
+> to a high-water mark. It composes with this plan (distance here, level there)
+> but turns the invariant below into a ceiling (`Σ w_i · trail_i ≤
+> TRAIL_PERCENT`), since a binding floor can only tighten.
+
 where `w_i` is the symbol's market-value weight within the stopped universe
 and `σ_i` is 20-day realized volatility of daily closes. The weighted-average
 trail — the maximum aggregate giveback the stop book tolerates — stays exactly

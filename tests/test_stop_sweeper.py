@@ -305,3 +305,206 @@ def test_expiring_soon_with_naive_created_does_not_raise():
     expires = sw._plus_days(naive_created, sw.GTC_LIFETIME_DAYS)
     assert "+00:00" in expires                      # _plus_days now emits aware
     assert sw._expiring_soon({"expires_at": expires}) is False
+
+
+# --------------------------------------------------------------------------- #
+# high-water stop levels: RH client read + apply (TRAILING_STOP_HIGH_WATER.md)
+# --------------------------------------------------------------------------- #
+
+def stopped_order(symbol, level, pct="16", **over):
+    o = rh_order(symbol, pct=pct)
+    o["stop_price"] = str(level)
+    o.update(over)
+    return o
+
+
+def test_stop_level_read_from_order():
+    assert sw.stop_level_of(stopped_order("AAPL", "88.10")) == (88.10, "stop_price")
+
+
+def test_stop_level_probes_alternate_fields():
+    o = rh_order("AAPL")
+    o["trailing_peg"]["price"] = "91.25"
+    assert sw.stop_level_of(o) == (91.25, "trailing_peg.price")
+
+
+def test_stop_level_absent_is_not_guessed_from_peg():
+    # An order with only a peg percentage carries no level: the read must say
+    # so rather than inventing one, or a guess establishes a floor.
+    assert sw.stop_level_of(rh_order("AAPL")) == (None, "")
+
+
+@pytest.mark.parametrize("bad", ["", None, "0", "not-a-number"])
+def test_stop_level_rejects_unusable_values(bad):
+    assert sw.stop_level_of({"stop_price": bad}) == (None, "")
+
+
+def test_read_stop_levels_keys_by_symbol_with_peg():
+    out = sw.read_stop_levels([stopped_order("AAPL", "88.1"), rh_order("IWN", pct="20")])
+    assert out["AAPL"]["level"] == 88.1
+    assert out["AAPL"]["source"] == "stop_price"
+    assert out["IWN"]["level"] is None
+    assert out["IWN"]["trail_percent"] == 20.0
+
+
+def test_apply_high_water_is_flat_percent_without_a_mark():
+    plan = sw.apply_high_water(100, 16, None)
+    assert (plan["stop_price"], plan["peg_percent"]) == (84.0, 16.0)
+    assert not plan["binding"] and not plan["breach"]
+
+
+def test_apply_high_water_floor_binds_and_never_sits_below_the_mark():
+    # Peaked at 100 (stop 88), price has since drifted to 90: the flat 16%
+    # would write 75.60 — well under the level already earned.
+    plan = sw.apply_high_water(90, 16, 88.0)
+    assert plan["binding"] and not plan["breach"]
+    assert plan["stop_price"] >= 88.0
+    assert plan["peg_percent"] < 16
+
+
+def test_apply_high_water_quantizes_down_so_the_stop_stays_above_the_mark():
+    # Rounding the peg up would drop the stop under the mark it floors.
+    for price, hw in [(90, 88.0), (101.37, 93.11), (55.5, 51.02)]:
+        plan = sw.apply_high_water(price, 16, hw)
+        assert plan["stop_price"] >= hw
+        assert plan["peg_percent"] % sw.TRAIL_QUANTUM == 0
+
+
+def test_apply_high_water_never_rounds_the_stop_below_the_mark():
+    # Cent-rounding must not shave the level the mark is there to hold.
+    for price, hw in [(100.004, 88.0035), (33.337, 31.1119), (7.771, 7.7099)]:
+        plan = sw.apply_high_water(price, 16, hw)
+        assert plan["breach"] or plan["stop_price"] >= hw
+
+
+def test_apply_high_water_flags_a_tight_peg_rather_than_loosening_it():
+    # Below TRAIL_FLOOR, but honouring the floor would lower an earned level.
+    plan = sw.apply_high_water(90, 16, 88.0)
+    assert plan["tight"] and plan["peg_percent"] < sw.TRAIL_FLOOR
+    assert plan["stop_price"] >= 88.0
+
+
+def test_apply_high_water_breach_yields_no_placeable_order():
+    plan = sw.apply_high_water(80, 16, 88.0)
+    assert plan["breach"]
+    assert plan["stop_price"] is None and plan["peg_percent"] is None
+
+
+def test_apply_high_water_within_one_quantum_is_a_breach_not_a_rounding():
+    plan = sw.apply_high_water(100, 16, 99.8)     # implies a 0.2% peg
+    assert plan["breach"]
+
+
+# --------------------------------------------------------------------------- #
+# high-water store: monotone, survives pruning, resets keep their reason
+# --------------------------------------------------------------------------- #
+
+def test_hw_observe_raises_but_never_lowers(store):
+    assert store.hw_observe("AAPL", 88.0) == (88.0, True)
+    assert store.hw_observe("AAPL", 91.5) == (91.5, True)
+    assert store.hw_observe("AAPL", 70.0) == (91.5, False)
+    assert store.hw_get("AAPL")["hw_stop"] == 91.5
+
+
+@pytest.mark.parametrize("bad", [None, 0, -5, "junk"])
+def test_hw_observe_ignores_unusable_levels(store, bad):
+    store.hw_observe("AAPL", 88.0)
+    assert store.hw_observe("AAPL", bad) == (88.0, False)
+
+
+def test_hw_mark_survives_prune_of_the_stops_row(store):
+    # The mark has to outlive the order it was read from: prune_missing drops
+    # the stops row when a symbol leaves the RH book.
+    c = FakeClient(book=[rh_order("AAPL"), rh_order("IWN")])
+    sweep(c, store, ["AAPL", "IWN"])
+    store.hw_observe("IWN", 42.0)
+    c.book = [rh_order("AAPL")]
+    sweep(c, store, ["AAPL"])
+    assert store.get("IWN") is None
+    assert store.hw_get("IWN")["hw_stop"] == 42.0
+
+
+def test_hw_reset_clears_the_mark_and_keeps_the_reason(store):
+    store.hw_observe("AAPL", 88.0)
+    row = store.hw_reset("AAPL", "filled")
+    assert row["hw_stop"] is None
+    assert row["reset_reason"] == "filled" and row["reset_at"]
+    # A reset mark is re-established by the next observation, not blocked.
+    assert store.hw_observe("AAPL", 51.0) == (51.0, True)
+
+
+# --------------------------------------------------------------------------- #
+# reconciliation engine
+# --------------------------------------------------------------------------- #
+
+def test_reconcile_seeds_marks_from_the_rh_book(store):
+    c = FakeClient(book=[stopped_order("AAPL", "88.10"), stopped_order("IWN", "40.00")])
+    out = sw.reconcile(c, store)
+    assert out["checked"] == 2
+    assert out["source_counts"] == {"stop_price": 2}
+    assert store.hw_get("AAPL")["hw_stop"] == 88.10
+    assert out["findings"] == []
+
+
+def test_reconcile_never_touches_the_rh_book(store):
+    c = FakeClient(book=[stopped_order("AAPL", "88.10")])
+    sw.reconcile(c, store, price_map={"AAPL": 60}, qty_map={"AAPL": 5})
+    assert c.placed == [] and c.replaced == []
+
+
+def test_reconcile_reports_a_level_regression(store):
+    c = FakeClient(book=[stopped_order("AAPL", "88.00")])
+    sw.reconcile(c, store)
+    # GTC renewal rewrote the order against a lower mark.
+    c.book = [stopped_order("AAPL", "70.00")]
+    out = sw.reconcile(c, store)
+    reg = [f for f in out["findings"] if f["finding"] == "level_regression"]
+    assert len(reg) == 1
+    assert reg[0]["give_back"] == 18.0 and reg[0]["verified"] is True
+    assert store.hw_get("AAPL")["hw_stop"] == 88.00      # mark did not follow
+
+
+def test_reconcile_marks_derived_findings_unverified(store):
+    # No level on the order: derived from the mark, so a regression against it
+    # is weaker evidence and must say so.
+    c = FakeClient(book=[rh_order("AAPL")])
+    sw.reconcile(c, store, price_map={"AAPL": 100})       # -> 84.00
+    out = sw.reconcile(c, store, price_map={"AAPL": 90})  # -> 75.60
+    reg = [f for f in out["findings"] if f["finding"] == "level_regression"]
+    assert len(reg) == 1 and reg[0]["verified"] is False
+
+
+def test_reconcile_flags_a_breach_without_lowering_the_mark(store):
+    c = FakeClient(book=[stopped_order("AAPL", "88.00")])
+    sw.reconcile(c, store)
+    out = sw.reconcile(c, store, price_map={"AAPL": 80})
+    assert [f["finding"] for f in out["findings"] if f["finding"] == "hw_breach"]
+    assert store.hw_get("AAPL")["hw_stop"] == 88.00
+
+
+def test_reconcile_separates_a_held_position_from_a_stale_mark(store):
+    c = FakeClient(book=[stopped_order("HELD", "50.00"), stopped_order("GONE", "40.00")])
+    sw.reconcile(c, store)
+    c.book = []                                   # both stops vanished from RH
+    out = sw.reconcile(c, store, qty_map={"HELD": 10})
+    kinds = {f["symbol"]: f["finding"] for f in out["findings"]}
+    assert kinds == {"HELD": "missing_stop", "GONE": "orphan_high_water"}
+    assert [r["symbol"] for r in out["reset_candidates"]] == ["GONE"]
+
+
+def test_reconcile_reports_an_unreadable_level(store):
+    c = FakeClient(book=[rh_order("AAPL")])       # no stop level, no price
+    out = sw.reconcile(c, store)
+    assert [f["finding"] for f in out["findings"]] == ["no_level"]
+    assert store.hw_get("AAPL") is None
+
+
+def test_reconcile_reset_candidate_clears_and_lets_a_re_entry_rebuild(store):
+    c = FakeClient(book=[stopped_order("AAPL", "88.00")])
+    sw.reconcile(c, store)
+    c.book = []
+    out = sw.reconcile(c, store)
+    store.hw_reset(out["reset_candidates"][0]["symbol"], "position closed")
+    c.book = [stopped_order("AAPL", "30.00")]     # re-entered far lower
+    sw.reconcile(c, store)
+    assert store.hw_get("AAPL")["hw_stop"] == 30.00
