@@ -182,7 +182,7 @@ def start_engine_thread(app):
     from app.brokers.robinhood_client import RobinhoodTrader, seconds_until_hour_et
     from app.engine import AllocationEngine
     from app.runtime_client import RuntimeClient
-    from app.redis_store import sync_to_redis
+    from app.redis_store import sync_to_redis, log_redis_load
     from app.s3_store import sync_order_events
     from app.option_history_store import (
         put_position_snapshot as put_option_position_snapshot,
@@ -540,6 +540,12 @@ def start_engine_thread(app):
                         )
                     except Exception:
                         log.exception("Redis sync error")
+
+                    # Redis load check — read-only, runs in dry-run too.
+                    try:
+                        log_redis_load()
+                    except Exception:
+                        log.exception("Redis load check error")
 
                     # Option history — unconditional (runs in dry-run too) so
                     # the observational record isn't gated by trading mode.
