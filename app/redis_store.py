@@ -56,6 +56,62 @@ def _get_client():
     return None
 
 
+def log_redis_load():
+    """Probe Redis load metrics and log them at INFO level.
+
+    A lightweight health check for the orders/stocks Redis that backs the
+    market-orders sync. Reads server-wide load counters from ``INFO`` plus the
+    sizes of the two hashes this service writes, and logs a one-line summary.
+    Runs on every sync cadence regardless of trading mode — it only reads.
+
+    Returns:
+        A dict of the collected metrics, or None if Redis is unreachable.
+    """
+    client = _get_client()
+    if not client:
+        return None
+
+    try:
+        info = client.info()
+
+        used = info.get("used_memory", 0)
+        maxmem = info.get("maxmemory", 0)
+        used_pct = round(used / maxmem * 100, 1) if maxmem else None
+        hits = info.get("keyspace_hits", 0)
+        misses = info.get("keyspace_misses", 0)
+        hit_rate = round(hits / (hits + misses) * 100, 1) if (hits + misses) else None
+
+        metrics = {
+            "used_memory_human": info.get("used_memory_human"),
+            "used_memory_pct": used_pct,
+            "connected_clients": info.get("connected_clients"),
+            "ops_per_sec": info.get("instantaneous_ops_per_sec"),
+            "hit_rate_pct": hit_rate,
+            "mem_frag_ratio": info.get("mem_fragmentation_ratio"),
+            "stocks_keys": client.hlen("stocks"),
+            "orders_keys": client.hlen("orders"),
+        }
+
+        log.info(
+            "[redis-load] mem=%s (%s%% of max) clients=%s ops/s=%s "
+            "hit_rate=%s%% frag=%s stocks=%s orders=%s",
+            metrics["used_memory_human"], metrics["used_memory_pct"],
+            metrics["connected_clients"], metrics["ops_per_sec"],
+            metrics["hit_rate_pct"], metrics["mem_frag_ratio"],
+            metrics["stocks_keys"], metrics["orders_keys"],
+        )
+        return metrics
+
+    except Exception as e:
+        log.error("[redis-load] FAILED: %s", e)
+        return None
+    finally:
+        try:
+            client.close()
+        except Exception:
+            pass
+
+
 def sync_to_redis(positions, open_orders, account, live=False,
                   options_positions=None, order_events=None):
     """Write portfolio positions and orders to Redis.
