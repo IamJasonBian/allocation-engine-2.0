@@ -73,6 +73,10 @@ MCP_REFRESH_INTERVAL_SECONDS = int(
     os.getenv("MCP_REFRESH_INTERVAL_SECONDS", _get("mcp", "refresh_interval_seconds", "3600"))
 )
 
+# --- [limit] Plain limit orders via POST /orders/limit ---
+# Per-order cap on quantity * limit_price, in USD.
+LIMIT_MAX_NOTIONAL = float(os.getenv("LIMIT_MAX_NOTIONAL", _get("limit", "max_notional", "1000")))
+
 # --- Server ---
 PORT = int(os.getenv("PORT", _get("server", "port", "8080")))
 DEBUG = os.getenv("FLASK_DEBUG", _get("server", "debug", "false")).lower() == "true"

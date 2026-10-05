@@ -1,12 +1,15 @@
-"""Trade-safety guardrails — block destructive actions outside trailing stops.
+"""Trade-safety guardrails — block destructive actions outside sanctioned shapes.
 
-The service's mandate is narrow: percentage trailing-stop orders are the only
-sanctioned account mutation. These checks make that structural instead of
-conventional, on all three surfaces that could otherwise move money:
+The service's mandate is narrow: percentage trailing stops, plus plain limit
+orders under a notional cap, are the only sanctioned account
+mutations. These checks make that structural instead of conventional, on every
+surface that could otherwise move money:
 
   * /orders/trailing_stop (+ /replace) — the payload must actually BE a
     percentage trailing stop, so the allow-listed endpoint can't be used to
     smuggle a plain market/limit order to Robinhood.
+  * /orders/limit — the order must be a whole-share limit under
+    [limit] max_notional, with a UUID ref_id. The caller picks the ticker.
   * /exec/mcp — tools/call with a destructive tool name (buy/sell/place/
     cancel/…) is refused unless the tool is trailing-stop related or
     explicitly allow-listed via [mcp] allowed_tools. Reads pass through.
@@ -19,6 +22,8 @@ Callers turn a reason into HTTP 403 GUARDRAIL_BLOCKED and log it.
 """
 
 import re
+import uuid
+from decimal import Decimal, InvalidOperation
 
 import config
 
@@ -72,6 +77,39 @@ def check_trailing_stop_payload(payload: dict) -> str | None:
         qty = 0
     if qty <= 0:
         return "payload.quantity must be > 0"
+    return None
+
+
+def check_limit_order(order: dict) -> str | None:
+    """Plain limit orders: whole shares, valid tick, capped notional."""
+    if not isinstance(order.get("symbol"), str) or not order["symbol"].strip():
+        return "symbol is required"
+    if order.get("side") not in ("buy", "sell"):
+        return "side must be 'buy' or 'sell'"
+    try:
+        qty = Decimal(str(order.get("quantity")))
+        price = Decimal(str(order.get("limit_price")))
+    except InvalidOperation:
+        return "quantity and limit_price must be numbers"
+    if not (qty.is_finite() and price.is_finite()):
+        return "quantity and limit_price must be finite"
+    if qty <= 0 or qty != qty.to_integral_value():
+        return "quantity must be a positive whole number of shares"
+    if price <= 0:
+        return "limit_price must be > 0"
+    max_places = 2 if price >= 1 else 4
+    if -price.normalize().as_tuple().exponent > max_places:
+        return "limit_price %s has more than %d decimal places" % (price, max_places)
+    notional = qty * price
+    if notional > Decimal(str(config.LIMIT_MAX_NOTIONAL)):
+        return "notional $%s exceeds [limit] max_notional $%s" % (
+            notional, config.LIMIT_MAX_NOTIONAL)
+    if order.get("time_in_force", "gfd") not in ("gfd", "gtc"):
+        return "time_in_force must be 'gfd' or 'gtc'"
+    try:
+        uuid.UUID(str(order.get("ref_id")))
+    except ValueError:
+        return "ref_id must be a UUID (idempotency key; reuse it on retry)"
     return None
 
 

@@ -4,6 +4,7 @@ Scope is deliberately narrow (per the service's mandate):
   * authenticate (password grant + device-approval / MFA)
   * read active percentage trailing-stop orders
   * place / replace percentage trailing-stop orders
+  * place plain limit orders (see guardrails.py)
 
 The exact request/response shapes are modelled on robin_stocks, which may be
 stale — so every network step logs its raw JSON (truncated) at DEBUG so we can
@@ -349,6 +350,53 @@ def place_trailing_stop(session: Session, payload: dict, dry_run: bool = True) -
     http = _new_session()
     http.headers.update(session.headers())
     return _dump("orders (place)", http.post(f"{BASE}/orders/", json=payload, timeout=15))
+
+
+def get_instrument_url(session: Session, symbol: str) -> str:
+    """Resolve a ticker to its tradeable instrument URL (exact symbol match)."""
+    http = _new_session()
+    http.headers.update(session.headers())
+    data = _dump("instruments", http.get(f"{BASE}/instruments/",
+                                         params={"symbol": symbol}, timeout=10))
+    for inst in data.get("results", []):
+        if inst.get("symbol", "").upper() == symbol.upper():
+            if not inst.get("tradeable"):
+                raise RuntimeError(f"{symbol} is not tradeable")
+            return inst["url"]
+    raise RuntimeError(f"no instrument for {symbol}")
+
+
+def place_limit_order(session: Session, order: dict, dry_run: bool = True) -> dict:
+    """Build a regular-hours limit order from a guardrail-checked intent and place it.
+
+    Raises on a non-2xx from Robinhood so a rejected order never reads as placed.
+    """
+    symbol = order["symbol"].upper()
+    payload = {
+        "account": session.account_url,
+        "instrument": get_instrument_url(session, symbol),
+        "symbol": symbol,
+        "type": "limit",
+        "time_in_force": order.get("time_in_force", "gfd"),
+        "trigger": "immediate",
+        "side": order["side"],
+        "quantity": str(int(float(order["quantity"]))),
+        "price": str(order["limit_price"]),
+        "market_hours": "regular_hours",
+        "extended_hours": False,
+        "ref_id": str(order["ref_id"]),
+    }
+    if dry_run:
+        log.info("[dry_run] would POST %s/orders/ %s", BASE, json.dumps(payload))
+        return {"dry_run": True, "method": "POST", "url": f"{BASE}/orders/", "payload": payload}
+    http = _new_session()
+    http.headers.update(session.headers())
+    resp = http.post(f"{BASE}/orders/", json=payload, timeout=15)
+    data = _dump("orders (limit)", resp)
+    if not resp.ok:
+        raise RuntimeError(f"Robinhood rejected order: HTTP {resp.status_code} "
+                           f"{json.dumps(_redact(data))[:500]}")
+    return data
 
 
 def replace_trailing_stop(session: Session, order_id: str, payload: dict,

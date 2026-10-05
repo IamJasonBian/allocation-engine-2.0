@@ -3,6 +3,7 @@
 import os
 import sys
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("AUTH_SERVICE_ENV", "/nonexistent-env-for-tests")
@@ -74,6 +75,40 @@ class TrailingStopPayloadTests(unittest.TestCase):
                 _valid_trailing_payload(
                     trailing_peg={"type": "percentage", "percentage": pct})),
                 msg=f"pct={pct}")
+
+
+def _limit_order(**overrides):
+    order = {"symbol": "MU", "side": "buy", "quantity": 2, "limit_price": "95.50",
+             "time_in_force": "gfd", "ref_id": "6a4698d9-a3c4-4621-a699-7b6eafe5bb14"}
+    return {**order, **overrides}
+
+
+class LimitOrderTests(unittest.TestCase):
+    def setUp(self):
+        patcher = mock.patch.object(config, "LIMIT_MAX_NOTIONAL", 1000.0)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_valid_orders_pass(self):
+        for o in ({}, {"side": "sell", "time_in_force": "gtc"}, {"limit_price": "0.1234"}):
+            self.assertIsNone(guardrails.check_limit_order(_limit_order(**o)), msg=o)
+
+    def test_invalid_orders_blocked(self):
+        cases = [
+            ({"symbol": None}, "symbol"), ({"symbol": "  "}, "symbol"),
+            ({"side": "short"}, "side"),
+            ({"quantity": 1.5}, "whole"), ({"quantity": 0}, "whole"),
+            ({"quantity": "NaN"}, "finite"), ({"quantity": None}, "numbers"),
+            ({"limit_price": 0}, "> 0"), ({"limit_price": "95.555"}, "decimal places"),
+            ({"limit_price": "0.12345"}, "decimal places"),
+            ({"limit_price": "Infinity"}, "finite"),
+            ({"quantity": 11}, "max_notional"),
+            ({"time_in_force": "ioc"}, "time_in_force"),
+            ({"ref_id": "abc"}, "ref_id"), ({"ref_id": None}, "ref_id"),
+        ]
+        for overrides, expected in cases:
+            reason = guardrails.check_limit_order(_limit_order(**overrides))
+            self.assertIn(expected, reason or "", msg=overrides)
 
 
 class McpPayloadTests(unittest.TestCase):
