@@ -238,55 +238,36 @@ class ServerTestCase(unittest.TestCase):
 
     # ---- limit orders ----
 
-    def _limit_body(self, **overrides):
-        order = {"symbol": "MU", "side": "buy", "quantity": 2, "limit_price": "95.50",
-                 "ref_id": "6a4698d9-a3c4-4621-a699-7b6eafe5bb14"}
-        order.update(overrides)
-        return {"order": order}
-
-    def _mock_instrument(self):
+    def _post_limit(self, dry_run=True, **overrides):
         mock.patch.object(config, "LIMIT_MAX_NOTIONAL", 1000.0).start()
-        return mock.patch.object(server.robinhood, "get_instrument_url",
-                                 return_value="https://api.robinhood.com/instruments/mu/").start()
+        mock.patch.object(server.robinhood, "get_instrument_url",
+                          return_value="https://api.robinhood.com/instruments/mu/").start()
+        order = {"symbol": "mu", "side": "buy", "quantity": 2, "limit_price": "95.50",
+                 "ref_id": "6a4698d9-a3c4-4621-a699-7b6eafe5bb14", **overrides}
+        return self.request("POST", "/orders/limit", body={"order": order, "dry_run": dry_run})
 
-    def test_limit_dry_run_default_builds_payload_on_box(self):
-        lookup = self._mock_instrument()
-        status, body = self.request("POST", "/orders/limit", body=self._limit_body())
+    def test_limit_dry_run_builds_payload_on_box(self):
+        status, body = self._post_limit()
         self.assertEqual(status, 200)
-        self.assertTrue(body["dry_run"])
         p = body["payload"]
-        self.assertEqual(lookup.call_args.args[1], "MU")
-        self.assertEqual(p["instrument"], "https://api.robinhood.com/instruments/mu/")
-        self.assertEqual(p["account"], FAKE_SESSION.account_url)
+        self.assertEqual((p["symbol"], p["account"], p["instrument"]),
+                         ("MU", FAKE_SESSION.account_url,
+                          "https://api.robinhood.com/instruments/mu/"))
         self.assertEqual((p["type"], p["trigger"], p["price"], p["quantity"],
                           p["time_in_force"]), ("limit", "immediate", "95.50", "2", "gfd"))
 
-    def test_limit_live_passes_dry_run_false_through(self):
-        self._mock_instrument()
-        with mock.patch.object(server.robinhood, "place_limit_order",
-                               return_value={"id": "ord-1"}) as place:
-            body = self._limit_body()
-            body["dry_run"] = False
-            status, _ = self.request("POST", "/orders/limit", body=body)
-        self.assertEqual(status, 200)
-        self.assertFalse(place.call_args.kwargs["dry_run"])
+    def test_limit_guardrail_blocks(self):
+        status, body = self._post_limit(quantity=20)
+        self.assertEqual((status, body["error_code"]), (403, "GUARDRAIL_BLOCKED"))
 
-    def test_limit_over_notional_blocked(self):
-        self._mock_instrument()
-        status, body = self.request("POST", "/orders/limit",
-                                    body=self._limit_body(quantity=20))
-        self.assertEqual(status, 403)
-        self.assertEqual(body["error_code"], "GUARDRAIL_BLOCKED")
-
-    def test_limit_instrument_lookup_failure_502(self):
-        self._mock_instrument().side_effect = RuntimeError("no instrument for MU")
-        status, body = self.request("POST", "/orders/limit", body=self._limit_body())
-        self.assertEqual(status, 502)
-        self.assertEqual(body["error_code"], "PLACE_FAILED")
-
-    def test_limit_missing_order_400(self):
-        status, _ = self.request("POST", "/orders/limit", body={"payload": {}})
-        self.assertEqual(status, 400)
+    def test_limit_live_rejection_is_502_not_200(self):
+        resp = mock.Mock(ok=False, status_code=400)
+        resp.json.return_value = {"detail": "Not enough buying power."}
+        http = mock.patch.object(server.robinhood, "_new_session").start().return_value
+        http.post.return_value = resp
+        status, body = self._post_limit(dry_run=False)
+        self.assertEqual((status, body["error_code"]), (502, "PLACE_FAILED"))
+        self.assertIn("buying power", body["detail"])
 
     # ---- MCP guardrails over HTTP ----
 

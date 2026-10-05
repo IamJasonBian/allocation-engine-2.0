@@ -366,33 +366,37 @@ def get_instrument_url(session: Session, symbol: str) -> str:
     raise RuntimeError(f"no instrument for {symbol}")
 
 
-def build_limit_order_payload(*, account_url: str, instrument_url: str, symbol: str,
-                              side: str, quantity, limit_price, ref_id: str,
-                              time_in_force: str = "gfd") -> dict:
-    """Construct a regular-hours limit order payload."""
-    return {
-        "account": account_url,
-        "instrument": instrument_url,
+def place_limit_order(session: Session, order: dict, dry_run: bool = True) -> dict:
+    """Build a regular-hours limit order from a guardrail-checked intent and place it.
+
+    Raises on a non-2xx from Robinhood so a rejected order never reads as placed.
+    """
+    symbol = order["symbol"].upper()
+    payload = {
+        "account": session.account_url,
+        "instrument": get_instrument_url(session, symbol),
         "symbol": symbol,
         "type": "limit",
-        "time_in_force": time_in_force,
+        "time_in_force": order.get("time_in_force", "gfd"),
         "trigger": "immediate",
-        "side": side,
-        "quantity": str(quantity),
-        "price": str(limit_price),
+        "side": order["side"],
+        "quantity": str(int(float(order["quantity"]))),
+        "price": str(order["limit_price"]),
         "market_hours": "regular_hours",
         "extended_hours": False,
-        "ref_id": ref_id,
+        "ref_id": str(order["ref_id"]),
     }
-
-
-def place_limit_order(session: Session, payload: dict, dry_run: bool = True) -> dict:
     if dry_run:
         log.info("[dry_run] would POST %s/orders/ %s", BASE, json.dumps(payload))
         return {"dry_run": True, "method": "POST", "url": f"{BASE}/orders/", "payload": payload}
     http = _new_session()
     http.headers.update(session.headers())
-    return _dump("orders (limit)", http.post(f"{BASE}/orders/", json=payload, timeout=15))
+    resp = http.post(f"{BASE}/orders/", json=payload, timeout=15)
+    data = _dump("orders (limit)", resp)
+    if not resp.ok:
+        raise RuntimeError(f"Robinhood rejected order: HTTP {resp.status_code} "
+                           f"{json.dumps(_redact(data))[:500]}")
+    return data
 
 
 def replace_trailing_stop(session: Session, order_id: str, payload: dict,

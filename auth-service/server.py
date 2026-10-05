@@ -244,9 +244,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send(502, {"error_code": "REPLACE_FAILED", "detail": str(e)})
 
     def _handle_place_limit(self):
-        # Unlike the trailing-stop relay, the box builds this payload itself
-        # (instrument + account resolved here), so the requested symbol is
-        # the instrument that actually trades.
+        # The box builds the payload (instrument + account resolved here), so
+        # the requested symbol is the instrument that actually trades.
         if not self._authorized():
             self._send(401, {"error": "unauthorized"})
             return
@@ -267,21 +266,9 @@ class Handler(BaseHTTPRequestHandler):
         if err:
             self._send(409, err)
             return
-        symbol = order["symbol"].upper()
         try:
-            payload = robinhood.build_limit_order_payload(
-                account_url=sess.account_url,
-                instrument_url=robinhood.get_instrument_url(sess, symbol),
-                symbol=symbol,
-                side=order["side"],
-                quantity=int(float(order["quantity"])),
-                limit_price=order["limit_price"],
-                ref_id=str(order["ref_id"]),
-                time_in_force=order.get("time_in_force", "gfd"),
-            )
-            result = robinhood.place_limit_order(
-                sess, payload, dry_run=body.get("dry_run", True))
-            self._send(200, result)
+            self._send(200, robinhood.place_limit_order(
+                sess, order, dry_run=body.get("dry_run", True)))
         except Exception as e:  # noqa: BLE001
             log.exception("limit place failed")
             self._send(502, {"error_code": "PLACE_FAILED", "detail": str(e)})
