@@ -11,6 +11,7 @@ Endpoints (all POSTs and order reads require Bearer EXEC_TOKEN):
   GET  /orders/trailing_stop          — active percentage trailing-stop orders
   POST /orders/trailing_stop          — place one (dry_run defaults to true)
   POST /orders/trailing_stop/replace  — replace one (dry_run defaults to true)
+  POST /orders/limit                  — place a limit order (dry_run defaults to true)
   POST /exec                          — run an external command
 
 Threaded server; single process; tiny footprint (e2-micro friendly).
@@ -141,6 +142,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_place()
         elif route == "/orders/trailing_stop/replace":
             self._handle_replace()
+        elif route == "/orders/limit":
+            self._handle_place_limit()
         elif route == "/command":
             self._handle_command()
         elif route == "/exec/mcp":
@@ -239,6 +242,49 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:  # noqa: BLE001
             log.exception("replace failed")
             self._send(502, {"error_code": "REPLACE_FAILED", "detail": str(e)})
+
+    def _handle_place_limit(self):
+        # Unlike the trailing-stop relay, the box builds this payload itself
+        # (instrument + account resolved here), so the requested symbol is
+        # the instrument that actually trades.
+        if not self._authorized():
+            self._send(401, {"error": "unauthorized"})
+            return
+        try:
+            body = self._read_json()
+        except json.JSONDecodeError:
+            self._send(400, {"error": "invalid JSON body"})
+            return
+        order = body.get("order")
+        if not isinstance(order, dict):
+            self._send(400, {"error": "missing 'order' object"})
+            return
+        reason = guardrails.check_limit_order(order)
+        if reason:
+            self._guardrail_block(reason)
+            return
+        sess, err = _ensure_session(self._profile(body))
+        if err:
+            self._send(409, err)
+            return
+        symbol = order["symbol"].upper()
+        try:
+            payload = robinhood.build_limit_order_payload(
+                account_url=sess.account_url,
+                instrument_url=robinhood.get_instrument_url(sess, symbol),
+                symbol=symbol,
+                side=order["side"],
+                quantity=int(float(order["quantity"])),
+                limit_price=order["limit_price"],
+                ref_id=str(order["ref_id"]),
+                time_in_force=order.get("time_in_force", "gfd"),
+            )
+            result = robinhood.place_limit_order(
+                sess, payload, dry_run=body.get("dry_run", True))
+            self._send(200, result)
+        except Exception as e:  # noqa: BLE001
+            log.exception("limit place failed")
+            self._send(502, {"error_code": "PLACE_FAILED", "detail": str(e)})
 
     def _handle_command(self):
         # Generic authenticated intake for other services. For now we validate

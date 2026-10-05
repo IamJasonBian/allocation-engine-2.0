@@ -76,6 +76,60 @@ class TrailingStopPayloadTests(unittest.TestCase):
                 msg=f"pct={pct}")
 
 
+def _valid_limit_order(**overrides):
+    order = {"symbol": "MU", "side": "buy", "quantity": 2, "limit_price": "95.50",
+             "time_in_force": "gfd", "ref_id": "6a4698d9-a3c4-4621-a699-7b6eafe5bb14"}
+    order.update(overrides)
+    return order
+
+
+class LimitOrderTests(unittest.TestCase):
+    def setUp(self):
+        self._saved = config.LIMIT_MAX_NOTIONAL
+        config.LIMIT_MAX_NOTIONAL = 1000.0
+
+    def tearDown(self):
+        config.LIMIT_MAX_NOTIONAL = self._saved
+
+    def test_valid_order_passes(self):
+        self.assertIsNone(guardrails.check_limit_order(_valid_limit_order()))
+        self.assertIsNone(guardrails.check_limit_order(
+            _valid_limit_order(symbol="nvda", side="sell", time_in_force="gtc")))
+
+    def test_missing_symbol_blocked(self):
+        for sym in (None, "", "  ", 5):
+            self.assertIn("symbol", guardrails.check_limit_order(
+                _valid_limit_order(symbol=sym)), msg=f"symbol={sym!r}")
+
+    def test_notional_cap(self):
+        self.assertIn("max_notional", guardrails.check_limit_order(
+            _valid_limit_order(quantity=11, limit_price="95.50")))
+
+    def test_bad_quantities_blocked(self):
+        for qty in (0, -1, 1.5, "junk", "NaN", None):
+            self.assertIsNotNone(guardrails.check_limit_order(
+                _valid_limit_order(quantity=qty)), msg=f"qty={qty}")
+
+    def test_bad_prices_blocked(self):
+        for price in (0, -1, "95.555", "0.12345", "junk", "Infinity", None):
+            self.assertIsNotNone(guardrails.check_limit_order(
+                _valid_limit_order(limit_price=price)), msg=f"price={price}")
+
+    def test_sub_dollar_price_allows_four_places(self):
+        self.assertIsNone(guardrails.check_limit_order(
+            _valid_limit_order(limit_price="0.1234")))
+
+    def test_bad_side_and_tif_blocked(self):
+        self.assertIn("side", guardrails.check_limit_order(_valid_limit_order(side="short")))
+        self.assertIn("time_in_force", guardrails.check_limit_order(
+            _valid_limit_order(time_in_force="ioc")))
+
+    def test_ref_id_must_be_uuid(self):
+        for ref in (None, "", "abc"):
+            self.assertIn("ref_id", guardrails.check_limit_order(
+                _valid_limit_order(ref_id=ref)), msg=f"ref_id={ref}")
+
+
 class McpPayloadTests(unittest.TestCase):
     def _call(self, tool, arguments=None):
         return {"jsonrpc": "2.0", "id": 1, "method": "tools/call",

@@ -44,6 +44,7 @@ PRIVILEGED = [
     ("POST", "/login"),
     ("POST", "/orders/trailing_stop"),
     ("POST", "/orders/trailing_stop/replace"),
+    ("POST", "/orders/limit"),
     ("POST", "/command"),
     ("POST", "/exec"),
     ("POST", "/exec/mcp"),
@@ -234,6 +235,58 @@ class ServerTestCase(unittest.TestCase):
             body={"order_id": "ord-1", "payload": _valid_trailing_payload()})
         self.assertEqual(status, 200)
         self.assertTrue(body["dry_run"])
+
+    # ---- limit orders ----
+
+    def _limit_body(self, **overrides):
+        order = {"symbol": "MU", "side": "buy", "quantity": 2, "limit_price": "95.50",
+                 "ref_id": "6a4698d9-a3c4-4621-a699-7b6eafe5bb14"}
+        order.update(overrides)
+        return {"order": order}
+
+    def _mock_instrument(self):
+        mock.patch.object(config, "LIMIT_MAX_NOTIONAL", 1000.0).start()
+        return mock.patch.object(server.robinhood, "get_instrument_url",
+                                 return_value="https://api.robinhood.com/instruments/mu/").start()
+
+    def test_limit_dry_run_default_builds_payload_on_box(self):
+        lookup = self._mock_instrument()
+        status, body = self.request("POST", "/orders/limit", body=self._limit_body())
+        self.assertEqual(status, 200)
+        self.assertTrue(body["dry_run"])
+        p = body["payload"]
+        self.assertEqual(lookup.call_args.args[1], "MU")
+        self.assertEqual(p["instrument"], "https://api.robinhood.com/instruments/mu/")
+        self.assertEqual(p["account"], FAKE_SESSION.account_url)
+        self.assertEqual((p["type"], p["trigger"], p["price"], p["quantity"],
+                          p["time_in_force"]), ("limit", "immediate", "95.50", "2", "gfd"))
+
+    def test_limit_live_passes_dry_run_false_through(self):
+        self._mock_instrument()
+        with mock.patch.object(server.robinhood, "place_limit_order",
+                               return_value={"id": "ord-1"}) as place:
+            body = self._limit_body()
+            body["dry_run"] = False
+            status, _ = self.request("POST", "/orders/limit", body=body)
+        self.assertEqual(status, 200)
+        self.assertFalse(place.call_args.kwargs["dry_run"])
+
+    def test_limit_over_notional_blocked(self):
+        self._mock_instrument()
+        status, body = self.request("POST", "/orders/limit",
+                                    body=self._limit_body(quantity=20))
+        self.assertEqual(status, 403)
+        self.assertEqual(body["error_code"], "GUARDRAIL_BLOCKED")
+
+    def test_limit_instrument_lookup_failure_502(self):
+        self._mock_instrument().side_effect = RuntimeError("no instrument for MU")
+        status, body = self.request("POST", "/orders/limit", body=self._limit_body())
+        self.assertEqual(status, 502)
+        self.assertEqual(body["error_code"], "PLACE_FAILED")
+
+    def test_limit_missing_order_400(self):
+        status, _ = self.request("POST", "/orders/limit", body={"payload": {}})
+        self.assertEqual(status, 400)
 
     # ---- MCP guardrails over HTTP ----
 
