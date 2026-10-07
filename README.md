@@ -113,7 +113,6 @@ systemctl restart auth-service
 | `RUNTIME_SERVICE_URL` | Runtime service base URL | `https://route-runtime-service.netlify.app/api` |
 | `POLL_INTERVAL_SECONDS` | Engine loop interval | `30` |
 | `DRY_RUN` | Log orders without submitting | `true` |
-| `ENGINE_ENABLED` | Run background engine loop | `true` |
 | `ENGINE_BROKER` | Broker for engine reconciliation | `alpaca` |
 | `PORT` | Server port | `10000` |
 
@@ -222,10 +221,9 @@ graph TD
     API --> POS[positions.py]
     API --> ORD[orders.py]
     API --> PORT[portfolio.py]
-    API --> EAPI[engine_api.py]
 
     ACCT & POS & ORD & PORT --> SCH[app/schemas.py]
-    ACCT & POS & ORD & PORT & EAPI --> BREG[app/brokers/__init__.py]
+    ACCT & POS & ORD & PORT --> BREG[app/brokers/__init__.py]
 
     BGM --> ENG[app/engine.py]
     BGM --> BREG

@@ -108,7 +108,6 @@ class Config:
     # -- Engine --
     POLL_INTERVAL_SECONDS = int(os.getenv("POLL_INTERVAL_SECONDS", "30"))
     DRY_RUN = os.getenv("DRY_RUN", "true").lower() == "true"
-    ENGINE_ENABLED = os.getenv("ENGINE_ENABLED", "true").lower() == "true"
     ENGINE_BROKER = os.getenv("ENGINE_BROKER", "robinhood")
     DATA_BROKER = os.getenv("DATA_BROKER", "alpaca")
     MAX_ORDER_QTY = int(os.getenv("MAX_ORDER_QTY", "50"))

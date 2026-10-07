@@ -37,8 +37,6 @@ services:
         sync: false
       - key: DRY_RUN
         value: "true"
-      - key: ENGINE_ENABLED
-        value: "true"
       - key: ENGINE_BROKER
         value: "alpaca"
       - key: POLL_INTERVAL_SECONDS
@@ -84,8 +82,6 @@ services:
       - key: SLACK_WEBHOOK_URL
         sync: false
       - key: DRY_RUN
-        value: "true"
-      - key: ENGINE_ENABLED
         value: "true"
       - key: ENGINE_BROKER
         value: "alpaca"

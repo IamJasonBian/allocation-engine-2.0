@@ -33,9 +33,30 @@ def test_a_normal_book_publishes():
 
 
 
-def test_engine_disabled_does_not_start_loop():
-    from types import SimpleNamespace
+def _gunicorn_conf():
+    import os
+    import runpy
+    return runpy.run_path(os.path.join(os.path.dirname(__file__), "..", "gunicorn.conf.py"))
+
+
+def test_web_service_does_not_start_the_engine(monkeypatch):
+    import threading
+    monkeypatch.setenv("RENDER_SERVICE_TYPE", "web")
+    _gunicorn_conf()["post_fork"](None, None)
+    assert not any(t.name == "engine-loop" for t in threading.enumerate())
+
+
+def test_api_exposes_no_engine_routes():
+    from app import create_app
+    rules = [r.rule for r in create_app().url_map.iter_rules()]
+    assert not any(r.startswith("/api/engine") for r in rules)
+
+
+def test_worker_service_starts_the_engine(monkeypatch):
+    import threading
     from app import background
-    background._engine_thread = None
-    background.start_engine_thread(SimpleNamespace(config={"ENGINE_ENABLED": False}))
-    assert background._engine_thread is None
+    started = threading.Event()
+    monkeypatch.setattr(background, "run_engine_loop", lambda app: started.set())
+    monkeypatch.setenv("RENDER_SERVICE_TYPE", "worker")
+    _gunicorn_conf()["post_fork"](None, None)
+    assert started.wait(timeout=5)
