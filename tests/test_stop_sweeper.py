@@ -32,11 +32,13 @@ from app.stop_sweeper import (
 class FakeClient:
     """In-memory stand-in for the auth-service; validates like real clients."""
 
-    def __init__(self, book=None):
+    def __init__(self, book=None, option_positions=None, option_orders=None):
         self.book = book or []          # orders "on RH"
         self.rh_reads = 0               # how often we hit "RH"
         self.placed = []
         self.replaced = []
+        self._option_positions = option_positions if option_positions is not None else []
+        self._option_orders = option_orders if option_orders is not None else []
 
     def get_stops(self):
         self.rh_reads += 1
@@ -57,6 +59,12 @@ class FakeClient:
     def mcp_call(self, payload):
         validate_mcp_call(payload)
         return {"ok": True}
+
+    def get_option_positions(self):
+        return list(self._option_positions)
+
+    def get_option_orders(self):
+        return list(self._option_orders)
 
     def place_option_limit(self, order, dry_run=True):
         self.placed.append((order, dry_run))
@@ -326,8 +334,10 @@ def _long_option_pos(**overrides):
         "expiration": "2026-03-20",
         "position_type": "long",
         "quantity": 2,
-        "avg_price": 2.0,
-        "mark_price": 2.5,
+        "purchase_price": 2.0,
+        "average_price": 200.0,
+        "entry_source": "position_average_price",
+        "source": "robinhood",
     }
     base.update(overrides)
     return base
@@ -338,9 +348,9 @@ def test_option_take_profit_limit_price():
 
 
 def test_sweep_options_take_profit_places_sell_to_close_limit(store):
-    client = FakeClient()
     pos = [_long_option_pos()]
-    out = sweep_options_take_profit(client, store, pos, tp_percent=50, dry_run=True)
+    client = FakeClient(option_positions=pos)
+    out = sweep_options_take_profit(client, store, tp_percent=50, dry_run=True)
     assert len(out["placed"]) == 1
     order, dry = client.placed[0]
     assert dry is True
@@ -351,17 +361,16 @@ def test_sweep_options_take_profit_places_sell_to_close_limit(store):
 
 
 def test_sweep_options_take_profit_runs_once_per_day(store):
-    client = FakeClient()
     pos = [_long_option_pos()]
-    sweep_options_take_profit(client, store, pos, dry_run=True)
+    client = FakeClient(option_positions=pos)
+    sweep_options_take_profit(client, store, dry_run=True)
     client.placed.clear()
-    out = sweep_options_take_profit(client, store, pos, dry_run=True)
+    out = sweep_options_take_profit(client, store, dry_run=True)
     assert out.get("skipped") == "already_swept_today"
     assert client.placed == []
 
 
 def test_sweep_options_take_profit_skips_duplicate_open_order(store):
-    client = FakeClient()
     pos = [_long_option_pos()]
     open_orders = [{
         "state": "queued",
@@ -374,7 +383,7 @@ def test_sweep_options_take_profit_skips_duplicate_open_order(store):
             "expiration": "2026-03-20",
         }],
     }]
-    out = sweep_options_take_profit(
-        client, store, pos, open_option_orders=open_orders, dry_run=True)
+    client = FakeClient(option_positions=pos, option_orders=open_orders)
+    out = sweep_options_take_profit(client, store, dry_run=True)
     assert out["placed"] == []
     assert any(s.get("reason") == "tp_limit_already_open" for s in out["skipped"])

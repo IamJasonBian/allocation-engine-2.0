@@ -253,11 +253,9 @@ def start_engine_thread(app):
             sweeper_client = None
             sweeper_store = None
 
-            def _maybe_option_take_profit_sweep(option_positions, raw_option_orders):
+            def _maybe_option_take_profit_sweep():
                 nonlocal sweeper_client, sweeper_store
                 if not config.get("OPTION_TP_ENABLED", True):
-                    return
-                if not option_positions:
                     return
                 if not config.get("AUTH_SERVICE_URL") or not config.get(
                         "RH_AUTH_SERVICE_REQUEST_TOKEN"):
@@ -278,11 +276,9 @@ def start_engine_thread(app):
                 dry = config.get("OPTION_TP_SWEEP_DRY_RUN", True)
                 tp = float(config.get("OPTION_TP_PERCENT", 50))
                 log.info("[opt-tp] starting daily take-profit sweep "
-                         "(positions=%d, tp=%.0f%%, dry_run=%s)",
-                         len(option_positions), tp, dry)
+                         "(tp=%.0f%%, dry_run=%s)", tp, dry)
                 out = sw.sweep_options_take_profit(
-                    sweeper_client, sweeper_store, option_positions,
-                    open_option_orders=raw_option_orders or [],
+                    sweeper_client, sweeper_store,
                     tp_percent=tp, dry_run=dry)
                 placed = out.get("placed") or []
                 log.info("[opt-tp] sweep done: placed=%d skipped=%d",
@@ -458,7 +454,6 @@ def start_engine_thread(app):
 
                     # --- Fetch options positions & orders ---
                     options_positions = []
-                    raw_opt_orders: list[dict] = []
                     options_open_orders: list[OrderEvent] = []
                     if hasattr(broker, "options_positions"):
                         try:
@@ -474,7 +469,7 @@ def start_engine_thread(app):
                             log.exception("Failed to fetch options orders")
 
                     try:
-                        _maybe_option_take_profit_sweep(options_positions, raw_opt_orders)
+                        _maybe_option_take_profit_sweep()
                     except Exception as tp_err:
                         log.exception("[opt-tp] sweep failed: %s", tp_err)
 

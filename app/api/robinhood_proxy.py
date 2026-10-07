@@ -52,6 +52,20 @@ def get_trailing_stop():
     return _handle(client.get_trailing_stop_orders)
 
 
+@bp.route("/robinhood/positions/options", methods=["GET"])
+def get_option_positions():
+    """Open option lots from Robinhood (RH lot average_price / purchase_price)."""
+    client = AuthServiceClient()
+    return _handle(client.get_option_positions)
+
+
+@bp.route("/robinhood/orders/options", methods=["GET"])
+def get_option_orders():
+    """Open option orders from Robinhood (take-profit dedup)."""
+    client = AuthServiceClient()
+    return _handle(client.get_option_orders)
+
+
 @bp.route("/robinhood/trailing-stop", methods=["POST"])
 def place_trailing_stop():
     """Build and place a trailing-stop order (allow-listed direct call).

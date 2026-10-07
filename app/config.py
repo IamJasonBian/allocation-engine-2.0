@@ -74,7 +74,7 @@ class Config:
     OPTION_TP_ENABLED = os.getenv("OPTION_TP_ENABLED", "true").lower() == "true"
     OPTION_TP_SWEEP_DRY_RUN = os.getenv("OPTION_TP_SWEEP_DRY_RUN", "true").lower() == "true"
     OPTION_TP_SWEEP_HOUR_ET = int(os.getenv("OPTION_TP_SWEEP_HOUR_ET", "0"))
-    # Resting sell-to-close limit at avg_entry * (1 + pct/100).
+    # Resting sell-to-close limit at RH lot purchase_price * (1 + pct/100).
     OPTION_TP_PERCENT = float(os.getenv("OPTION_TP_PERCENT", "50"))
 
     # -- Trading DB write path (5thstreetcapital Netlify functions) --

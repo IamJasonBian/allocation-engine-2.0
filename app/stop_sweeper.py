@@ -165,6 +165,16 @@ class ProxyClient:
         raise NotImplementedError(
             "replace is not exposed via the Render proxy — run with --via box")
 
+    def get_option_positions(self):
+        r = requests.get(f"{self.base}/positions/options", timeout=self.timeout)
+        r.raise_for_status()
+        return r.json().get("positions", [])
+
+    def get_option_orders(self):
+        r = requests.get(f"{self.base}/orders/options", timeout=self.timeout)
+        r.raise_for_status()
+        return r.json().get("orders", [])
+
     def mcp_call(self, payload):
         validate_mcp_call(payload)
         r = requests.post(f"{self.base}/mcp", json={"payload": payload},
@@ -207,6 +217,20 @@ class BoxClient:
                           headers=self.headers, timeout=self.timeout)
         r.raise_for_status()
         return r.json()
+
+    def get_option_positions(self):
+        """Open option lots from Robinhood (via auth-service)."""
+        r = requests.get(f"{self.base}/positions/options",
+                         headers=self.headers, timeout=self.timeout)
+        r.raise_for_status()
+        return r.json().get("positions", [])
+
+    def get_option_orders(self):
+        """Open option orders from Robinhood (via auth-service)."""
+        r = requests.get(f"{self.base}/orders/options",
+                         headers=self.headers, timeout=self.timeout)
+        r.raise_for_status()
+        return r.json().get("orders", [])
 
     def place_option_limit(self, order, dry_run=True):
         """Single-leg option limit; box resolves contract via RH instruments APIs."""
@@ -657,26 +681,32 @@ def option_contract_key(contract):
     )
 
 
-def option_take_profit_limit(avg_price, tp_percent):
+def option_take_profit_limit(entry_premium, tp_percent):
     """Premium limit for sell-to-close take profit."""
-    return round(float(avg_price) * (1 + float(tp_percent) / 100.0), 2)
+    return round(float(entry_premium) * (1 + float(tp_percent) / 100.0), 2)
 
 
-def build_option_take_profit_order(contract, quantity, avg_price, tp_percent,
+def build_option_take_profit_order(contract, quantity, entry_premium, tp_percent,
                                    ref_id=None):
     return {
         "contract": contract,
         "action": "sell_to_close",
         "quantity": int(quantity),
-        "limit_price": str(option_take_profit_limit(avg_price, tp_percent)),
+        "limit_price": str(option_take_profit_limit(entry_premium, tp_percent)),
         "time_in_force": "gtc",
         "ref_id": ref_id or str(uuid.uuid4()),
     }
 
 
+def _limit_prices_match(left, right):
+    try:
+        return abs(float(left) - float(right)) < 0.005
+    except (TypeError, ValueError):
+        return str(left) == str(right)
+
+
 def _open_tp_limit_exists(open_option_orders, contract_key, limit_price):
     """Skip if an open sell-to-close limit already rests at this contract/price."""
-    target = str(limit_price)
     for o in open_option_orders or []:
         if o.get("state") not in _OPEN_OPT_STATES:
             continue
@@ -686,27 +716,58 @@ def _open_tp_limit_exists(open_option_orders, contract_key, limit_price):
         key = (
             (leg.get("chain_symbol") or o.get("chain_symbol") or "").upper(),
             str(leg.get("option_type") or o.get("option_type") or "").lower(),
-            float(leg.get("strike") or o.get("strike") or 0),
-            leg.get("expiration") or o.get("expiration") or "",
+            float(leg.get("strike") or leg.get("strike_price") or o.get("strike") or 0),
+            leg.get("expiration") or leg.get("expiration_date")
+            or o.get("expiration") or "",
         )
         if key != contract_key:
             continue
         px = o.get("limit_price") or o.get("price")
-        if px is not None and str(px) == target:
+        if px is not None and _limit_prices_match(px, limit_price):
             return True
     return False
 
 
-def sweep_options_take_profit(client, store, option_positions,
-                              open_option_orders=None,
-                              tp_percent=OPTION_TP_PERCENT, dry_run=True):
+def _entry_premium_from_rh_position(position):
+    """Original purchase premium per contract — RH lot only (never mark/mid)."""
+    if position.get("purchase_price") is not None:
+        try:
+            px = float(position["purchase_price"])
+        except (TypeError, ValueError):
+            px = 0.0
+        if px > 0:
+            return px
+    raw = position.get("average_price")
+    if raw is None:
+        return None
+    try:
+        cents = float(raw)
+    except (TypeError, ValueError):
+        return None
+    return cents / 100.0 if cents > 0 else None
+
+
+def sweep_options_take_profit(client, store, tp_percent=OPTION_TP_PERCENT,
+                              dry_run=True):
     """Once-per-day: resting sell-to-close limits at entry + tp_percent.
 
-    Contract identity is chain_symbol/strike/expiration/option_type; the
-    auth-service box resolves GET /instruments/ + GET /options/instruments/.
+    Positions and open orders are read from Robinhood via the auth-service
+    (GET /positions/options, GET /orders/options). Take-profit limits use
+    RH lot ``purchase_price`` (or ``average_price`` cents fallback), not
+    mark or dashboard-derived prices. Placement uses GET /instruments/ +
+    GET /options/instruments/ on the box.
     """
     if store.option_tp_swept_today():
         return {"skipped": "already_swept_today", "placed": [], "surveyed": []}
+
+    log.info("[opt-tp] fetching option positions and open orders from RH (box)")
+    try:
+        option_positions = client.get_option_positions()
+        open_option_orders = client.get_option_orders()
+    except Exception as e:  # noqa: BLE001
+        log.warning("[opt-tp] RH read failed: %s", e)
+        return {"skipped": "rh_read_failed", "placed": [], "surveyed": [],
+                "detail": str(e)}
 
     surveyed, placed, skipped = [], [], []
     for p in option_positions or []:
@@ -718,20 +779,20 @@ def sweep_options_take_profit(client, store, option_positions,
         if not contract:
             skipped.append({"reason": "incomplete_contract", "position": p})
             continue
-        avg = p.get("avg_price")
-        if not avg:
-            skipped.append({"contract": contract, "reason": "no_avg_price"})
+        entry = _entry_premium_from_rh_position(p)
+        if entry is None or entry <= 0:
+            skipped.append({"contract": contract, "reason": "no_purchase_price"})
             continue
         whole = int(qty)
         if whole < 1:
             skipped.append({"contract": contract, "reason": "fractional_qty"})
             continue
         ckey = option_contract_key(contract)
-        limit_px = option_take_profit_limit(avg, tp_percent)
+        limit_px = option_take_profit_limit(entry, tp_percent)
         if _open_tp_limit_exists(open_option_orders, ckey, limit_px):
             skipped.append({"contract": contract, "reason": "tp_limit_already_open"})
             continue
-        order = build_option_take_profit_order(contract, whole, avg, tp_percent)
+        order = build_option_take_profit_order(contract, whole, entry, tp_percent)
         surveyed.append({"contract": contract, "quantity": whole, "order": order})
         sym = contract["chain_symbol"]
         try:
