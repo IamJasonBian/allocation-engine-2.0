@@ -4,6 +4,7 @@ Scope is deliberately narrow (per the service's mandate):
   * authenticate (password grant + device-approval / MFA)
   * read active percentage trailing-stop orders
   * place / replace percentage trailing-stop orders
+  * place single-leg option limit orders (see options_model.py)
 
 The exact request/response shapes are modelled on robin_stocks, which may be
 stale — so every network step logs its raw JSON (truncated) at DEBUG so we can
@@ -349,6 +350,91 @@ def place_trailing_stop(session: Session, payload: dict, dry_run: bool = True) -
     http = _new_session()
     http.headers.update(session.headers())
     return _dump("orders (place)", http.post(f"{BASE}/orders/", json=payload, timeout=15))
+
+
+def _options_chain_id(session: Session, chain_symbol: str) -> str:
+    sym = chain_symbol.upper()
+    http = _new_session()
+    http.headers.update(session.headers())
+    data = _dump("instruments (chain)", http.get(f"{BASE}/instruments/",
+                                                 params={"symbol": sym}, timeout=10))
+    for inst in data.get("results", []):
+        if inst.get("symbol", "").upper() == sym:
+            chain_id = inst.get("tradable_chain_id")
+            if chain_id:
+                return chain_id
+            raise RuntimeError(f"{sym} has no tradable options chain")
+    raise RuntimeError(f"no instrument for {sym}")
+
+
+def get_option_instrument_url(session: Session, chain_symbol: str, expiration: str,
+                              strike, option_type: str) -> str:
+    chain_id = _options_chain_id(session, chain_symbol)
+    http = _new_session()
+    http.headers.update(session.headers())
+    data = _dump("options/instruments", http.get(
+        f"{BASE}/options/instruments/",
+        params={
+            "chain_id": chain_id,
+            "expiration_dates": expiration,
+            "strike_price": strike,
+            "type": option_type.lower(),
+            "state": "active",
+        },
+        timeout=10,
+    ))
+    for inst in data.get("results", []):
+        if inst.get("expiration_date") == expiration:
+            return inst["url"]
+    raise RuntimeError(
+        f"no {option_type} {chain_symbol} {expiration} @ {strike}")
+
+
+def place_option_limit_order(session: Session, order: dict, dry_run: bool = True) -> dict:
+    """Build Robinhood's options/orders payload from a guardrail-checked intent."""
+    from options_model import parse_contract, rh_leg_from_action
+
+    contract, err = parse_contract(order["contract"])
+    if err:
+        raise ValueError(err)
+    leg_meta = rh_leg_from_action(order["action"])
+    if not leg_meta:
+        raise ValueError(f"unknown action {order['action']!r}")
+
+    option_url = get_option_instrument_url(
+        session, contract["chain_symbol"], contract["expiration"],
+        contract["strike"], contract["option_type"])
+    qty = int(float(order["quantity"]))
+    payload = {
+        "account": session.account_url,
+        "direction": leg_meta["direction"],
+        "time_in_force": order.get("time_in_force", "gtc"),
+        "legs": [{
+            "position_effect": leg_meta["position_effect"],
+            "side": leg_meta["side"],
+            "ratio_quantity": 1,
+            "option": option_url,
+        }],
+        "type": "limit",
+        "trigger": "immediate",
+        "price": str(order["limit_price"]),
+        "quantity": qty,
+        "override_day_trade_checks": False,
+        "override_dtbp_checks": False,
+        "ref_id": str(order["ref_id"]),
+    }
+    url = f"{BASE}/options/orders/"
+    if dry_run:
+        log.info("[dry_run] would POST %s %s", url, json.dumps(payload))
+        return {"dry_run": True, "method": "POST", "url": url, "payload": payload}
+    http = _new_session()
+    http.headers.update(session.headers())
+    resp = http.post(url, json=payload, timeout=15)
+    data = _dump("options/orders (limit)", resp)
+    if not resp.ok:
+        raise RuntimeError(f"Robinhood rejected order: HTTP {resp.status_code} "
+                           f"{json.dumps(_redact(data))[:500]}")
+    return data
 
 
 def replace_trailing_stop(session: Session, order_id: str, payload: dict,

@@ -3,6 +3,7 @@
 import os
 import sys
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("AUTH_SERVICE_ENV", "/nonexistent-env-for-tests")
@@ -74,6 +75,63 @@ class TrailingStopPayloadTests(unittest.TestCase):
                 _valid_trailing_payload(
                     trailing_peg={"type": "percentage", "percentage": pct})),
                 msg=f"pct={pct}")
+
+
+def _option_limit_order(**overrides):
+    order = {
+        "contract": {
+            "chain_symbol": "MU", "option_type": "call", "strike": 95,
+            "expiration": "2026-03-20",
+        },
+        "action": "buy_to_open",
+        "quantity": 1, "limit_price": "2.50", "time_in_force": "gtc",
+        "ref_id": "6a4698d9-a3c4-4621-a699-7b6eafe5bb14",
+    }
+    if overrides:
+        contract_over = {k: v for k, v in overrides.items()
+                         if k in ("chain_symbol", "option_type", "strike", "expiration")}
+        top = {k: v for k, v in overrides.items() if k not in contract_over}
+        if contract_over:
+            order["contract"] = {**order["contract"], **contract_over}
+        order.update(top)
+    return order
+
+
+class OptionLimitOrderTests(unittest.TestCase):
+    def setUp(self):
+        patcher = mock.patch.object(config, "OPTIONS_LIMIT_MAX_NOTIONAL", 1000.0)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_valid_orders_pass(self):
+        cases = [
+            _option_limit_order(),
+            _option_limit_order(action="sell_to_open"),
+            _option_limit_order(limit_price="0.1234"),
+            _option_limit_order(option_type="put"),
+        ]
+        for order in cases:
+            self.assertIsNone(guardrails.check_option_limit_order(order), msg=order)
+
+    def test_invalid_orders_blocked(self):
+        cases = [
+            ({"chain_symbol": None}, "chain_symbol"),
+            ({"chain_symbol": "  "}, "chain_symbol"),
+            ({"option_type": "straddle"}, "option_type"),
+            ({"expiration": "03/20/2026"}, "expiration"),
+            ({"strike": 0}, "strike"),
+            ({"action": "buy"}, "action"),
+            ({"quantity": 1.5}, "contracts"), ({"quantity": 0}, "contracts"),
+            ({"quantity": "NaN"}, "finite"),
+            ({"limit_price": 0}, "> 0"), ({"limit_price": "2.555"}, "decimal places"),
+            ({"limit_price": "0.12345"}, "decimal places"),
+            ({"quantity": 5}, "max_notional"),
+            ({"time_in_force": "ioc"}, "time_in_force"),
+            ({"ref_id": "abc"}, "ref_id"),
+        ]
+        for overrides, expected in cases:
+            reason = guardrails.check_option_limit_order(_option_limit_order(**overrides))
+            self.assertIn(expected, reason or "", msg=overrides)
 
 
 class McpPayloadTests(unittest.TestCase):

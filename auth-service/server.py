@@ -11,6 +11,7 @@ Endpoints (all POSTs and order reads require Bearer EXEC_TOKEN):
   GET  /orders/trailing_stop          — active percentage trailing-stop orders
   POST /orders/trailing_stop          — place one (dry_run defaults to true)
   POST /orders/trailing_stop/replace  — replace one (dry_run defaults to true)
+  POST /orders/options/limit          — single-leg option limit (dry_run default)
   POST /exec                          — run an external command
 
 Threaded server; single process; tiny footprint (e2-micro friendly).
@@ -141,6 +142,8 @@ class Handler(BaseHTTPRequestHandler):
             self._handle_place()
         elif route == "/orders/trailing_stop/replace":
             self._handle_replace()
+        elif route == "/orders/options/limit":
+            self._handle_place_option_limit()
         elif route == "/command":
             self._handle_command()
         elif route == "/exec/mcp":
@@ -239,6 +242,34 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:  # noqa: BLE001
             log.exception("replace failed")
             self._send(502, {"error_code": "REPLACE_FAILED", "detail": str(e)})
+
+    def _handle_place_option_limit(self):
+        if not self._authorized():
+            self._send(401, {"error": "unauthorized"})
+            return
+        try:
+            body = self._read_json()
+        except json.JSONDecodeError:
+            self._send(400, {"error": "invalid JSON body"})
+            return
+        order = body.get("order")
+        if not isinstance(order, dict):
+            self._send(400, {"error": "missing 'order' object"})
+            return
+        reason = guardrails.check_option_limit_order(order)
+        if reason:
+            self._guardrail_block(reason)
+            return
+        sess, err = _ensure_session(self._profile(body))
+        if err:
+            self._send(409, err)
+            return
+        try:
+            self._send(200, robinhood.place_option_limit_order(
+                sess, order, dry_run=body.get("dry_run", True)))
+        except Exception as e:  # noqa: BLE001
+            log.exception("option limit place failed")
+            self._send(502, {"error_code": "PLACE_FAILED", "detail": str(e)})
 
     def _handle_command(self):
         # Generic authenticated intake for other services. For now we validate

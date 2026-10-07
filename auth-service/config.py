@@ -73,6 +73,12 @@ MCP_REFRESH_INTERVAL_SECONDS = int(
     os.getenv("MCP_REFRESH_INTERVAL_SECONDS", _get("mcp", "refresh_interval_seconds", "3600"))
 )
 
+# --- [options] Single-leg option limits via POST /orders/options/limit ---
+# Cap on quantity * premium * 100, in USD.
+OPTIONS_LIMIT_MAX_NOTIONAL = float(
+    os.getenv("OPTIONS_LIMIT_MAX_NOTIONAL", _get("options", "limit_max_notional", "1000"))
+)
+
 # --- Server ---
 PORT = int(os.getenv("PORT", _get("server", "port", "8080")))
 DEBUG = os.getenv("FLASK_DEBUG", _get("server", "debug", "false")).lower() == "true"
