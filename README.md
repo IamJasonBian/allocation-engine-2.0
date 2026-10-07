@@ -71,6 +71,33 @@ python main.py --broker alpaca run
 
 Broker defaults to `DEFAULT_BROKER` env var. Append `/alpaca` or `/robinhood` to target a specific broker.
 
+## Deploy
+
+```
+gcloud auth login
+
+gcloud compute instances list --project route-manager-prod \
+  --filter='name=allocation-engine-auth-service-prod' 
+  --format='table(name,status,networkInterfaces[0].accessConfigs[0].natIP)'
+
+gcloud compute ssh allocation-engine-auth-service-prod \
+  --zone us-central1-c --project route-manager-prod -- \
+  'curl -sf http://127.0.0.1:8080/health && echo && \
+   curl -sf http://127.0.0.1:8080/auth/status | head -c 500; echo; \
+   systemctl is-active auth-service 2>/dev/null || pgrep -af "auth-service|server.py"'
+
+Out:
+{"status": "ok", "service": "auth-service"}
+{"profile": "rh.auth", "authenticated": true, "token_unexpired": true, "token_verified": true, "verify_interval": 300, "expires_at": "", "account_number": ""}
+
+
+Single Line Change:
+git fetch origin
+git restore --source=origin/feat/auth-service-options-limit -- auth-service/
+
+systemctl restart auth-service
+```
+
 ## Environment Variables
 
 | Variable | Description | Default |
