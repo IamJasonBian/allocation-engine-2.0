@@ -98,6 +98,9 @@ def maybe_stop_sweep(config, state, current_positions):
     """
     if not config["STOP_SWEEP_ENABLED"]:
         return
+    # BoxClient raises SystemExit without these, which would kill the loop.
+    if not config["AUTH_SERVICE_URL"] or not config["RH_AUTH_SERVICE_REQUEST_TOKEN"]:
+        return
     state.ensure(config)
     if state.store.swept_today():
         return
