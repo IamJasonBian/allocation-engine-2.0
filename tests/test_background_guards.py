@@ -31,3 +31,11 @@ def test_a_genuinely_flat_book_with_cash_still_publishes():
 def test_a_normal_book_publishes():
     assert book_looks_unreadable([POSITION], [OPTION], REAL_ACCOUNT) is False
 
+
+
+def test_engine_disabled_does_not_start_loop():
+    from types import SimpleNamespace
+    from app import background
+    background._engine_thread = None
+    background.start_engine_thread(SimpleNamespace(config={"ENGINE_ENABLED": False}))
+    assert background._engine_thread is None

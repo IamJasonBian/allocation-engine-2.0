@@ -176,6 +176,9 @@ def start_engine_thread(app):
     if _engine_thread and _engine_thread.is_alive():
         log.info("[engine] Thread already alive, skipping")
         return
+    if not app.config.get("ENGINE_ENABLED", True):
+        log.info("[engine] ENGINE_ENABLED=false — engine loop not started")
+        return
 
     # Import everything here (called from gunicorn post_fork, not create_app)
     from app.brokers import get_broker, clear_broker
@@ -250,27 +253,31 @@ def start_engine_thread(app):
             # local sqlite queue, cover naked tickers with a 16% stop, renew
             # stops near GTC expiry. Never breaks the tick; every action is
             # logged so it is visible in Render logs.
-            sweeper_client = None
-            sweeper_store = None
+            # Equity stop sweep and option take-profit sweep are independent:
+            # each has its own toggle, box client, and store handle.
+            stop_client = None
+            stop_store = None
+            opt_tp_client = None
+            opt_tp_store = None
 
             def _maybe_option_take_profit_sweep():
-                nonlocal sweeper_client, sweeper_store
+                nonlocal opt_tp_client, opt_tp_store
                 if not config.get("OPTION_TP_ENABLED", True):
                     return
                 if not config.get("AUTH_SERVICE_URL") or not config.get(
                         "RH_AUTH_SERVICE_REQUEST_TOKEN"):
                     return
                 from app import stop_sweeper as sw
-                if sweeper_store is None:
-                    sweeper_store = sw.StopStore(config.get("STOP_DB_PATH", sw.DEFAULT_DB))
-                if sweeper_store.option_tp_swept_today():
+                if opt_tp_store is None:
+                    opt_tp_store = sw.StopStore(config.get("STOP_DB_PATH", sw.DEFAULT_DB))
+                if opt_tp_store.option_tp_swept_today():
                     return
                 from zoneinfo import ZoneInfo
                 hour_et = datetime.now(ZoneInfo("America/New_York")).hour
                 if hour_et < int(config.get("OPTION_TP_SWEEP_HOUR_ET", 0)):
                     return
-                if sweeper_client is None:
-                    sweeper_client = sw.BoxClient(
+                if opt_tp_client is None:
+                    opt_tp_client = sw.BoxClient(
                         base=config.get("AUTH_SERVICE_URL", ""),
                         token=config.get("RH_AUTH_SERVICE_REQUEST_TOKEN", ""))
                 dry = config.get("OPTION_TP_SWEEP_DRY_RUN", True)
@@ -278,7 +285,7 @@ def start_engine_thread(app):
                 log.info("[opt-tp] starting daily take-profit sweep "
                          "(tp=%.0f%%, dry_run=%s)", tp, dry)
                 out = sw.sweep_options_take_profit(
-                    sweeper_client, sweeper_store,
+                    opt_tp_client, opt_tp_store,
                     tp_percent=tp, dry_run=dry)
                 placed = out.get("placed") or []
                 log.info("[opt-tp] sweep done: placed=%d skipped=%d",
@@ -303,18 +310,20 @@ def start_engine_thread(app):
                                  (res or {}).get("data", "failed"))
 
             def _maybe_stop_sweep(current_positions):
-                nonlocal sweeper_client, sweeper_store
+                nonlocal stop_client, stop_store
+                if not config.get("STOP_SWEEP_ENABLED", True):
+                    return
                 from app import stop_sweeper as sw
-                if sweeper_store is None:
-                    sweeper_store = sw.StopStore(config.get("STOP_DB_PATH", sw.DEFAULT_DB))
-                if sweeper_store.swept_today():
+                if stop_store is None:
+                    stop_store = sw.StopStore(config.get("STOP_DB_PATH", sw.DEFAULT_DB))
+                if stop_store.swept_today():
                     return
                 from zoneinfo import ZoneInfo
                 hour_et = datetime.now(ZoneInfo("America/New_York")).hour
                 if hour_et < int(config.get("STOP_SWEEP_HOUR_ET", 0)):
                     return
-                if sweeper_client is None:
-                    sweeper_client = sw.BoxClient(
+                if stop_client is None:
+                    stop_client = sw.BoxClient(
                         base=config.get("AUTH_SERVICE_URL", ""),
                         token=config.get("RH_AUTH_SERVICE_REQUEST_TOKEN", ""))
                 tickers = [t.strip().upper() for t in
@@ -351,7 +360,7 @@ def start_engine_thread(app):
                          "(tickers=%s, trail=%.0f%%, vol_scaled=%s, dry_run=%s)",
                          tickers or "book-only", sw.TRAIL_PERCENT,
                          bool(trail_map), dry)
-                out = sw.sweep(sweeper_client, sweeper_store, tickers,
+                out = sw.sweep(stop_client, stop_store, tickers,
                                dry_run=dry, qty_map=qty_map, price_map=price_map,
                                account_url=sw.account_url_from_box(),
                                trail_map=trail_map)

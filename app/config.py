@@ -58,6 +58,7 @@ class Config:
     # -- Trailing-stop sweeper (runs in the background engine loop) --
     # Universe beyond current positions; comma-separated symbols.
     STOP_TICKERS = os.getenv("STOP_TICKERS", "")
+    STOP_SWEEP_ENABLED = os.getenv("STOP_SWEEP_ENABLED", "true").lower() == "true"
     # Sweeper writes stay dry-run unless explicitly armed.
     STOP_SWEEP_DRY_RUN = os.getenv("STOP_SWEEP_DRY_RUN", "true").lower() == "true"
     # Earliest ET hour for the daily sweep (0 = first tick of the day).
