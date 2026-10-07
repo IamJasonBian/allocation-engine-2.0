@@ -367,7 +367,12 @@ class RobinhoodTrader(BrokerClient):
     # -- options ------------------------------------------------------------
 
     def options_positions(self) -> list[dict]:
-        """Return current options positions."""
+        """Return current options positions.
+
+        Entry premium is Robinhood's lot ``average_price`` on
+        ``GET options/positions/`` (cents → ``purchase_price`` dollars).
+        Mark/greeks come from RH option market data — never derived in UI.
+        """
         self._ensure_auth()
         try:
             raw = rh.options.get_open_option_positions()
@@ -386,7 +391,8 @@ class RobinhoodTrader(BrokerClient):
             chain_symbol = pos.get("chain_symbol", "")
             # RH's position.type is direction (long/short), not contract kind.
             position_type = pos.get("type", "")
-            avg_price = float(pos.get("average_price", 0)) / 100  # RH stores in cents
+            average_price_cents = float(pos.get("average_price", 0) or 0)
+            purchase_price = average_price_cents / 100.0
             trade_value_multiplier = float(pos.get("trade_value_multiplier", 100))
 
             # Get option instrument details
@@ -420,7 +426,7 @@ class RobinhoodTrader(BrokerClient):
             # Get market data for this option (includes greeks). The RH
             # endpoint requires call/put — we pass option_type which now holds
             # the instrument's contract kind, not direction.
-            mark_price = avg_price
+            mark_price = purchase_price
             greeks = {"delta": None, "gamma": None, "theta": None, "vega": None, "iv": None}
             underlying_price = None
             try:
@@ -430,7 +436,7 @@ class RobinhoodTrader(BrokerClient):
                 )
                 if market_data and isinstance(market_data, list) and market_data[0]:
                     md = market_data[0]
-                    mark_price = float(md.get("mark_price", avg_price))
+                    mark_price = float(md.get("mark_price", purchase_price))
                     for g in ("delta", "gamma", "theta", "vega"):
                         val = md.get(g)
                         if val is not None:
@@ -464,7 +470,7 @@ class RobinhoodTrader(BrokerClient):
                 except Exception:
                     pass
 
-            cost_basis = qty * avg_price * trade_value_multiplier
+            cost_basis = qty * purchase_price * trade_value_multiplier
             current_value = qty * mark_price * trade_value_multiplier
             unrealized_pl = current_value - cost_basis
 
@@ -476,8 +482,11 @@ class RobinhoodTrader(BrokerClient):
                 "expiration": expiration,
                 "dte": dte,
                 "quantity": qty,
-                "avg_price": round(avg_price, 4),
+                # avg_price kept for Trading DB / dashboard (tradingDb.cjs reads it).
+                "avg_price": round(purchase_price, 4),
+                "purchase_price": round(purchase_price, 4),
                 "mark_price": round(mark_price, 4),
+                "source": "robinhood",
                 "multiplier": trade_value_multiplier,
                 "cost_basis": round(cost_basis, 2),
                 "current_value": round(current_value, 2),

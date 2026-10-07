@@ -65,7 +65,7 @@ def put_position_snapshot(positions: list[dict], ts: datetime,
 
     Always writes (even when `positions` is empty) so the series carries flat
     periods explicitly. Stamps `mark_stale: true` on any row where
-    `mark_price == avg_price`, flagging the Robinhood stale-mark case for
+    `mark_price == purchase_price`, flagging the Robinhood stale-mark case for
     downstream filtering.
     """
     creds = _creds()
@@ -78,8 +78,10 @@ def put_position_snapshot(positions: list[dict], ts: datetime,
     for p in positions:
         row = dict(p)
         mark = row.get("mark_price")
-        avg = row.get("avg_price")
-        row["mark_stale"] = (mark is not None and avg is not None and mark == avg)
+        entry = row.get("purchase_price")
+        if entry is None:
+            entry = row.get("avg_price")
+        row["mark_stale"] = (mark is not None and entry is not None and mark == entry)
         stamped.append(row)
 
     underlying_prices: dict[str, float] = {}

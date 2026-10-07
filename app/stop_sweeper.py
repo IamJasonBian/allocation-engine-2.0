@@ -48,6 +48,7 @@ BOX_BASE = os.getenv("AUTH_SERVICE_URL", "")
 BOX_TOKEN = os.getenv("RH_AUTH_SERVICE_REQUEST_TOKEN", "")
 
 TRAIL_PERCENT = float(os.getenv("STOP_TRAIL_PERCENT", "16"))
+OPTION_TP_PERCENT = float(os.getenv("OPTION_TP_PERCENT", "75"))
 # Vol-scaled trail bounds (docs/TRAILING_STOP_WATERFALL.md): clamp then
 # renormalize so the budget invariant survives; quantize to broker-friendly steps.
 TRAIL_FLOOR = 8.0
@@ -164,6 +165,16 @@ class ProxyClient:
         raise NotImplementedError(
             "replace is not exposed via the Render proxy — run with --via box")
 
+    def get_option_positions(self):
+        r = requests.get(f"{self.base}/positions/options", timeout=self.timeout)
+        r.raise_for_status()
+        return r.json().get("positions", [])
+
+    def get_option_orders(self):
+        r = requests.get(f"{self.base}/orders/options", timeout=self.timeout)
+        r.raise_for_status()
+        return r.json().get("orders", [])
+
     def mcp_call(self, payload):
         validate_mcp_call(payload)
         r = requests.post(f"{self.base}/mcp", json={"payload": payload},
@@ -203,6 +214,28 @@ class BoxClient:
         r = requests.post(f"{self.base}/orders/trailing_stop/replace",
                           json={"order_id": order_id, "payload": payload,
                                 "dry_run": dry_run},
+                          headers=self.headers, timeout=self.timeout)
+        r.raise_for_status()
+        return r.json()
+
+    def get_option_positions(self):
+        """Open option lots from Robinhood (via auth-service)."""
+        r = requests.get(f"{self.base}/positions/options",
+                         headers=self.headers, timeout=self.timeout)
+        r.raise_for_status()
+        return r.json().get("positions", [])
+
+    def get_option_orders(self):
+        """Open option orders from Robinhood (via auth-service)."""
+        r = requests.get(f"{self.base}/orders/options",
+                         headers=self.headers, timeout=self.timeout)
+        r.raise_for_status()
+        return r.json().get("orders", [])
+
+    def place_option_limit(self, order, dry_run=True):
+        """Single-leg option limit; box resolves contract via RH instruments APIs."""
+        r = requests.post(f"{self.base}/orders/options/limit",
+                          json={"order": order, "dry_run": dry_run},
                           headers=self.headers, timeout=self.timeout)
         r.raise_for_status()
         return r.json()
@@ -292,6 +325,10 @@ class StopStore:
 
     def swept_today(self):
         last = self.get_meta("last_sweep_at")
+        return bool(last) and last[:10] == _now_iso()[:10]
+
+    def option_tp_swept_today(self):
+        last = self.get_meta("last_option_tp_sweep_at")
         return bool(last) and last[:10] == _now_iso()[:10]
 
 
@@ -614,53 +651,169 @@ def check(client, store, symbol):
 
 
 # --------------------------------------------------------------------------- #
-# options sweep — DRAFT (not wired into the engine loop yet)
+# options take-profit sweep (daily, engine loop)
 # --------------------------------------------------------------------------- #
 
-def sweep_options(client, store, option_positions, trail_percent=TRAIL_PERCENT,
-                  dry_run=True):
-    """DRAFT: protective-stop sweep for long option positions.
+_OPEN_OPT_STATES = {"queued", "confirmed", "partially_filled", "pending", "unconfirmed"}
 
-    Mirrors the equity sweep's shape (cover naked positions, sqlite-first
-    queue) but options need a different order model than equity trailing
-    stops, so for now this only surveys and records intent — it never places.
 
-    option_positions: list from broker.options_positions() with at least
-        {chain_symbol, option_id/option, quantity, type ('long'/'short'), ...}
+def _contract_from_position(position):
+    sym = position.get("chain_symbol") or position.get("symbol")
+    kind = str(position.get("option_type") or "").lower()
+    strike = position.get("strike")
+    exp = position.get("expiration")
+    if not sym or kind not in ("call", "put") or not strike or not exp:
+        return None
+    return {
+        "chain_symbol": str(sym).upper(),
+        "option_type": kind,
+        "strike": strike,
+        "expiration": str(exp),
+    }
 
-    TODO(options-sweep):
-      - RH options have no `trailing_peg`; a protective exit is a stop or
-        stop-limit on the *option contract* (option_id), or a % move in the
-        underlying. Decide the instrument: stop on the option leg vs. an
-        underlying-triggered close. Confirm the payload against a live read
-        the way we did for equities (initial stop_price was the missing key).
-      - Only long positions (type == 'long', quantity > 0) get a protective
-        sell-to-close; short options need buy-to-close and different risk.
-      - Reuse client.get_stops() equivalent for options (needs an
-        auth-service /orders/option_trailing_stop or MCP tool) to detect
-        already-covered contracts before placing.
-      - Expiry: option orders don't share the 90-day GTC lifetime; key the
-        queue on option_id and reconcile against contract expiration instead.
-      - Add guardrails: only sell-to-close / buy-to-close on held contracts,
-        never opening new option exposure.
-    """
-    surveyed, todo = [], []
-    for p in option_positions or []:
-        sym = (p.get("chain_symbol") or p.get("symbol") or "").upper()
-        qty = float(p.get("quantity", 0) or 0)
-        if qty <= 0 or (p.get("type") or "long") != "long":
+
+def option_contract_key(contract):
+    return (
+        contract["chain_symbol"],
+        contract["option_type"],
+        float(contract["strike"]),
+        contract["expiration"],
+    )
+
+
+def option_take_profit_limit(entry_premium, tp_percent):
+    """Premium limit for sell-to-close take profit."""
+    return round(float(entry_premium) * (1 + float(tp_percent) / 100.0), 2)
+
+
+def build_option_take_profit_order(contract, quantity, entry_premium, tp_percent,
+                                   ref_id=None):
+    return {
+        "contract": contract,
+        "action": "sell_to_close",
+        "quantity": int(quantity),
+        "limit_price": str(option_take_profit_limit(entry_premium, tp_percent)),
+        "time_in_force": "gtc",
+        "ref_id": ref_id or str(uuid.uuid4()),
+    }
+
+
+def _limit_prices_match(left, right):
+    try:
+        return abs(float(left) - float(right)) < 0.005
+    except (TypeError, ValueError):
+        return str(left) == str(right)
+
+
+def _open_tp_limit_exists(open_option_orders, contract_key, limit_price):
+    """Skip if an open sell-to-close limit already rests at this contract/price."""
+    for o in open_option_orders or []:
+        if o.get("state") not in _OPEN_OPT_STATES:
             continue
-        contract = p.get("option") or p.get("option_id") or ""
-        surveyed.append({"symbol": sym, "option_id": contract, "quantity": qty})
-        # TODO(options-sweep): replace this with a real protective-order
-        # placement once the option order model above is settled.
-        todo.append(sym)
-        log.info("[opt-sweep] would protect %s x%s (contract=%s) — NOT placed "
-                 "(draft)", sym, qty, str(contract)[-12:])
+        leg = (o.get("legs") or [{}])[0] if o.get("legs") else {}
+        if str(leg.get("side") or o.get("side") or "").lower() != "sell":
+            continue
+        key = (
+            (leg.get("chain_symbol") or o.get("chain_symbol") or "").upper(),
+            str(leg.get("option_type") or o.get("option_type") or "").lower(),
+            float(leg.get("strike") or leg.get("strike_price") or o.get("strike") or 0),
+            leg.get("expiration") or leg.get("expiration_date")
+            or o.get("expiration") or "",
+        )
+        if key != contract_key:
+            continue
+        px = o.get("limit_price") or o.get("price")
+        if px is not None and _limit_prices_match(px, limit_price):
+            return True
+    return False
 
-    log.info("[opt-sweep] DRAFT survey: %d long option positions, "
-             "placement not implemented (dry_run=%s)", len(surveyed), dry_run)
-    return {"surveyed": surveyed, "todo_place": todo, "placed": []}
+
+def _entry_premium_from_rh_position(position):
+    """Original purchase premium per contract — RH lot only (never mark/mid)."""
+    if position.get("purchase_price") is not None:
+        try:
+            px = float(position["purchase_price"])
+        except (TypeError, ValueError):
+            px = 0.0
+        if px > 0:
+            return px
+    raw = position.get("average_price")
+    if raw is None:
+        return None
+    try:
+        cents = float(raw)
+    except (TypeError, ValueError):
+        return None
+    return cents / 100.0 if cents > 0 else None
+
+
+def sweep_options_take_profit(client, store, tp_percent=OPTION_TP_PERCENT,
+                              dry_run=True):
+    """Once-per-day: resting sell-to-close limits at entry + tp_percent.
+
+    Positions and open orders are read from Robinhood via the auth-service
+    (GET /positions/options, GET /orders/options). Take-profit limits use
+    RH lot ``purchase_price`` (or ``average_price`` cents fallback), not
+    mark or dashboard-derived prices. Placement uses GET /instruments/ +
+    GET /options/instruments/ on the box.
+    """
+    if store.option_tp_swept_today():
+        return {"skipped": "already_swept_today", "placed": [], "surveyed": []}
+
+    log.info("[opt-tp] fetching option positions and open orders from RH (box)")
+    try:
+        option_positions = client.get_option_positions()
+        open_option_orders = client.get_option_orders()
+    except Exception as e:  # noqa: BLE001
+        log.warning("[opt-tp] RH read failed: %s", e)
+        return {"skipped": "rh_read_failed", "placed": [], "surveyed": [],
+                "detail": str(e)}
+
+    surveyed, placed, skipped = [], [], []
+    for p in option_positions or []:
+        qty = float(p.get("quantity", 0) or 0)
+        direction = p.get("position_type") or p.get("type") or "long"
+        if qty <= 0 or str(direction).lower() != "long":
+            continue
+        contract = _contract_from_position(p)
+        if not contract:
+            skipped.append({"reason": "incomplete_contract", "position": p})
+            continue
+        entry = _entry_premium_from_rh_position(p)
+        if entry is None or entry <= 0:
+            skipped.append({"contract": contract, "reason": "no_purchase_price"})
+            continue
+        whole = int(qty)
+        if whole < 1:
+            skipped.append({"contract": contract, "reason": "fractional_qty"})
+            continue
+        ckey = option_contract_key(contract)
+        limit_px = option_take_profit_limit(entry, tp_percent)
+        if _open_tp_limit_exists(open_option_orders, ckey, limit_px):
+            skipped.append({"contract": contract, "reason": "tp_limit_already_open"})
+            continue
+        order = build_option_take_profit_order(contract, whole, entry, tp_percent)
+        surveyed.append({"contract": contract, "quantity": whole, "order": order})
+        sym = contract["chain_symbol"]
+        try:
+            result = client.place_option_limit(order, dry_run=dry_run)
+        except Exception as e:  # noqa: BLE001
+            log.warning("[opt-tp] %s failed: %s", sym, e)
+            skipped.append({"contract": contract, "reason": str(e)})
+            continue
+        ok, detail = _placement_ok(result)
+        if not ok:
+            skipped.append({"contract": contract, "reason": detail})
+            continue
+        placed.append({"contract": contract, "result": result})
+        log.info("[opt-tp] %s %s %s sell_to_close limit $%s qty=%s (dry_run=%s)",
+                 sym, contract["option_type"], contract["expiration"],
+                 order["limit_price"], whole, dry_run)
+
+    store.set_meta("last_option_tp_sweep_at", _now_iso())
+    log.info("[opt-tp] surveyed=%d placed=%d skipped=%d dry_run=%s",
+             len(surveyed), len(placed), len(skipped), dry_run)
+    return {"surveyed": surveyed, "placed": placed, "skipped": skipped}
 
 
 # --------------------------------------------------------------------------- #

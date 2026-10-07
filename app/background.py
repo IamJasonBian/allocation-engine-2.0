@@ -253,6 +253,55 @@ def start_engine_thread(app):
             sweeper_client = None
             sweeper_store = None
 
+            def _maybe_option_take_profit_sweep():
+                nonlocal sweeper_client, sweeper_store
+                if not config.get("OPTION_TP_ENABLED", True):
+                    return
+                if not config.get("AUTH_SERVICE_URL") or not config.get(
+                        "RH_AUTH_SERVICE_REQUEST_TOKEN"):
+                    return
+                from app import stop_sweeper as sw
+                if sweeper_store is None:
+                    sweeper_store = sw.StopStore(config.get("STOP_DB_PATH", sw.DEFAULT_DB))
+                if sweeper_store.option_tp_swept_today():
+                    return
+                from zoneinfo import ZoneInfo
+                hour_et = datetime.now(ZoneInfo("America/New_York")).hour
+                if hour_et < int(config.get("OPTION_TP_SWEEP_HOUR_ET", 0)):
+                    return
+                if sweeper_client is None:
+                    sweeper_client = sw.BoxClient(
+                        base=config.get("AUTH_SERVICE_URL", ""),
+                        token=config.get("RH_AUTH_SERVICE_REQUEST_TOKEN", ""))
+                dry = config.get("OPTION_TP_SWEEP_DRY_RUN", True)
+                tp = float(config.get("OPTION_TP_PERCENT", 75))
+                log.info("[opt-tp] starting daily take-profit sweep "
+                         "(tp=%.0f%%, dry_run=%s)", tp, dry)
+                out = sw.sweep_options_take_profit(
+                    sweeper_client, sweeper_store,
+                    tp_percent=tp, dry_run=dry)
+                placed = out.get("placed") or []
+                log.info("[opt-tp] sweep done: placed=%d skipped=%d",
+                         len(placed), len(out.get("skipped") or []))
+                if not dry and placed:
+                    events = []
+                    for p in placed:
+                        result = p.get("result") or {}
+                        if result.get("id"):
+                            c = p.get("contract") or {}
+                            events.append({
+                                "order_id": result["id"],
+                                "type": "OPTION_TAKE_PROFIT_LIMIT",
+                                "status": result.get("state", "submitted"),
+                                "symbol": c.get("chain_symbol", ""),
+                                "quantity": float((p.get("order") or {}).get("quantity") or 0),
+                            })
+                    if events:
+                        from app.trading_db import post_bot_activity
+                        res = post_bot_activity(events)
+                        log.info("[trading-db] option TP bot activity: %s",
+                                 (res or {}).get("data", "failed"))
+
             def _maybe_stop_sweep(current_positions):
                 nonlocal sweeper_client, sweeper_store
                 from app import stop_sweeper as sw
@@ -418,6 +467,11 @@ def start_engine_thread(app):
                                 options_open_orders.append(_option_order_to_event(oo))
                         except Exception:
                             log.exception("Failed to fetch options orders")
+
+                    try:
+                        _maybe_option_take_profit_sweep()
+                    except Exception as tp_err:
+                        log.exception("[opt-tp] sweep failed: %s", tp_err)
 
                     # --- Build unified OrderEvent lists ---
                     equity_events: list[OrderEvent] = [

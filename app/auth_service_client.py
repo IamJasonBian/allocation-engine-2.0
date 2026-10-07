@@ -4,11 +4,13 @@ The auth-service runs on an external box, authenticates to Robinhood, and
 exposes a small HTTP surface. This service reaches it with a Bearer token
 (`RH_AUTH_SERVICE_REQUEST_TOKEN`) over HTTPS.
 
-Two order calls are allow-listed as direct (non-MCP) calls against the
-auth-service, using its Robinhood password session:
-    GET  /orders/trailing_stop   — read active percentage trailing-stop orders
-    POST /orders/trailing_stop   — build/place a trailing-stop order
-Everything else is routed through the MCP passthrough (POST /exec/mcp), which
+Allow-listed direct (non-MCP) calls against the auth-service RH session:
+    GET  /orders/trailing_stop   — active percentage trailing-stop orders
+    GET  /positions/options      — open option lots (RH purchase / average_price)
+    GET  /orders/options         — open option orders (TP dedup)
+    POST /orders/trailing_stop   — place a trailing-stop order
+    POST /orders/options/limit   — single-leg option limit (when deployed)
+Other mutations route through the MCP passthrough (POST /exec/mcp), which
 relays a JSON-RPC 2.0 payload to the official Robinhood MCP
 (agent.robinhood.com/mcp/trading); the MCP's own OAuth token is attached by the
 auth-service.
@@ -237,6 +239,13 @@ class AuthServiceClient:
 
     def get_trailing_stop_orders(self):
         return self._request("GET", "/orders/trailing_stop")
+
+    def get_option_positions(self):
+        """Open option lots; purchase_price from Robinhood average_price."""
+        return self._request("GET", "/positions/options")
+
+    def get_option_orders(self):
+        return self._request("GET", "/orders/options")
 
     def place_trailing_stop(self, payload, dry_run=True):
         return self._request("POST", "/orders/trailing_stop",

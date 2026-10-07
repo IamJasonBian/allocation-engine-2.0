@@ -72,7 +72,8 @@ def post_positions(positions=None, option_positions=None, account=None):
 
     Args:
         positions: Stock positions from BrokerClient.positions().
-        option_positions: Option positions from BrokerClient.options_positions().
+        option_positions: Option positions from BrokerClient.options_positions()
+            (``purchase_price`` from RH lot ``average_price`` on options/positions).
         account: Account summary from BrokerClient.account().
 
     Returns:
