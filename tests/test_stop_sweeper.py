@@ -384,6 +384,6 @@ def test_sweep_options_take_profit_skips_duplicate_open_order(store):
         }],
     }]
     client = FakeClient(option_positions=pos, option_orders=open_orders)
-    out = sweep_options_take_profit(client, store, dry_run=True)
+    out = sweep_options_take_profit(client, store, tp_percent=50, dry_run=True)
     assert out["placed"] == []
     assert any(s.get("reason") == "tp_limit_already_open" for s in out["skipped"])
