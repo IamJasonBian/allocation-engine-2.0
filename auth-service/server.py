@@ -9,8 +9,6 @@ Endpoints (all POSTs and order reads require Bearer EXEC_TOKEN):
   GET  /auth/status                   — auth state + error codes (for alerting)
   POST /login                         — trigger the login flow (device approval)
   GET  /orders/trailing_stop          — active percentage trailing-stop orders
-  GET  /positions/options             — open option lots (RH average_price, qty)
-  GET  /orders/options                — open option orders (for TP dedup)
   POST /orders/trailing_stop          — place one (dry_run defaults to true)
   POST /orders/trailing_stop/replace  — replace one (dry_run defaults to true)
   POST /exec                          — run an external command
@@ -130,10 +128,6 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, session_mgr.status(config.DEFAULT_PROFILE))
         elif self.path.rstrip("/") == "/orders/trailing_stop":
             self._handle_read_orders()
-        elif self.path.rstrip("/") == "/positions/options":
-            self._handle_read_option_positions()
-        elif self.path.rstrip("/") == "/orders/options":
-            self._handle_read_option_orders()
         elif self.path.rstrip("/") == "/token":
             self._handle_token()
         else:
@@ -185,38 +179,6 @@ class Handler(BaseHTTPRequestHandler):
         except Exception as e:  # noqa: BLE001
             log.exception("read orders failed")
             self._send(502, {"error_code": "READ_ORDERS_FAILED", "detail": str(e)})
-
-    def _handle_read_option_positions(self):
-        if not self._authorized():
-            self._send(401, {"error": "unauthorized"})
-            return
-        sess, err = _ensure_session(config.DEFAULT_PROFILE)
-        if err:
-            self._send(409, err)
-            return
-        try:
-            positions = robinhood.get_open_option_positions(sess)
-            self._send(200, {"count": len(positions), "positions": positions})
-        except Exception as e:  # noqa: BLE001
-            log.exception("read option positions failed")
-            self._send(502, {"error_code": "READ_OPTION_POSITIONS_FAILED",
-                              "detail": str(e)})
-
-    def _handle_read_option_orders(self):
-        if not self._authorized():
-            self._send(401, {"error": "unauthorized"})
-            return
-        sess, err = _ensure_session(config.DEFAULT_PROFILE)
-        if err:
-            self._send(409, err)
-            return
-        try:
-            orders = robinhood.get_option_orders(sess, open_only=True)
-            self._send(200, {"count": len(orders), "orders": orders})
-        except Exception as e:  # noqa: BLE001
-            log.exception("read option orders failed")
-            self._send(502, {"error_code": "READ_OPTION_ORDERS_FAILED",
-                              "detail": str(e)})
 
     def _handle_place(self):
         # The order payload is built elsewhere; we authenticate, relay it to

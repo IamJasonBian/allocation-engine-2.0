@@ -120,11 +120,6 @@ class McpPayloadTests(unittest.TestCase):
             {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {}}))
 
 
-class ReadRouteTests(unittest.TestCase):
-    def test_option_positions_read_is_allowlisted(self):
-        self.assertIn("/positions/options", guardrails.ALLOWED_READ_ROUTES)
-
-
 class ExecCommandTests(unittest.TestCase):
     def test_benign_commands_pass(self):
         for cmd in ("echo hi", "uptime", ["ls", "-la", "/tmp"],

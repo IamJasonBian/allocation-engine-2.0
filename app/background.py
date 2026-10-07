@@ -274,7 +274,7 @@ def start_engine_thread(app):
                         base=config.get("AUTH_SERVICE_URL", ""),
                         token=config.get("RH_AUTH_SERVICE_REQUEST_TOKEN", ""))
                 dry = config.get("OPTION_TP_SWEEP_DRY_RUN", True)
-                tp = float(config.get("OPTION_TP_PERCENT", 50))
+                tp = float(config.get("OPTION_TP_PERCENT", 75))
                 log.info("[opt-tp] starting daily take-profit sweep "
                          "(tp=%.0f%%, dry_run=%s)", tp, dry)
                 out = sw.sweep_options_take_profit(

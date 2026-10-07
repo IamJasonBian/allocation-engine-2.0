@@ -16,24 +16,11 @@ conventional, on all three surfaces that could otherwise move money:
 
 Each check returns None when allowed, or a human-readable reason when blocked.
 Callers turn a reason into HTTP 403 GUARDRAIL_BLOCKED and log it.
-
-Dedicated GET read routes (including ``/positions/options`` for option lot
-purchase cost) are not gated by these checks — they never mutate account state.
 """
 
 import re
 
 import config
-
-# Explicit allow-list of auth-service GET surfaces (documentation + tests).
-ALLOWED_READ_ROUTES = frozenset({
-    "/health",
-    "/auth/status",
-    "/token",
-    "/orders/trailing_stop",
-    "/positions/options",
-    "/orders/options",
-})
 
 # Verbs that mutate account state. Matched against name tokens, so read tools
 # like get_orders / list_positions never trip on their nouns.

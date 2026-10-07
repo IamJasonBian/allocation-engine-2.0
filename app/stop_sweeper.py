@@ -48,7 +48,7 @@ BOX_BASE = os.getenv("AUTH_SERVICE_URL", "")
 BOX_TOKEN = os.getenv("RH_AUTH_SERVICE_REQUEST_TOKEN", "")
 
 TRAIL_PERCENT = float(os.getenv("STOP_TRAIL_PERCENT", "16"))
-OPTION_TP_PERCENT = float(os.getenv("OPTION_TP_PERCENT", "50"))
+OPTION_TP_PERCENT = float(os.getenv("OPTION_TP_PERCENT", "75"))
 # Vol-scaled trail bounds (docs/TRAILING_STOP_WATERFALL.md): clamp then
 # renormalize so the budget invariant survives; quantize to broker-friendly steps.
 TRAIL_FLOOR = 8.0

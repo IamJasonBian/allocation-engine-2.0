@@ -40,8 +40,6 @@ FAKE_SESSION = Session(
 
 PRIVILEGED = [
     ("GET", "/orders/trailing_stop"),
-    ("GET", "/positions/options"),
-    ("GET", "/orders/options"),
     ("GET", "/token"),
     ("POST", "/login"),
     ("POST", "/orders/trailing_stop"),
