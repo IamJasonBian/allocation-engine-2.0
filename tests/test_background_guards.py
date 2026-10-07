@@ -50,3 +50,13 @@ def test_api_exposes_no_engine_routes():
     from app import create_app
     rules = [r.rule for r in create_app().url_map.iter_rules()]
     assert not any(r.startswith("/api/engine") for r in rules)
+
+
+def test_worker_service_starts_the_engine(monkeypatch):
+    import threading
+    from app import background
+    started = threading.Event()
+    monkeypatch.setattr(background, "run_engine_loop", lambda app: started.set())
+    monkeypatch.setenv("RENDER_SERVICE_TYPE", "worker")
+    _gunicorn_conf()["post_fork"](None, None)
+    assert started.wait(timeout=5)
