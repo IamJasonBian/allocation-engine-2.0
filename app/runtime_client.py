@@ -1,40 +1,30 @@
-"""Client for the allocation-runtime-service read-only API."""
+"""Client for the allocation-runtime-service read-only API.
 
-import requests
+Not implemented: only the removed AllocationEngine consumed it.
+"""
 
 
 class RuntimeClient:
     def __init__(self, base_url: str):
-        self.base = base_url.rstrip("/")
-
-    def _get(self, path: str):
-        resp = requests.get(f"{self.base}{path}", timeout=15)
-        resp.raise_for_status()
-        return resp.json()
+        raise NotImplementedError("RuntimeClient is not implemented")
 
     def health(self) -> dict:
-        return self._get("/health")
+        raise NotImplementedError
 
     def state(self) -> dict:
-        """Latest trading state (tickers, drift metrics, strategy state)."""
-        return self._get("/state")
+        raise NotImplementedError
 
     def orders(self) -> dict:
-        """Open stock orders + options positions from latest snapshot."""
-        return self._get("/orders")
+        raise NotImplementedError
 
     def portfolio(self) -> dict:
-        """Portfolio holdings from latest snapshot."""
-        return self._get("/portfolio")
+        raise NotImplementedError
 
     def market_data(self) -> dict:
-        """Ticker-level metrics and drift analysis."""
-        return self._get("/market-data")
+        raise NotImplementedError
 
     def snapshots(self) -> dict:
-        """List most recent 50 snapshot keys."""
-        return self._get("/snapshots")
+        raise NotImplementedError
 
     def snapshot(self, key: str) -> dict:
-        """Full data for a specific snapshot."""
-        return self._get(f"/snapshots/{key}")
+        raise NotImplementedError

@@ -1,4 +1,4 @@
-"""Worker loop: daily sweeps plus publishing the book (run via app.worker)."""
+"""Worker loop: daily sweeps plus publishing the book (started by gunicorn.conf.py)."""
 
 import os
 import time
@@ -160,8 +160,8 @@ def book_looks_unreadable(positions, options_positions, account) -> bool:
 def run_engine_loop(app):
     """Run the worker loop forever: read the book, run the daily sweeps, sync.
 
-    Started only by the worker entrypoint (``python -m app.worker``); the API
-    web service never imports or runs it. Each tick reads Robinhood (via the
+    Started only on the Render background worker (gunicorn.conf.py post_fork,
+    RENDER_SERVICE_TYPE=worker); the API web service never runs it. Each tick reads Robinhood (via the
     auth-service box), runs the equity stop and option take-profit sweeps
     (app/utils_shared.py), and publishes the book to Redis, option history,
     the Trading DB, and S3. It places no other orders.

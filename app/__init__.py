@@ -25,7 +25,7 @@ def create_app(config_class=Config):
     from app.api import register_blueprints
     register_blueprints(app)
 
-    # The engine loop runs only in the worker (python -m app.worker).
+    # The engine loop runs only on the Render worker (gunicorn.conf.py).
     log.info("[create_app] DRY_RUN=%s, ENGINE_BROKER=%s",
              app.config.get("DRY_RUN"), app.config.get("ENGINE_BROKER"))
 

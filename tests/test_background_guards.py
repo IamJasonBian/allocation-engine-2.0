@@ -33,11 +33,20 @@ def test_a_normal_book_publishes():
 
 
 
-def test_api_process_does_not_run_the_engine():
+def _gunicorn_conf():
     import os
     import runpy
+    return runpy.run_path(os.path.join(os.path.dirname(__file__), "..", "gunicorn.conf.py"))
+
+
+def test_web_service_does_not_start_the_engine(monkeypatch):
+    import threading
+    monkeypatch.setenv("RENDER_SERVICE_TYPE", "web")
+    _gunicorn_conf()["post_fork"](None, None)
+    assert not any(t.name == "engine-loop" for t in threading.enumerate())
+
+
+def test_api_exposes_no_engine_routes():
     from app import create_app
-    conf = runpy.run_path(os.path.join(os.path.dirname(__file__), "..", "gunicorn.conf.py"))
-    assert "post_fork" not in conf          # gunicorn (API) never starts the loop
     rules = [r.rule for r in create_app().url_map.iter_rules()]
     assert not any(r.startswith("/api/engine") for r in rules)
