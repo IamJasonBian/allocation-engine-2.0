@@ -1,5 +1,9 @@
 # Trailing stops: volatility-scaled percentages under a fixed risk budget
 
+> **Status (2026-10-07):** the Phase-2 code (`compute_trail_percents`, the
+> `trail_map` sweep parameter, `STOP_VOL_SCALED`) was removed; stops use a flat
+> `STOP_TRAIL_PERCENT`. Recover it from git history if this plan resumes.
+
 A waterfall plan for improving **only the trailing-stop percentages** — which
 symbol gets what trail — while keeping the overall risk profile exactly where
 it is today. Each phase completes and signs off before the next begins.

@@ -63,9 +63,14 @@ class Config:
     STOP_SWEEP_DRY_RUN = os.getenv("STOP_SWEEP_DRY_RUN", "true").lower() == "true"
     # Earliest ET hour for the daily sweep (0 = first tick of the day).
     STOP_SWEEP_HOUR_ET = int(os.getenv("STOP_SWEEP_HOUR_ET", "0"))
-    # Vol-scaled trail percentages (docs/TRAILING_STOP_WATERFALL.md).
-    # Off = flat STOP_TRAIL_PERCENT, byte-for-byte today's behavior.
-    STOP_VOL_SCALED = os.getenv("STOP_VOL_SCALED", "false").lower() == "true"
+    STOP_TRAIL_PERCENT = float(os.getenv("STOP_TRAIL_PERCENT", "16"))
+    # Renew a GTC stop this many days before RH's ~90-day expiry.
+    STOP_EXPIRY_LEAD_DAYS = int(os.getenv("STOP_EXPIRY_LEAD_DAYS", "7"))
+    # Pace live placements — RH throttles bursts (~429 after a handful/second).
+    STOP_PLACE_DELAY_SECONDS = float(os.getenv("STOP_PLACE_DELAY_SECONDS", "1.5"))
+    # CLI transport (--via proxy): the deployed API's /api/robinhood proxy.
+    RH_PROXY_BASE = os.getenv(
+        "RH_PROXY_BASE", "https://allocation-engine-api.onrender.com/api/robinhood")
     STOP_DB_PATH = os.getenv(
         "STOP_DB_PATH",
         os.path.join(os.path.dirname(__file__), "..", "data", "stops.sqlite3"),

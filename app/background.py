@@ -192,6 +192,9 @@ def start_engine_thread(app):
         put_order_snapshot as put_option_order_snapshot,
     )
     from app.slack import notify as slack_notify
+    from app.utils_shared import (
+        SweepState, maybe_option_take_profit_sweep, maybe_stop_sweep,
+    )
     from app.risk.observer import RiskSubject
     from app.risk.slack_observer import SlackAlertObserver
     from app.shadow_index import (
@@ -248,158 +251,10 @@ def start_engine_thread(app):
             open_orders = []
             account = {}
 
-            # --- Trailing-stop sweeper (via auth-service) ---
-            # One sweep per day: mirror the RH trailing-stop book into the
-            # local sqlite queue, cover naked tickers with a 16% stop, renew
-            # stops near GTC expiry. Never breaks the tick; every action is
-            # logged so it is visible in Render logs.
-            # Equity stop sweep and option take-profit sweep are independent:
-            # each has its own toggle, box client, and store handle.
-            stop_client = None
-            stop_store = None
-            opt_tp_client = None
-            opt_tp_store = None
-
-            def _maybe_option_take_profit_sweep():
-                nonlocal opt_tp_client, opt_tp_store
-                if not config.get("OPTION_TP_ENABLED", True):
-                    return
-                if not config.get("AUTH_SERVICE_URL") or not config.get(
-                        "RH_AUTH_SERVICE_REQUEST_TOKEN"):
-                    return
-                from app import stop_sweeper as sw
-                if opt_tp_store is None:
-                    opt_tp_store = sw.StopStore(config.get("STOP_DB_PATH", sw.DEFAULT_DB))
-                if opt_tp_store.option_tp_swept_today():
-                    return
-                from zoneinfo import ZoneInfo
-                hour_et = datetime.now(ZoneInfo("America/New_York")).hour
-                if hour_et < int(config.get("OPTION_TP_SWEEP_HOUR_ET", 0)):
-                    return
-                if opt_tp_client is None:
-                    opt_tp_client = sw.BoxClient(
-                        base=config.get("AUTH_SERVICE_URL", ""),
-                        token=config.get("RH_AUTH_SERVICE_REQUEST_TOKEN", ""))
-                dry = config.get("OPTION_TP_SWEEP_DRY_RUN", True)
-                tp = float(config.get("OPTION_TP_PERCENT", 75))
-                log.info("[opt-tp] starting daily take-profit sweep "
-                         "(tp=%.0f%%, dry_run=%s)", tp, dry)
-                out = sw.sweep_options_take_profit(
-                    opt_tp_client, opt_tp_store,
-                    tp_percent=tp, dry_run=dry)
-                placed = out.get("placed") or []
-                log.info("[opt-tp] sweep done: placed=%d skipped=%d",
-                         len(placed), len(out.get("skipped") or []))
-                if not dry and placed:
-                    events = []
-                    for p in placed:
-                        result = p.get("result") or {}
-                        if result.get("id"):
-                            c = p.get("contract") or {}
-                            events.append({
-                                "order_id": result["id"],
-                                "type": "OPTION_TAKE_PROFIT_LIMIT",
-                                "status": result.get("state", "submitted"),
-                                "symbol": c.get("chain_symbol", ""),
-                                "quantity": float((p.get("order") or {}).get("quantity") or 0),
-                            })
-                    if events:
-                        from app.trading_db import post_bot_activity
-                        res = post_bot_activity(events)
-                        log.info("[trading-db] option TP bot activity: %s",
-                                 (res or {}).get("data", "failed"))
-
-            def _maybe_stop_sweep(current_positions):
-                nonlocal stop_client, stop_store
-                if not config.get("STOP_SWEEP_ENABLED", True):
-                    return
-                from app import stop_sweeper as sw
-                if stop_store is None:
-                    stop_store = sw.StopStore(config.get("STOP_DB_PATH", sw.DEFAULT_DB))
-                if stop_store.swept_today():
-                    return
-                from zoneinfo import ZoneInfo
-                hour_et = datetime.now(ZoneInfo("America/New_York")).hour
-                if hour_et < int(config.get("STOP_SWEEP_HOUR_ET", 0)):
-                    return
-                if stop_client is None:
-                    stop_client = sw.BoxClient(
-                        base=config.get("AUTH_SERVICE_URL", ""),
-                        token=config.get("RH_AUTH_SERVICE_REQUEST_TOKEN", ""))
-                tickers = [t.strip().upper() for t in
-                           config.get("STOP_TICKERS", "").split(",") if t.strip()]
-                qty_map, price_map = {}, {}
-                for p in current_positions:
-                    sym = (p.get("symbol") or "").upper()
-                    if not sym:
-                        continue
-                    qty_map[sym] = p.get("qty")
-                    q = float(p.get("qty") or 0)
-                    if q and p.get("market_value"):
-                        price_map[sym] = float(p["market_value"]) / q
-                tickers = sorted(set(tickers) | set(qty_map))
-                dry = config.get("STOP_SWEEP_DRY_RUN", True)
-                if not dry and not qty_map:
-                    # Live sweeps need real position sizes; wait for a tick
-                    # where positions have loaded rather than latching the day.
-                    log.info("[stop-sweeper] live sweep deferred — positions "
-                             "not loaded yet")
-                    return
-                trail_map = None
-                if config.get("STOP_VOL_SCALED"):
-                    mv_map = {}
-                    for p in current_positions:
-                        sym = (p.get("symbol") or "").upper()
-                        if sym and p.get("market_value"):
-                            mv_map[sym] = float(p["market_value"])
-                    # No sigma source is wired yet (see the gaps in
-                    # docs/TRAILING_STOP_WATERFALL.md) — empty sigmas mean
-                    # every symbol falls back to the flat budget, logged.
-                    trail_map = sw.compute_trail_percents(mv_map, {})
-                log.info("[stop-sweeper] starting daily sweep "
-                         "(tickers=%s, trail=%.0f%%, vol_scaled=%s, dry_run=%s)",
-                         tickers or "book-only", sw.TRAIL_PERCENT,
-                         bool(trail_map), dry)
-                out = sw.sweep(stop_client, stop_store, tickers,
-                               dry_run=dry, qty_map=qty_map, price_map=price_map,
-                               account_url=sw.account_url_from_box(),
-                               trail_map=trail_map)
-                log.info("[stop-sweeper] sweep done: %d active in RH book, "
-                         "placed=%s, renewed=%s, pruned=%s, skipped=%s",
-                         out["active_from_rh"],
-                         [p["symbol"] for p in out["placed"]] or "none",
-                         [r.get("symbol") for r in out["renewed"]] or "none",
-                         out["pruned"] or "none",
-                         [s["symbol"] for s in out.get("skipped", [])] or "none")
-
-                if not dry:
-                    # Live sweeper actions land in the bot-activity feed
-                    # (de-duped on {order_id}:{status} downstream).
-                    events = []
-                    for p in out["placed"]:
-                        result = p.get("result") or {}
-                        if result.get("id"):
-                            events.append({
-                                "order_id": result["id"],
-                                "type": "TRAILING_STOP_ORDER",
-                                "status": result.get("state", "submitted"),
-                                "symbol": p["symbol"],
-                                "quantity": float(qty_map.get(p["symbol"]) or 0),
-                            })
-                    for r in out["renewed"]:
-                        result = r.get("result") or {}
-                        if r.get("action") == "renewed" and result.get("id"):
-                            events.append({
-                                "order_id": result["id"],
-                                "type": "TRAILING_STOP_REPLACED",
-                                "status": result.get("state", "submitted"),
-                                "symbol": r.get("symbol", ""),
-                            })
-                    if events:
-                        from app.trading_db import post_bot_activity
-                        res = post_bot_activity(events)
-                        log.info("[trading-db] bot activity posted: %s",
-                                 (res or {}).get("data", "failed"))
+            # Daily sweeps (app/utils_shared.py): each has its own toggle,
+            # auth-service client, and store handle.
+            stop_sweep_state = SweepState()
+            opt_tp_sweep_state = SweepState()
 
             import time as _time
             _engine_status["last_error"] = f"pre_loop_v3_{int(_time.time())}"
@@ -457,7 +312,7 @@ def start_engine_thread(app):
                     # Sweep after positions load so the universe (and live
                     # quantities) reflect the real book.
                     try:
-                        _maybe_stop_sweep(positions)
+                        maybe_stop_sweep(config, stop_sweep_state, positions)
                     except Exception as sweep_err:
                         log.exception("[stop-sweeper] sweep failed: %s", sweep_err)
 
@@ -478,7 +333,7 @@ def start_engine_thread(app):
                             log.exception("Failed to fetch options orders")
 
                     try:
-                        _maybe_option_take_profit_sweep()
+                        maybe_option_take_profit_sweep(config, opt_tp_sweep_state)
                     except Exception as tp_err:
                         log.exception("[opt-tp] sweep failed: %s", tp_err)
 
