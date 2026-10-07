@@ -33,9 +33,11 @@ def test_a_normal_book_publishes():
 
 
 
-def test_engine_disabled_does_not_start_loop():
-    from types import SimpleNamespace
-    from app import background
-    background._engine_thread = None
-    background.start_engine_thread(SimpleNamespace(config={"ENGINE_ENABLED": False}))
-    assert background._engine_thread is None
+def test_api_process_does_not_run_the_engine():
+    import os
+    import runpy
+    from app import create_app
+    conf = runpy.run_path(os.path.join(os.path.dirname(__file__), "..", "gunicorn.conf.py"))
+    assert "post_fork" not in conf          # gunicorn (API) never starts the loop
+    rules = [r.rule for r in create_app().url_map.iter_rules()]
+    assert not any(r.startswith("/api/engine") for r in rules)

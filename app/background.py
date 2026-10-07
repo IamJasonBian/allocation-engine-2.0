@@ -1,7 +1,6 @@
-"""Background engine thread — runs reconciliation loop alongside Flask."""
+"""Worker loop: daily sweeps plus publishing the book (run via app.worker)."""
 
 import os
-import threading
 import time
 import logging
 from datetime import datetime, timezone
@@ -158,33 +157,20 @@ def book_looks_unreadable(positions, options_positions, account) -> bool:
     return all(not float((account or {}).get(f) or 0) for f in fields)
 
 
-_engine_thread = None
-_engine_status = {
-    "running": False,
-    "last_tick": None,
-    "tick_count": 0,
-    "last_error": None,
-    "dry_run": True,
-}
-_tick_event = threading.Event()
+def run_engine_loop(app):
+    """Run the worker loop forever: read the book, run the daily sweeps, sync.
 
+    Started only by the worker entrypoint (``python -m app.worker``); the API
+    web service never imports or runs it. Each tick reads Robinhood (via the
+    auth-service box), runs the equity stop and option take-profit sweeps
+    (app/utils_shared.py), and publishes the book to Redis, option history,
+    the Trading DB, and S3. It places no other orders.
 
-def start_engine_thread(app):
-    """Start the background reconciliation loop in a daemon thread."""
-    global _engine_thread
-
-    if _engine_thread and _engine_thread.is_alive():
-        log.info("[engine] Thread already alive, skipping")
-        return
-    if not app.config.get("ENGINE_ENABLED", True):
-        log.info("[engine] ENGINE_ENABLED=false — engine loop not started")
-        return
-
-    # Import everything here (called from gunicorn post_fork, not create_app)
+    Args:
+        app: Flask app whose config (app.config.Config) drives the loop.
+    """
     from app.brokers import get_broker, clear_broker
     from app.brokers.robinhood_client import RobinhoodTrader, seconds_until_hour_et
-    from app.engine import AllocationEngine
-    from app.runtime_client import RuntimeClient
     from app.redis_store import sync_to_redis
     from app.s3_store import sync_order_events
     from app.option_history_store import (
@@ -192,396 +178,183 @@ def start_engine_thread(app):
         put_order_snapshot as put_option_order_snapshot,
     )
     from app.slack import notify as slack_notify
+    from app.trading_db import post_orders, post_positions
     from app.utils_shared import (
         SweepState, maybe_option_take_profit_sweep, maybe_stop_sweep,
     )
-    from app.risk.observer import RiskSubject
-    from app.risk.slack_observer import SlackAlertObserver
-    from app.shadow_index import (
-        BTC_MINI, build_shadow_position, check_shadow_drift,
-        check_order_shadow_drift,
-    )
 
-    log.info("[engine] Starting background engine thread (imports done)")
+    config = app.config
+    broker = None
+    interval = config["POLL_INTERVAL_SECONDS"]
+    is_live = not config["DRY_RUN"]
+    s3_interval = 15 * 60  # 15 minutes
+    last_s3_sync = 0.0
+    db_sync_interval = config["TRADING_DB_SYNC_SECONDS"]
+    last_db_sync = 0.0
+    retry_hour = config["RH_RETRY_HOUR_ET"]
 
-    def _loop():
-        # Push app context for the entire thread lifetime
-        ctx = app.app_context()
-        ctx.push()
+    # Daily sweeps: each has its own toggle, auth-service client, and store.
+    stop_sweep_state = SweepState()
+    opt_tp_sweep_state = SweepState()
+
+    log.info("[engine] worker loop started (interval=%ds, dry_run=%s, broker=%s)",
+             interval, config["DRY_RUN"], config["ENGINE_BROKER"])
+
+    while True:
+        if broker is None:
+            try:
+                broker = get_broker(config["ENGINE_BROKER"])
+                log.info("Broker initialized successfully")
+            except Exception:
+                log.exception("Failed to initialize broker")
+                time.sleep(interval)
+                continue
+
         try:
-            config = app.config
-            broker = None
-            data_broker = None
-            engine = None
-            runtime = RuntimeClient(config["RUNTIME_SERVICE_URL"])
+            positions = broker.positions()
+            open_orders = broker.open_orders()
+            account = broker.account()
 
-            # Risk infrastructure
-            risk_subject = RiskSubject()
-            if os.environ.get("TELEGRAM_BOT_TOKEN") and os.environ.get("TELEGRAM_CHAT_ID"):
-                risk_subject.attach(SlackAlertObserver())
-                log.info("Telegram risk observer attached to background engine")
+            # Sweep after positions load so the universe (and live
+            # quantities) reflect the real book.
+            try:
+                maybe_stop_sweep(config, stop_sweep_state, positions)
+            except Exception as sweep_err:
+                log.exception("[stop-sweeper] sweep failed: %s", sweep_err)
 
-            # Shadow index config — project BTC/USD → Grayscale Bitcoin Mini Trust ETF
-            shadow_index = BTC_MINI
-            etf_close = os.environ.get("BTC_ETF_LAST_CLOSE")
-            btc_at_close = os.environ.get("BTC_AT_CLOSE")
-            if etf_close and btc_at_close:
-                shadow_index.last_close = float(etf_close)
-                shadow_index.btc_at_close = float(btc_at_close)
-                log.info("Shadow index %s configured (last_close=$%.2f, btc_at_close=$%s)",
-                         shadow_index.shadow_symbol, shadow_index.last_close,
-                         f"{shadow_index.btc_at_close:,.2f}")
-
-            _engine_status["running"] = True
-            _engine_status["dry_run"] = config["DRY_RUN"]
-            interval = config["POLL_INTERVAL_SECONDS"]
-            is_live = not config["DRY_RUN"]
-            s3_interval = 15 * 60  # 15 minutes
-            last_s3_sync = 0.0
-            db_sync_interval = config.get("TRADING_DB_SYNC_SECONDS", 900)
-            last_db_sync = 0.0
-            retry_hour = config.get("RH_RETRY_HOUR_ET", 11)
-
-            data_broker_name = config.get("DATA_BROKER", "")
-            log.info("Background engine started (interval=%ds, dry_run=%s, broker=%s, data_broker=%s)",
-                     interval, config["DRY_RUN"], config["ENGINE_BROKER"],
-                     data_broker_name or "none")
-
-            positions = []
-            open_orders = []
-            account = {}
-
-            # Daily sweeps (app/utils_shared.py): each has its own toggle,
-            # auth-service client, and store handle.
-            stop_sweep_state = SweepState()
-            opt_tp_sweep_state = SweepState()
-
-            import time as _time
-            _engine_status["last_error"] = f"pre_loop_v3_{int(_time.time())}"
-            log.info("[engine] About to enter main loop")
-
-            while True:
-                # --- Broker initialization ---
-                if broker is None:
-                    try:
-                        _engine_status["last_error"] = f"broker_get_{config['ENGINE_BROKER']}_{int(_time.time())}"
-                        broker = get_broker(config["ENGINE_BROKER"])
-                        _engine_status["last_error"] = "broker_init_done"
-                        if data_broker_name and data_broker_name != config["ENGINE_BROKER"]:
-                            try:
-                                _engine_status["last_error"] = "data_broker_init"
-                                data_broker = get_broker(data_broker_name)
-                                log.info("Data broker (%s) initialized", data_broker_name)
-                            except Exception:
-                                log.exception("Failed to init data broker (%s) — continuing without",
-                                              data_broker_name)
-                                data_broker = None
-                        _engine_status["last_error"] = "engine_init"
-                        engine = AllocationEngine(
-                            trader=broker,
-                            runtime=runtime,
-                            dry_run=config["DRY_RUN"],
-                            data_broker=data_broker,
-                            max_order_qty=config["MAX_ORDER_QTY"],
-                            risk_subject=risk_subject,
-                        )
-                        _engine_status["last_error"] = None
-                        log.info("Broker initialized successfully")
-                    except Exception as e:
-                        log.exception("Failed to initialize broker")
-                        _engine_status["last_error"] = f"broker_init_error: {e}"
-                        _tick_event.wait(timeout=interval)
-                        _tick_event.clear()
-                        continue
-
-                # --- Normal tick ---
+            options_positions = []
+            options_open_orders: list[OrderEvent] = []
+            if hasattr(broker, "options_positions"):
                 try:
-                    if is_live:
-                        log.info("Live mode: refreshing broker state")
-                    else:
-                        engine.tick()
+                    options_positions = broker.options_positions()
+                except Exception:
+                    log.exception("Failed to fetch options positions")
+            if hasattr(broker, "options_orders"):
+                try:
+                    for oo in broker.options_orders(limit=200):
+                        options_open_orders.append(_option_order_to_event(oo))
+                except Exception:
+                    log.exception("Failed to fetch options orders")
 
-                    _engine_status["last_tick"] = datetime.now(timezone.utc).isoformat()
-                    _engine_status["tick_count"] += 1
-                    _engine_status["last_error"] = None
+            try:
+                maybe_option_take_profit_sweep(config, opt_tp_sweep_state)
+            except Exception as tp_err:
+                log.exception("[opt-tp] sweep failed: %s", tp_err)
 
-                    positions = broker.positions()
-                    open_orders = broker.open_orders()
-                    account = broker.account()
+            equity_events: list[OrderEvent] = [
+                _equity_order_to_event(o, is_open=True) for o in open_orders
+            ]
+            all_order_events = equity_events + options_open_orders
 
-                    # Sweep after positions load so the universe (and live
-                    # quantities) reflect the real book.
-                    try:
-                        maybe_stop_sweep(config, stop_sweep_state, positions)
-                    except Exception as sweep_err:
-                        log.exception("[stop-sweeper] sweep failed: %s", sweep_err)
+            log.info(
+                f"[portfolio] Equity: ${account.get('equity', 0):,.2f} | "
+                f"Cash: ${account.get('cash', 0):,.2f} | "
+                f"Buying Power: ${account.get('buying_power', 0):,.2f} | "
+                f"Market Value: ${account.get('portfolio_value', 0):,.2f}"
+            )
+            log.info("[options] %d option positions, %d option orders",
+                     len(options_positions), len(options_open_orders))
 
-                    # --- Fetch options positions & orders ---
-                    options_positions = []
-                    options_open_orders: list[OrderEvent] = []
-                    if hasattr(broker, "options_positions"):
-                        try:
-                            options_positions = broker.options_positions()
-                        except Exception:
-                            log.exception("Failed to fetch options positions")
-                    if hasattr(broker, "options_orders"):
-                        try:
-                            raw_opt_orders = broker.options_orders(limit=200)
-                            for oo in raw_opt_orders:
-                                options_open_orders.append(_option_order_to_event(oo))
-                        except Exception:
-                            log.exception("Failed to fetch options orders")
+            try:
+                sync_to_redis(
+                    positions, open_orders, account,
+                    live=is_live,
+                    options_positions=options_positions,
+                    order_events=all_order_events,
+                )
+            except Exception:
+                log.exception("Redis sync error")
 
-                    try:
-                        maybe_option_take_profit_sweep(config, opt_tp_sweep_state)
-                    except Exception as tp_err:
-                        log.exception("[opt-tp] sweep failed: %s", tp_err)
+            # Option history — unconditional (runs in dry-run too) so the
+            # observational record isn't gated by trading mode.
+            try:
+                now_utc = datetime.now(timezone.utc)
+                put_option_position_snapshot(
+                    options_positions, ts=now_utc, account=account,
+                )
+                put_option_order_snapshot(
+                    [dict(o) for o in options_open_orders], ts=now_utc,
+                )
+            except Exception:
+                log.exception("Option history sync error")
 
-                    # --- Build unified OrderEvent lists ---
-                    equity_events: list[OrderEvent] = [
-                        _equity_order_to_event(o, is_open=True) for o in open_orders
-                    ]
-                    all_order_events = equity_events + options_open_orders
+            now_mono = time.monotonic()
 
-                    # Enrich positions with Alpaca market data prices
-                    if data_broker and hasattr(data_broker, "get_latest_prices") and positions:
-                        try:
-                            syms = [p["symbol"] for p in positions]
-                            prices = data_broker.get_latest_prices(syms)
-                            for p in positions:
-                                sym = p["symbol"]
-                                if sym in prices:
-                                    price = prices[sym]
-                                    qty = p["qty"]
-                                    p["current_price"] = price
-                                    p["market_value"] = round(qty * price, 2)
-                                    cost_basis = qty * p["avg_entry"]
-                                    p["unrealized_pl"] = round(qty * price - cost_basis, 2)
-                                    p["unrealized_pl_pct"] = round(
-                                        (qty * price - cost_basis) / cost_basis, 4
-                                    ) if cost_basis > 0 else 0.0
-                            log.info("[data] Enriched %d/%d positions with Alpaca prices",
-                                     len(prices), len(positions))
-                        except Exception:
-                            log.exception("Failed to enrich positions with Alpaca prices")
-
-                    # --- Shadow equity: project BTC → GBTC index drift ---
-                    if shadow_index and shadow_index.last_close and shadow_index.btc_at_close and data_broker:
-                        btc_pos = next(
-                            (p for p in positions if p["symbol"] == shadow_index.etf_symbol),
-                            None,
-                        )
-                        if btc_pos:
-                            try:
-                                btc_prices = data_broker.get_latest_prices(
-                                    [shadow_index.crypto_symbol]
-                                )
-                                btc_px = btc_prices.get(shadow_index.crypto_symbol)
-                                if btc_px:
-                                    shadow_pos = build_shadow_position(
-                                        btc_px, shadow_index, qty=btc_pos["qty"],
-                                    )
-                                    log.info(
-                                        "[shadow] %s projected $%.2f (BTC $%s) "
-                                        "vs close $%.2f → drift %+.2f%%",
-                                        shadow_index.shadow_symbol,
-                                        shadow_pos["current_price"],
-                                        f"{btc_px:,.2f}",
-                                        shadow_index.last_close,
-                                        shadow_pos["unrealized_pl_pct"] * 100,
-                                    )
-                                    # Append shadow position so it flows to Redis/Blob/API
-                                    positions.append(shadow_pos)
-
-                                    event = check_shadow_drift(btc_px, shadow_index)
-                                    if event:
-                                        risk_subject.notify(event)
-                                    # Check open limit orders against projected price
-                                    order_events = check_order_shadow_drift(
-                                        btc_px, shadow_index, open_orders,
-                                    )
-                                    for oe in order_events:
-                                        risk_subject.notify(oe)
-                            except Exception:
-                                log.exception("Shadow index check failed")
-
-                    log.info(
-                        f"[portfolio] Equity: ${account.get('equity', 0):,.2f} | "
-                        f"Cash: ${account.get('cash', 0):,.2f} | "
-                        f"Buying Power: ${account.get('buying_power', 0):,.2f} | "
-                        f"Market Value: ${account.get('portfolio_value', 0):,.2f}"
+            # --- Trading DB write path (orders + positions) ---
+            # Not gated on is_live: a dry-run worker still reads the real
+            # book and the dashboard should reflect it.
+            if (now_mono - last_db_sync) >= db_sync_interval:
+                # Filled equity orders come from order_history(); the open
+                # book alone would never grow the record.
+                recent_orders = _equity_order_history(broker)
+                try:
+                    res = post_orders(
+                        open_orders=open_orders,
+                        recent_orders=recent_orders,
+                        recent_option_orders=options_open_orders,
                     )
+                    if res:
+                        log.info("[trading-db] orders synced: %s", res.get("data"))
+                except Exception:
+                    log.exception("[trading-db] order sync error")
 
-                    if open_orders:
-                        for o in open_orders:
-                            log.info("[order] %s %s — %s qty=%g limit=$%s status=%s",
-                                     o.get("side", "?"), o.get("symbol", "?"),
-                                     o.get("type", "market"),
-                                     o.get("qty", 0),
-                                     o.get("limit_price") or "MKT",
-                                     o.get("status", "?"))
-                    else:
-                        log.info("[order] No open orders")
-
-                    if options_positions or options_open_orders:
-                        open_opt = [oo for oo in options_open_orders
-                                    if oo.get("state", "") in ("queued", "confirmed", "partially_filled", "pending")]
-                        log.info("[options] %d option positions, %d option orders (%d open)",
-                                 len(options_positions), len(options_open_orders), len(open_opt))
-                        for op in options_positions:
-                            log.info("[option-pos] %s %s $%s exp=%s qty=%s P/L=$%s (%.1f%%)",
-                                     op.get("chain_symbol"), op.get("option_type", "").upper(),
-                                     op.get("strike"), op.get("expiration"),
-                                     op.get("quantity"), op.get("unrealized_pl"),
-                                     op.get("unrealized_pl_pct", 0) * 100)
-                        for oo in open_opt:
-                            leg = (oo.get("legs") or [{}])[0] if oo.get("legs") else {}
-                            opt_desc = "%s %s $%s %s" % (
-                                leg.get("chain_symbol") or oo.get("symbol", "?"),
-                                (leg.get("option_type") or "?").upper(),
-                                leg.get("strike", "?"),
-                                leg.get("expiration", "?"),
-                            ) if leg else oo.get("symbol", "?")
-                            log.info("[option-ord] %s %s — %s qty=%s price=$%s state=%s",
-                                     opt_desc, oo.get("side", "?"),
-                                     oo.get("order_type", "?"), oo.get("quantity"),
-                                     oo.get("limit_price") or oo.get("price", "?"),
-                                     oo.get("state"))
-
-                    # Sync to Redis (now with options)
+                # Never publish a book that looks like a failed read —
+                # post_positions is a whole-book replace, so that would prune
+                # every row the dashboard renders.
+                if book_looks_unreadable(positions, options_positions, account):
+                    log.warning(
+                        "[trading-db] skipping position sync — broker "
+                        "returned no positions and a zeroed account "
+                        "(treating as a failed read, not a flat book)")
+                else:
                     try:
-                        sync_to_redis(
-                            positions, open_orders, account,
-                            live=is_live,
-                            options_positions=options_positions,
-                            order_events=all_order_events,
+                        res = post_positions(
+                            positions=positions,
+                            option_positions=options_positions,
+                            account=account,
                         )
+                        if res:
+                            log.info("[trading-db] positions synced: %s",
+                                     res.get("data"))
                     except Exception:
-                        log.exception("Redis sync error")
+                        log.exception("[trading-db] position sync error")
 
-                    # Option history — unconditional (runs in dry-run too) so
-                    # the observational record isn't gated by trading mode.
-                    # Dedup on the writer side keeps blob counts sane.
-                    try:
-                        now_utc = datetime.now(timezone.utc)
-                        put_option_position_snapshot(
-                            options_positions, ts=now_utc, account=account,
-                        )
-                        put_option_order_snapshot(
-                            [dict(o) for o in options_open_orders], ts=now_utc,
-                        )
-                    except Exception:
-                        log.exception("Option history sync error")
+                last_db_sync = now_mono
 
-                    now_mono = time.monotonic()
+            if is_live and (now_mono - last_s3_sync) >= s3_interval:
+                try:
+                    sync_order_events(
+                        all_order_events,
+                        positions=positions,
+                        options_positions=options_positions,
+                        account=account,
+                    )
+                    last_s3_sync = now_mono
+                except Exception:
+                    log.exception("S3 sync error")
 
-                    # --- Trading DB write path (orders + positions) ---
-                    # Not gated on is_live: dry-run engines still read the
-                    # real book and the frontend should reflect it. This is
-                    # the only positions path — the Netlify "engine snapshot"
-                    # blob it replaced was gated on is_live and went stale.
-                    if (now_mono - last_db_sync) >= db_sync_interval:
-                        # Filled equity orders come from order_history(); the
-                        # open book alone would never grow the record, since
-                        # an order stops being "open" the moment it fills.
-                        recent_orders = _equity_order_history(broker)
-                        try:
-                            from app.trading_db import post_orders
-                            res = post_orders(
-                                open_orders=open_orders,
-                                recent_orders=recent_orders,
-                                recent_option_orders=options_open_orders,
-                            )
-                            if res:
-                                log.info("[trading-db] orders synced: %s",
-                                         res.get("data"))
-                        except Exception:
-                            log.exception("[trading-db] order sync error")
+        except Exception:
+            log.exception("Engine tick error")
 
-                        # Never publish a book that looks like a failed read —
-                        # post_positions is a whole-book replace, so that
-                        # would prune every row the dashboard renders.
-                        if book_looks_unreadable(positions, options_positions,
-                                                 account):
-                            log.warning(
-                                "[trading-db] skipping position sync — broker "
-                                "returned no positions and a zeroed account "
-                                "(treating as a failed read, not a flat book)")
-                        else:
-                            try:
-                                from app.trading_db import post_positions
-                                res = post_positions(
-                                    positions=positions,
-                                    option_positions=options_positions,
-                                    account=account,
-                                )
-                                if res:
-                                    log.info("[trading-db] positions synced: %s",
-                                             res.get("data"))
-                            except Exception:
-                                log.exception("[trading-db] position sync error")
+            # If Robinhood is stuck in a device challenge, sleep until the
+            # configured retry hour instead of retrying every tick.
+            if (config["ENGINE_BROKER"] == "robinhood"
+                    and isinstance(broker, RobinhoodTrader)
+                    and broker.in_device_challenge_mode):
+                wait_secs = seconds_until_hour_et(retry_hour)
+                log.info("[scheduler] Device challenge mode — "
+                         "sleeping %.0f seconds until %d:00 AM ET",
+                         wait_secs, retry_hour)
+                slack_notify(
+                    f":clock11: FlipActivate: allocation-engine-2.0 — "
+                    f"Device challenge pending. Will retry at "
+                    f"{retry_hour}:00 AM ET "
+                    f"(in {wait_secs / 3600:.1f} hours). "
+                    "Approve the device in the Robinhood app before then."
+                )
+                time.sleep(wait_secs)
+                clear_broker(config["ENGINE_BROKER"])
+                broker = None
+                continue
 
-                        last_db_sync = now_mono
-
-                    if is_live and (now_mono - last_s3_sync) >= s3_interval:
-                        # Sync order events to S3
-                        try:
-                            sync_order_events(
-                                all_order_events,
-                                positions=positions,
-                                options_positions=options_positions,
-                                account=account,
-                            )
-                            last_s3_sync = now_mono
-                        except Exception:
-                            log.exception("S3 sync error")
-
-                except Exception as e:
-                    log.exception("Engine tick error")
-                    _engine_status["last_error"] = str(e)
-
-                    # If Robinhood is stuck in a device challenge, sleep until
-                    # the configured retry hour instead of retrying every tick.
-                    if (config["ENGINE_BROKER"] == "robinhood"
-                            and isinstance(broker, RobinhoodTrader)
-                            and broker.in_device_challenge_mode):
-                        wait_secs = seconds_until_hour_et(retry_hour)
-                        log.info("[scheduler] Device challenge mode — "
-                                 "sleeping %.0f seconds until %d:00 AM ET",
-                                 wait_secs, retry_hour)
-                        slack_notify(
-                            f":clock11: FlipActivate: allocation-engine-2.0 — "
-                            f"Device challenge pending. Will retry at "
-                            f"{retry_hour}:00 AM ET "
-                            f"(in {wait_secs / 3600:.1f} hours). "
-                            "Approve the device in the Robinhood app before then."
-                        )
-                        _tick_event.wait(timeout=wait_secs)
-                        _tick_event.clear()
-                        # Force fresh broker on next iteration
-                        clear_broker(config["ENGINE_BROKER"])
-                        broker = None
-                        engine = None
-                        continue
-
-                _tick_event.wait(timeout=interval)
-                _tick_event.clear()
-        except Exception as e:
-            log.exception("Engine thread crashed")
-            _engine_status["last_error"] = f"thread_crash: {e}"
-
-    _engine_thread = threading.Thread(target=_loop, daemon=True, name="engine-loop")
-    _engine_thread.start()
-
-
-def get_engine_status() -> dict:
-    from app.brokers.robinhood_client import _init_phase
-    status = dict(_engine_status)
-    status["rh_init_phase"] = _init_phase
-    return status
-
-
-def trigger_tick() -> dict:
-    """Wake the engine thread to run an immediate tick."""
-    _tick_event.set()
-    return {"triggered": True, "status": get_engine_status()}
+        time.sleep(interval)
