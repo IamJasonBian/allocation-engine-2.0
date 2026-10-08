@@ -157,6 +157,23 @@ def book_looks_unreadable(positions, options_positions, account) -> bool:
     return all(not float((account or {}).get(f) or 0) for f in fields)
 
 
+def alert_option_drawdowns(events, alerted: set[str], risk_subject) -> set[str]:
+    """Notify each newly-breaching option once; return the set still breaching.
+
+    Args:
+        events: OPTION_DRAWDOWN RiskEvents from check_option_drawdowns().
+        alerted: Contract keys already alerted on a previous tick.
+        risk_subject: Bus whose observers (Telegram) receive new breaches.
+
+    Returns:
+        Contract keys breaching now — pass back in on the next tick.
+    """
+    for e in events:
+        if e.symbol not in alerted:
+            risk_subject.notify(e)
+    return {e.symbol for e in events}
+
+
 def run_engine_loop(app):
     """Run the worker loop forever: read the book, run the daily sweeps, sync.
 
@@ -178,6 +195,9 @@ def run_engine_loop(app):
         put_order_snapshot as put_option_order_snapshot,
     )
     from app.slack import notify as slack_notify
+    from app.risk.observer import RiskSubject
+    from app.risk.option_loss import check_option_drawdowns
+    from app.risk.slack_observer import SlackAlertObserver
     from app.trading_db import post_orders, post_positions
     from app.utils_shared import (
         SweepState, maybe_option_take_profit_sweep, maybe_stop_sweep,
@@ -196,6 +216,12 @@ def run_engine_loop(app):
     # Daily sweeps: each has its own toggle, auth-service client, and store.
     stop_sweep_state = SweepState()
     opt_tp_sweep_state = SweepState()
+
+    # Option drawdown alerts go to Telegram (app/slack.py). A contract alerts
+    # once per breach and re-arms after it recovers or closes.
+    risk_subject = RiskSubject()
+    risk_subject.attach(SlackAlertObserver())
+    drawdown_alerted: set[str] = set()
 
     log.info("[engine] worker loop started (interval=%ds, dry_run=%s, broker=%s)",
              interval, config["DRY_RUN"], config["ENGINE_BROKER"])
@@ -235,6 +261,13 @@ def run_engine_loop(app):
                         options_open_orders.append(_option_order_to_event(oo))
                 except Exception:
                     log.exception("Failed to fetch options orders")
+
+            try:
+                drawdown_alerted = alert_option_drawdowns(
+                    check_option_drawdowns(options_positions),
+                    drawdown_alerted, risk_subject)
+            except Exception:
+                log.exception("Option drawdown check failed")
 
             try:
                 maybe_option_take_profit_sweep(config, opt_tp_sweep_state)
