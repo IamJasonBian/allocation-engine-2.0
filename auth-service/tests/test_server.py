@@ -46,6 +46,7 @@ PRIVILEGED = [
     ("POST", "/login"),
     ("POST", "/orders/trailing_stop"),
     ("POST", "/orders/trailing_stop/replace"),
+    ("POST", "/orders/options/limit"),
     ("POST", "/command"),
     ("POST", "/exec"),
     ("POST", "/exec/mcp"),
@@ -236,6 +237,56 @@ class ServerTestCase(unittest.TestCase):
             body={"order_id": "ord-1", "payload": _valid_trailing_payload()})
         self.assertEqual(status, 200)
         self.assertTrue(body["dry_run"])
+
+    # ---- option limit orders ----
+
+    _OPTION_URL = "https://api.robinhood.com/options/instruments/opt-mu-call/"
+
+    def _post_option_limit(self, dry_run=True, **overrides):
+        mock.patch.object(config, "OPTIONS_LIMIT_MAX_NOTIONAL", 1000.0).start()
+        mock.patch.object(server.robinhood, "get_option_instrument_url",
+                          return_value=self._OPTION_URL).start()
+        contract = {
+            "chain_symbol": "mu", "option_type": "call", "strike": 95,
+            "expiration": "2026-03-20",
+        }
+        if "contract" in overrides:
+            contract.update(overrides.pop("contract"))
+        order = {
+            "contract": contract,
+            "action": "buy_to_open",
+            "quantity": 1, "limit_price": "2.50",
+            "ref_id": "6a4698d9-a3c4-4621-a699-7b6eafe5bb14",
+            **overrides,
+        }
+        return self.request(
+            "POST", "/orders/options/limit", body={"order": order, "dry_run": dry_run})
+
+    def test_option_limit_dry_run_builds_payload_on_box(self):
+        status, body = self._post_option_limit()
+        self.assertEqual(status, 200)
+        self.assertEqual(body["url"], "https://api.robinhood.com/options/orders/")
+        p = body["payload"]
+        self.assertEqual(p["account"], FAKE_SESSION.account_url)
+        self.assertEqual(p["direction"], "debit")
+        leg = p["legs"][0]
+        self.assertEqual((leg["side"], leg["position_effect"], leg["option"]),
+                         ("buy", "open", self._OPTION_URL))
+        self.assertEqual((p["type"], p["trigger"], p["price"], p["quantity"],
+                          p["time_in_force"]), ("limit", "immediate", "2.50", 1, "gtc"))
+
+    def test_option_limit_guardrail_blocks(self):
+        status, body = self._post_option_limit(quantity=5)
+        self.assertEqual((status, body["error_code"]), (403, "GUARDRAIL_BLOCKED"))
+
+    def test_option_limit_live_rejection_is_502_not_200(self):
+        resp = mock.Mock(ok=False, status_code=400)
+        resp.json.return_value = {"detail": "Not enough buying power."}
+        http = mock.patch.object(server.robinhood, "_new_session").start().return_value
+        http.post.return_value = resp
+        status, body = self._post_option_limit(dry_run=False)
+        self.assertEqual((status, body["error_code"]), (502, "PLACE_FAILED"))
+        self.assertIn("buying power", body["detail"])
 
     # ---- MCP guardrails over HTTP ----
 
