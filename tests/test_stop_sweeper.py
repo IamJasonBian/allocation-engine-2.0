@@ -174,6 +174,21 @@ def test_sweep_places_only_for_uncovered(store):
     assert store.get("AAPL") is None
 
 
+def test_sweep_applies_equity_stop_mapping(store):
+    c = FakeClient()
+
+    out = sweep(c, store, ["AAPL", "MU", "NBIS"], trail_percent=12)
+
+    percentages = {
+        payload["symbol"]: float(payload["trailing_peg"]["percentage"])
+        for payload, _ in c.placed
+    }
+    assert percentages == {"AAPL": 12.0, "MU": 4.0, "NBIS": 6.0}
+    assert {row["symbol"] for row in out["simulated"]} == {
+        "AAPL", "MU", "NBIS",
+    }
+
+
 def test_sweep_resolves_symbol_missing_from_robinhood_order(store):
     order = rh_order("")
     order.pop("symbol")

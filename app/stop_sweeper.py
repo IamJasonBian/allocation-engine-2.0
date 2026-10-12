@@ -41,6 +41,7 @@ from datetime import datetime, timedelta, timezone
 import requests
 
 from app.config import Config
+from app.risk.equity_stop_mapping import equity_stop_percent
 
 log = logging.getLogger("stop_sweeper")
 
@@ -532,7 +533,7 @@ def sweep(client, store, tickers, trail_percent=TRAIL_PERCENT, dry_run=True,
                 continue
 
         place_qty = whole_qty if not dry_run else (whole_qty or 1)
-        t_trail = float(trail_percent)
+        t_trail = equity_stop_percent(t, trail_percent)
         if not dry_run and (placed or skipped):
             time.sleep(PLACE_DELAY_SECONDS)   # pace to dodge RH 429 throttling
         log.info("sweep: %s placing %.1f%% trailing stop qty=%s (dry_run=%s)",
