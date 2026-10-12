@@ -407,6 +407,21 @@ def _symbol_of(order):
     return (order.get("symbol") or order.get("chain_symbol") or "").upper()
 
 
+def resolve_order_symbol(order):
+    """Resolve a symbol from the instrument URL on a raw Robinhood order."""
+    instrument_url = order.get("instrument")
+    if not instrument_url:
+        return ""
+    try:
+        r = requests.get(instrument_url, timeout=15)
+        r.raise_for_status()
+        return str(r.json().get("symbol") or "").upper()
+    except Exception as e:  # noqa: BLE001
+        log.warning("instrument symbol lookup failed for %s: %s",
+                    instrument_url, e)
+        return ""
+
+
 def resolve_instrument_url(symbol):
     """Resolve a ticker to its RH instrument URL (public endpoint, no auth)."""
     try:
@@ -446,7 +461,8 @@ def _placement_ok(result):
 
 def sweep(client, store, tickers, trail_percent=TRAIL_PERCENT, dry_run=True,
           qty_map=None, price_map=None, account_url="",
-          instrument_resolver=resolve_instrument_url):
+          instrument_resolver=resolve_instrument_url,
+          order_symbol_resolver=resolve_order_symbol):
     """The start-of-day pass: mirror RH stops into sqlite, cover naked tickers.
 
     Live placement (dry_run=False) needs a WHOLE-share quantity (RH rejects
@@ -457,18 +473,38 @@ def sweep(client, store, tickers, trail_percent=TRAIL_PERCENT, dry_run=True,
     log.info("sweep: reading active trailing stops from RH")
     orders = client.get_stops()
     covered = {}
+    unresolved_active_orders = []
     for o in orders:
         sym = _symbol_of(o)
+        if not sym:
+            sym = order_symbol_resolver(o)
         if sym:
-            covered[sym] = o
-            store.upsert(sym, o)
+            normalized = {**o, "symbol": sym}
+            covered[sym] = normalized
+            store.upsert(sym, normalized)
+        else:
+            unresolved_active_orders.append(o.get("id") or "(missing id)")
+    if unresolved_active_orders:
+        log.error(
+            "sweep: aborting — %d active RH stops have no resolvable symbol",
+            len(unresolved_active_orders),
+        )
+        return {
+            "active_from_rh": len(covered),
+            "placed": [],
+            "simulated": [],
+            "renewed": [],
+            "pruned": [],
+            "skipped": [],
+            "unresolved_active_orders": unresolved_active_orders,
+        }
     pruned = store.prune_missing(set(covered) | {t.upper() for t in tickers})
     if pruned:
         log.info("sweep: pruned stale rows: %s", pruned)
 
     qty_map = {k.upper(): v for k, v in (qty_map or {}).items()}
     price_map = {k.upper(): v for k, v in (price_map or {}).items()}
-    placed, renewed, skipped = [], [], []
+    placed, simulated, renewed, skipped = [], [], [], []
     for t in (x.upper() for x in tickers):
         if t in covered:
             if _expiring_soon(store.get(t)):
@@ -517,9 +553,12 @@ def sweep(client, store, tickers, trail_percent=TRAIL_PERCENT, dry_run=True,
             log.warning("sweep: %s REJECTED by RH: %s", t, detail)
             skipped.append({"symbol": t, "reason": f"rh_rejected: {detail}"})
             continue
+        if result.get("dry_run"):
+            simulated.append({"symbol": t, "result": result})
+            continue
         placed.append({"symbol": t, "result": result})
         store.upsert(t, {"id": (result or {}).get("id"),
-                         "state": "dry_run" if dry_run else detail,
+                         "state": detail,
                          "created_at": _now_iso(), "side": "sell",
                          "quantity": str(place_qty),
                          "trailing_peg": {"type": "percentage",
@@ -527,13 +566,19 @@ def sweep(client, store, tickers, trail_percent=TRAIL_PERCENT, dry_run=True,
 
     store.set_meta("last_sweep_at", _now_iso())
     return {"active_from_rh": len(covered), "placed": placed,
-            "renewed": renewed, "pruned": pruned, "skipped": skipped}
+            "simulated": simulated, "renewed": renewed, "pruned": pruned,
+            "skipped": skipped, "unresolved_active_orders": []}
 
 
-def renew(client, store, symbol, dry_run=True):
+def renew(client, store, symbol, dry_run=True,
+          order_symbol_resolver=resolve_order_symbol):
     """Stop is near expiry: confirm against RH, then replace (PUT) to renew."""
     log.info("renew: %s near expiry — re-checking RH book", symbol)
-    live = {_symbol_of(o): o for o in client.get_stops()}
+    live = {}
+    for order in client.get_stops():
+        order_symbol = _symbol_of(order) or order_symbol_resolver(order)
+        if order_symbol:
+            live[order_symbol] = order
     order = live.get(symbol.upper())
     if not order:
         log.warning("renew: %s not in RH book — will be re-placed next sweep", symbol)

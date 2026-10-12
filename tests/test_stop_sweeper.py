@@ -6,6 +6,7 @@ leave this tool, and MCP traffic is read-only.
 """
 
 import uuid
+from datetime import datetime, timezone
 
 import pytest
 
@@ -79,7 +80,7 @@ def rh_order(symbol, side="sell", pct="16", order_id=None, created=None):
         "side": side,
         "quantity": "5",
         "trigger": "stop",
-        "created_at": created or "2026-07-01T00:00:00+00:00",
+        "created_at": created or datetime.now(timezone.utc).isoformat(),
         "account": "https://api.robinhood.com/accounts/X/",
         "instrument": "https://api.robinhood.com/instruments/Y/",
         "trailing_peg": {"type": "percentage", "percentage": pct},
@@ -166,10 +167,49 @@ def test_mcp_blocks_destructive_or_unknown(payload):
 def test_sweep_places_only_for_uncovered(store):
     c = FakeClient(book=[rh_order("IWN")])
     out = sweep(c, store, ["AAPL", "IWN"])
-    assert [p["symbol"] for p in out["placed"]] == ["AAPL"]
+    assert out["placed"] == []
+    assert [p["symbol"] for p in out["simulated"]] == ["AAPL"]
     assert all(dry for _, dry in c.placed), "sweep must default to dry_run"
     assert store.get("IWN")["state"] == "confirmed"
-    assert store.get("AAPL")["state"] == "dry_run"
+    assert store.get("AAPL") is None
+
+
+def test_sweep_resolves_symbol_missing_from_robinhood_order(store):
+    order = rh_order("")
+    order.pop("symbol")
+    c = FakeClient(book=[order])
+
+    out = sweep(
+        c,
+        store,
+        ["IWN"],
+        order_symbol_resolver=lambda _: "IWN",
+    )
+
+    assert out["active_from_rh"] == 1
+    assert out["placed"] == []
+    assert out["simulated"] == []
+    assert c.placed == []
+    assert store.get("IWN")["order_id"] == order["id"]
+
+
+def test_sweep_aborts_when_active_order_symbol_cannot_be_resolved(store):
+    order = rh_order("")
+    order.pop("symbol")
+    c = FakeClient(book=[order])
+
+    out = sweep(
+        c,
+        store,
+        ["IWN"],
+        order_symbol_resolver=lambda _: "",
+    )
+
+    assert out["unresolved_active_orders"] == [order["id"]]
+    assert out["placed"] == []
+    assert out["simulated"] == []
+    assert c.placed == []
+    assert not store.swept_today(), "an incomplete RH book must retry next tick"
 
 
 def test_check_is_sqlite_first_no_rh_call(store):

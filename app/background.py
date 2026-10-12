@@ -223,8 +223,20 @@ def run_engine_loop(app):
     risk_subject.attach(SlackAlertObserver())
     drawdown_alerted: set[str] = set()
 
-    log.info("[engine] worker loop started (interval=%ds, dry_run=%s, broker=%s)",
-             interval, config["DRY_RUN"], config["ENGINE_BROKER"])
+    log.info(
+        "[engine] worker loop started (interval=%ds, dry_run=%s, broker=%s, "
+        "stop_sweep_enabled=%s, stop_sweep_dry_run=%s)",
+        interval,
+        config["DRY_RUN"],
+        config["ENGINE_BROKER"],
+        config["STOP_SWEEP_ENABLED"],
+        config["STOP_SWEEP_DRY_RUN"],
+    )
+    if config["STOP_SWEEP_ENABLED"] and config["STOP_SWEEP_DRY_RUN"]:
+        log.critical(
+            "[stop-sweeper] DRY RUN ENABLED — positions will not receive "
+            "protective trailing stops"
+        )
 
     while True:
         if broker is None:
