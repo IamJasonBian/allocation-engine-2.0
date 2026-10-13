@@ -16,7 +16,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install engine dependencies
-        run: pip install -r requirements.txt
+        run: pip install pytest -r requirements.txt
 
       - name: Schema deploy check
         run: python scripts/check_schemas.py
