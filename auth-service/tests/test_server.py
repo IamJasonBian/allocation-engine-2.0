@@ -60,6 +60,8 @@ def _valid_trailing_payload(**overrides):
         side="sell",
         quantity=10,
         trail_percent=5,
+        stop_price=95,
+        limit_price=90,
     )
     payload.update(overrides)
     return payload
@@ -215,10 +217,10 @@ class ServerTestCase(unittest.TestCase):
         self.assertEqual(status, 403)
         self.assertEqual(body["error_code"], "GUARDRAIL_BLOCKED")
 
-    def test_place_limit_order_blocked(self):
+    def test_place_limit_above_stop_blocked(self):
         status, body = self.request(
             "POST", "/orders/trailing_stop",
-            body={"payload": _valid_trailing_payload(price="1.00")})
+            body={"payload": _valid_trailing_payload(price="100.00")})
         self.assertEqual(status, 403)
         self.assertEqual(body["error_code"], "GUARDRAIL_BLOCKED")
 

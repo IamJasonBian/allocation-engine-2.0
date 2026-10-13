@@ -70,7 +70,8 @@ def main():
         session,
         robinhood.build_trailing_stop_payload(
             account_url=session.account_url, instrument_url=instrument,
-            symbol=symbol, side="sell", quantity="1", trail_percent="5.00"),
+            symbol=symbol, side="sell", quantity="1", trail_percent="5.00",
+            stop_price="95.00", limit_price="90.25"),
         dry_run=True)
     print("  PLACE:")
     print(json.dumps(place, indent=2))
@@ -80,7 +81,9 @@ def main():
             robinhood.build_trailing_stop_payload(
                 account_url=session.account_url, instrument_url=instrument,
                 symbol=symbol, side=sample.get("side", "sell"),
-                quantity=sample.get("quantity", "1"), trail_percent="6.00"),
+                quantity=sample.get("quantity", "1"), trail_percent="6.00",
+                stop_price=sample.get("stop_price", "94.00"),
+                limit_price=sample.get("price", "88.36")),
             dry_run=True)
         print("  REPLACE:")
         print(json.dumps(replace, indent=2))

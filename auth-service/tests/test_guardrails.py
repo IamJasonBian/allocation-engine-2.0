@@ -20,6 +20,8 @@ def _valid_trailing_payload(**overrides):
         side="sell",
         quantity=10,
         trail_percent=5,
+        stop_price=95,
+        limit_price=90,
     )
     payload.update(overrides)
     return payload
@@ -31,6 +33,10 @@ class TrailingStopPayloadTests(unittest.TestCase):
 
     def test_buy_side_trailing_stop_passes(self):
         self.assertIsNone(guardrails.check_trailing_stop_payload(
+            _valid_trailing_payload(side="buy", stop_price=105, price=110)))
+
+    def test_buy_limit_below_stop_blocked(self):
+        self.assertIn("must not be below", guardrails.check_trailing_stop_payload(
             _valid_trailing_payload(side="buy")))
 
     def test_plain_market_buy_blocked(self):
@@ -39,8 +45,13 @@ class TrailingStopPayloadTests(unittest.TestCase):
                    "quantity": "10", "time_in_force": "gfd"}
         self.assertIn("trigger", guardrails.check_trailing_stop_payload(payload))
 
-    def test_limit_order_blocked(self):
-        self.assertIn("price", guardrails.check_trailing_stop_payload(
+    def test_missing_limit_price_blocked(self):
+        payload = _valid_trailing_payload()
+        del payload["price"]
+        self.assertIn("price", guardrails.check_trailing_stop_payload(payload))
+
+    def test_sell_limit_above_stop_blocked(self):
+        self.assertIn("must not exceed", guardrails.check_trailing_stop_payload(
             _valid_trailing_payload(price="100.00")))
 
     def test_missing_trailing_peg_blocked(self):
@@ -52,9 +63,9 @@ class TrailingStopPayloadTests(unittest.TestCase):
         self.assertIn("percentage", guardrails.check_trailing_stop_payload(
             _valid_trailing_payload(trailing_peg={"type": "price", "price": "5.00"})))
 
-    def test_non_market_type_blocked(self):
-        self.assertIn("market", guardrails.check_trailing_stop_payload(
-            _valid_trailing_payload(type="limit")))
+    def test_non_limit_type_blocked(self):
+        self.assertIn("limit", guardrails.check_trailing_stop_payload(
+            _valid_trailing_payload(type="market")))
 
     def test_bad_side_blocked(self):
         self.assertIn("side", guardrails.check_trailing_stop_payload(
