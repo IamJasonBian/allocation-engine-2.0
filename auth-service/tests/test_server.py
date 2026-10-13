@@ -215,10 +215,12 @@ class ServerTestCase(unittest.TestCase):
         self.assertEqual(status, 403)
         self.assertEqual(body["error_code"], "GUARDRAIL_BLOCKED")
 
-    def test_place_limit_order_blocked(self):
+    def test_place_plain_limit_without_trail_blocked(self):
+        payload = _valid_trailing_payload(price="1.00")
+        del payload["trailing_peg"]
         status, body = self.request(
             "POST", "/orders/trailing_stop",
-            body={"payload": _valid_trailing_payload(price="1.00")})
+            body={"payload": payload})
         self.assertEqual(status, 403)
         self.assertEqual(body["error_code"], "GUARDRAIL_BLOCKED")
 

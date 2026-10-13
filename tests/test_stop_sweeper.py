@@ -103,27 +103,33 @@ def valid_payload(**over):
 
 
 def test_built_payload_passes_guard():
-    validate_trailing_stop_payload(valid_payload())
+    payload = valid_payload()
+    assert payload["type"] == "limit"
+    validate_trailing_stop_payload(payload)
 
 
 @pytest.mark.parametrize("mutation,why", [
     ({"side": "buy"}, "buy order"),
-    ({"type": "limit"}, "limit order"),
+    ({"type": "market"}, "market order"),
     ({"trailing_peg": None}, "missing trailing peg"),
-    ({"price": "250.00"}, "smuggled limit price key"),
+    ({"trigger": "immediate"}, "immediate order"),
 ])
 def test_guard_rejects_destructive_payloads(mutation, why):
     with pytest.raises(GuardrailViolation):
         validate_trailing_stop_payload(valid_payload(**mutation)), why
 
 
-def test_live_placement_requires_account_and_instrument():
+def test_live_placement_requires_account_instrument_and_limit_price():
     # dry-run tolerates empty URLs, live must not
     validate_trailing_stop_payload(valid_payload(), live=False)
     with pytest.raises(GuardrailViolation):
         validate_trailing_stop_payload(valid_payload(), live=True)
+    with pytest.raises(GuardrailViolation):
+        validate_trailing_stop_payload(
+            valid_payload(account="https://a/", instrument="https://i/"), live=True)
     validate_trailing_stop_payload(
-        valid_payload(account="https://a/", instrument="https://i/"), live=True)
+        valid_payload(account="https://a/", instrument="https://i/",
+                      price="88.0", stop_price="88.0"), live=True)
 
 
 def test_replace_requires_order_id():
@@ -281,7 +287,9 @@ def test_live_sweep_places_whole_shares_with_stop_price(store):
     payload, dry = c.placed[0]
     assert dry is False
     assert payload["quantity"] == "42"                # floored to whole shares
+    assert payload["type"] == "limit"
     assert payload["stop_price"] == "88.0"            # 12% below 100
+    assert payload["price"] == "88.0"                 # stop-limit at the stop
     assert store.get("AAPL")["order_id"] == "ord-123"
 
 

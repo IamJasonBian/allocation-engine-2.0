@@ -124,7 +124,7 @@ class ToolTests(unittest.TestCase):
         p = out["payload"]
         self.assertEqual(p["trigger"], "stop")
         self.assertEqual(p["trailing_peg"], {"type": "percentage", "percentage": "5"})
-        self.assertEqual(p["type"], "market")
+        self.assertEqual(p["type"], "limit")
         self.assertNotIn("price", p)
         # dry run must never POST to RH
         self.assertFalse([c for c in self.http.calls if c["method"] == "POST"])

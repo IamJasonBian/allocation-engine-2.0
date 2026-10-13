@@ -69,7 +69,7 @@ class GuardrailViolation(ValueError):
 
 _ALLOWED_PAYLOAD_KEYS = {
     "account", "instrument", "symbol", "type", "time_in_force", "trigger",
-    "side", "quantity", "trailing_peg", "ref_id", "stop_price",
+    "side", "quantity", "trailing_peg", "ref_id", "stop_price", "price",
 }
 
 # MCP is read-only from this tool: market/portfolio reads are fine, anything
@@ -94,8 +94,10 @@ def validate_trailing_stop_payload(payload, live=False):
         raise GuardrailViolation("trigger must be 'stop' (no immediate orders)")
     if payload.get("side") != "sell":
         raise GuardrailViolation("side must be 'sell' — protective stops only")
-    if payload.get("type") != "market":
-        raise GuardrailViolation("type must be 'market' (no limit orders)")
+    if payload.get("type") != "limit":
+        raise GuardrailViolation("type must be 'limit' (stop-limit only)")
+    if live and not payload.get("price"):
+        raise GuardrailViolation("live stop-limit requires a limit price")
     if payload.get("time_in_force") != "gtc":
         raise GuardrailViolation("time_in_force must be 'gtc'")
     peg = payload.get("trailing_peg")
@@ -391,7 +393,7 @@ def build_payload(symbol, side, quantity, trail_percent,
         "account": account_url,
         "instrument": instrument_url,
         "symbol": symbol,
-        "type": "market",
+        "type": "limit",
         "time_in_force": "gtc",
         "trigger": "stop",
         "side": side,
@@ -400,7 +402,9 @@ def build_payload(symbol, side, quantity, trail_percent,
         "ref_id": str(uuid.uuid4()),
     }
     if current_price:
-        payload["stop_price"] = str(initial_stop_price(current_price, trail_percent, side))
+        stop = str(initial_stop_price(current_price, trail_percent, side))
+        payload["stop_price"] = stop
+        payload["price"] = stop
     return payload
 
 

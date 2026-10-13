@@ -329,7 +329,7 @@ def build_trailing_stop_payload(*, account_url: str, instrument_url: str, symbol
         "account": account_url,
         "instrument": instrument_url,
         "symbol": symbol,
-        "type": "market",
+        "type": "limit",
         "time_in_force": time_in_force,
         "trigger": "stop",
         "side": side,
@@ -339,6 +339,7 @@ def build_trailing_stop_payload(*, account_url: str, instrument_url: str, symbol
     }
     if stop_price is not None:
         payload["stop_price"] = str(stop_price)
+        payload["price"] = str(stop_price)
     return payload
 
 
