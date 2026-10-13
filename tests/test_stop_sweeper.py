@@ -285,6 +285,94 @@ def test_live_sweep_places_whole_shares_with_stop_price(store):
     assert store.get("AAPL")["order_id"] == "ord-123"
 
 
+def test_live_sweep_uses_instrument_map_when_public_lookup_fails(store):
+    """TSPH is not on the public RH instruments API; use the position URL."""
+    c = OrderIdClient()
+    out = sweep(
+        c, store, ["TSPH"],
+        dry_run=False, trail_percent=12,
+        qty_map={"TSPH": 20}, price_map={"TSPH": 10.0},
+        account_url="https://api.robinhood.com/accounts/X/",
+        instrument_resolver=lambda _: "",
+        instrument_map={"TSPH": "https://api.robinhood.com/instruments/tsph/"},
+    )
+    assert [p["symbol"] for p in out["placed"]] == ["TSPH"]
+    assert c.placed[0][0]["instrument"] == "https://api.robinhood.com/instruments/tsph/"
+    assert store.swept_today()
+
+
+def test_live_sweep_does_not_latch_when_instrument_unresolved(store):
+    c = OrderIdClient()
+    out = sweep(
+        c, store, ["TSPH"],
+        dry_run=False, trail_percent=12,
+        qty_map={"TSPH": 20}, price_map={"TSPH": 10.0},
+        account_url="https://api.robinhood.com/accounts/X/",
+        instrument_resolver=lambda _: "",
+    )
+    assert out["placed"] == []
+    assert out["skipped"] == [{"symbol": "TSPH", "reason": "unresolved_instrument"}]
+    assert not store.swept_today(), "retryable skips must not latch the day"
+
+
+def test_renew_prefers_known_order_id_over_earlier_symbol_match(store):
+    decoy = rh_order("TSPH")
+    target = rh_order("")
+    target.pop("symbol")
+    c = FakeClient(book=[decoy, target])
+    out = renew(
+        c, store, "TSPH",
+        known_order={"id": target["id"], "symbol": "TSPH"},
+        order_symbol_resolver=lambda _: "",
+    )
+    assert out["action"] == "renewed"
+    assert c.replaced[0][0] == target["id"]
+
+
+def test_live_sweep_skips_account_before_instrument_lookup(store):
+    calls = []
+
+    def resolver(symbol):
+        calls.append(symbol)
+        raise AssertionError("public instrument lookup must not run")
+
+    out = sweep(
+        OrderIdClient(), store, ["AAPL"],
+        dry_run=False, trail_percent=12,
+        qty_map={"AAPL": 5}, price_map={"AAPL": 100.0},
+        account_url="",
+        instrument_resolver=resolver,
+    )
+    assert out["skipped"] == [{"symbol": "AAPL", "reason": "unresolved_account"}]
+    assert calls == []
+
+
+def test_renew_matches_known_order_id_when_symbol_is_missing(store):
+    order = rh_order("")
+    order.pop("symbol")
+    c = FakeClient(book=[order])
+    out = renew(
+        c, store, "TSPH",
+        known_order={"id": order["id"], "symbol": "TSPH", **order},
+        order_symbol_resolver=lambda _: "",
+    )
+    assert out["action"] == "renewed"
+    assert c.replaced[0][0] == order["id"]
+
+
+def test_sweep_does_not_latch_when_renew_cannot_confirm_order(store):
+    old = rh_order("IWN", created="2026-04-10T00:00:00+00:00")
+
+    class DropClient(FakeClient):
+        def get_stops(self):
+            self.rh_reads += 1
+            return [old] if self.rh_reads == 1 else []
+
+    out = sweep(DropClient(), store, ["IWN"])
+    assert out["renewed"][0]["action"] == "missing_in_rh"
+    assert not store.swept_today()
+
+
 def test_rh_rejection_without_id_is_not_placed(store):
     # box returns 200 but RH rejected (no id) -> must count as skipped
     class RejectClient(FakeClient):

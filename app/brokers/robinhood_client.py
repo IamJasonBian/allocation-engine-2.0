@@ -166,6 +166,7 @@ class RobinhoodTrader(BrokerClient):
                 "avg_entry": avg_buy,
                 "unrealized_pl": round(unrealized_pl, 2),
                 "unrealized_pl_pct": round(unrealized_pl_pct, 4),
+                "instrument": pos.get("instrument", ""),
             })
         return result
 

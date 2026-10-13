@@ -460,10 +460,16 @@ def _placement_ok(result):
     return False, str(detail)[:200]
 
 
+_RETRYABLE_SKIP_REASONS = frozenset({
+    "unresolved_instrument", "unresolved_account", "unresolved_urls", "no_price",
+})
+
+
 def sweep(client, store, tickers, trail_percent=TRAIL_PERCENT, dry_run=True,
           qty_map=None, price_map=None, account_url="",
           instrument_resolver=resolve_instrument_url,
-          order_symbol_resolver=resolve_order_symbol):
+          order_symbol_resolver=resolve_order_symbol,
+          instrument_map=None):
     """The start-of-day pass: mirror RH stops into sqlite, cover naked tickers.
 
     Live placement (dry_run=False) needs a WHOLE-share quantity (RH rejects
@@ -509,7 +515,10 @@ def sweep(client, store, tickers, trail_percent=TRAIL_PERCENT, dry_run=True,
     for t in (x.upper() for x in tickers):
         if t in covered:
             if _expiring_soon(store.get(t)):
-                renewed.append(renew(client, store, t, dry_run=dry_run))
+                renewed.append(renew(
+                    client, store, t, dry_run=dry_run,
+                    known_order=covered[t],
+                    order_symbol_resolver=order_symbol_resolver))
             continue
 
         instrument_url, current_price = "", price_map.get(t)
@@ -525,11 +534,15 @@ def sweep(client, store, tickers, trail_percent=TRAIL_PERCENT, dry_run=True,
                 log.warning("sweep: %s skipped — no current price for stop", t)
                 skipped.append({"symbol": t, "reason": "no_price"})
                 continue
-            instrument_url = instrument_resolver(t)
-            if not instrument_url or not account_url:
-                log.warning("sweep: %s skipped — unresolved instrument/account "
-                            "URL", t)
-                skipped.append({"symbol": t, "reason": "unresolved_urls"})
+            if not account_url:
+                log.warning("sweep: %s skipped — unresolved account URL", t)
+                skipped.append({"symbol": t, "reason": "unresolved_account"})
+                continue
+            instrument_url = ((instrument_map or {}).get(t)
+                              or instrument_resolver(t))
+            if not instrument_url:
+                log.warning("sweep: %s skipped — unresolved instrument URL", t)
+                skipped.append({"symbol": t, "reason": "unresolved_instrument"})
                 continue
 
         place_qty = whole_qty if not dry_run else (whole_qty or 1)
@@ -565,22 +578,32 @@ def sweep(client, store, tickers, trail_percent=TRAIL_PERCENT, dry_run=True,
                          "trailing_peg": {"type": "percentage",
                                           "percentage": str(t_trail)}})
 
-    store.set_meta("last_sweep_at", _now_iso())
+    retryable = (
+        any(s.get("reason") in _RETRYABLE_SKIP_REASONS for s in skipped)
+        or any(r.get("action") == "missing_in_rh" for r in renewed)
+    )
+    if not retryable:
+        store.set_meta("last_sweep_at", _now_iso())
     return {"active_from_rh": len(covered), "placed": placed,
             "simulated": simulated, "renewed": renewed, "pruned": pruned,
             "skipped": skipped, "unresolved_active_orders": []}
 
 
 def renew(client, store, symbol, dry_run=True,
-          order_symbol_resolver=resolve_order_symbol):
+          order_symbol_resolver=resolve_order_symbol,
+          known_order=None):
     """Stop is near expiry: confirm against RH, then replace (PUT) to renew."""
     log.info("renew: %s near expiry — re-checking RH book", symbol)
-    live = {}
-    for order in client.get_stops():
-        order_symbol = _symbol_of(order) or order_symbol_resolver(order)
-        if order_symbol:
-            live[order_symbol] = order
-    order = live.get(symbol.upper())
+    known_id = (known_order or {}).get("id") or (store.get(symbol) or {}).get("order_id")
+    live_orders = client.get_stops()
+    order = next((candidate for candidate in live_orders
+                  if known_id and candidate.get("id") == known_id), None)
+    if order is None:
+        for candidate in live_orders:
+            order_symbol = _symbol_of(candidate) or order_symbol_resolver(candidate)
+            if order_symbol == symbol.upper():
+                order = candidate
+                break
     if not order:
         log.warning("renew: %s not in RH book — will be re-placed next sweep", symbol)
         return {"symbol": symbol, "action": "missing_in_rh"}
