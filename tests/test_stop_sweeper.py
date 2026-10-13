@@ -97,7 +97,7 @@ def store(tmp_path):
 # --------------------------------------------------------------------------- #
 
 def valid_payload(**over):
-    p = build_payload("AAPL", "sell", 1, 16)
+    p = build_payload("AAPL", "sell", 1, 16, current_price=100)
     p.update(over)
     return p
 
@@ -113,23 +113,20 @@ def test_built_payload_passes_guard():
     ({"type": "market"}, "market order"),
     ({"trailing_peg": None}, "missing trailing peg"),
     ({"trigger": "immediate"}, "immediate order"),
+    ({"price": "250.00"}, "limit above sell stop"),
 ])
 def test_guard_rejects_destructive_payloads(mutation, why):
     with pytest.raises(GuardrailViolation):
         validate_trailing_stop_payload(valid_payload(**mutation)), why
 
 
-def test_live_placement_requires_account_instrument_and_limit_price():
+def test_live_placement_requires_account_and_instrument():
     # dry-run tolerates empty URLs, live must not
     validate_trailing_stop_payload(valid_payload(), live=False)
     with pytest.raises(GuardrailViolation):
         validate_trailing_stop_payload(valid_payload(), live=True)
-    with pytest.raises(GuardrailViolation):
-        validate_trailing_stop_payload(
-            valid_payload(account="https://a/", instrument="https://i/"), live=True)
     validate_trailing_stop_payload(
-        valid_payload(account="https://a/", instrument="https://i/",
-                      price="88.0", stop_price="88.0"), live=True)
+        valid_payload(account="https://a/", instrument="https://i/"), live=True)
 
 
 def test_replace_requires_order_id():
@@ -172,7 +169,10 @@ def test_mcp_blocks_destructive_or_unknown(payload):
 
 def test_sweep_places_only_for_uncovered(store):
     c = FakeClient(book=[rh_order("IWN")])
-    out = sweep(c, store, ["AAPL", "IWN"])
+    out = sweep(
+        c, store, ["AAPL", "IWN"],
+        qty_map={"AAPL": 1}, price_map={"AAPL": 100},
+    )
     assert out["placed"] == []
     assert [p["symbol"] for p in out["simulated"]] == ["AAPL"]
     assert all(dry for _, dry in c.placed), "sweep must default to dry_run"
@@ -183,13 +183,28 @@ def test_sweep_places_only_for_uncovered(store):
 def test_sweep_applies_equity_stop_mapping(store):
     c = FakeClient()
 
-    out = sweep(c, store, ["AAPL", "MU", "NBIS"], trail_percent=12)
+    out = sweep(
+        c, store, ["AAPL", "MU", "NBIS"], trail_percent=12,
+        qty_map={"AAPL": 1, "MU": 1, "NBIS": 1},
+        price_map={"AAPL": 100, "MU": 100, "NBIS": 100},
+    )
 
     percentages = {
         payload["symbol"]: float(payload["trailing_peg"]["percentage"])
         for payload, _ in c.placed
     }
     assert percentages == {"AAPL": 12.0, "MU": 4.0, "NBIS": 6.0}
+    prices = {
+        payload["symbol"]: (
+            float(payload["stop_price"]), float(payload["price"])
+        )
+        for payload, _ in c.placed
+    }
+    assert prices == {
+        "AAPL": (88.0, 77.44),
+        "MU": (96.0, 92.16),
+        "NBIS": (94.0, 88.36),
+    }
     assert {row["symbol"] for row in out["simulated"]} == {
         "AAPL", "MU", "NBIS",
     }
@@ -243,7 +258,7 @@ def test_check_is_sqlite_first_no_rh_call(store):
     assert c.rh_reads == reads_after_sweep, "check must not hit RH when fresh"
 
 
-def test_expiring_stop_triggers_explicit_rh_check_and_renew(store):
+def test_expiring_market_stop_is_grandfathered_not_replaced(store):
     old = rh_order("IWN", created="2026-04-10T00:00:00+00:00")  # ~86d ago
     c = FakeClient(book=[old])
     sweep(c, store, ["IWN"])          # sweep itself renews the expiring stop
@@ -251,8 +266,8 @@ def test_expiring_stop_triggers_explicit_rh_check_and_renew(store):
     row = check(c, store, "IWN")      # dry-run didn't change RH -> renews again
     assert row["expiring_soon"]
     assert c.rh_reads > reads, "near-expiry must force an RH re-read"
-    assert {r[0] for r in c.replaced} == {old["id"]}
-    assert all(r[2] is True for r in c.replaced), "renew must default to dry_run"
+    assert c.replaced == []
+    assert row["order_id"] == old["id"]
 
 
 def test_renew_skips_buy_side_stop_instead_of_crashing(store):
@@ -289,7 +304,7 @@ def test_live_sweep_places_whole_shares_with_stop_price(store):
     assert payload["quantity"] == "42"                # floored to whole shares
     assert payload["type"] == "limit"
     assert payload["stop_price"] == "88.0"            # 12% below 100
-    assert payload["price"] == "88.0"                 # stop-limit at the stop
+    assert payload["price"] == "77.44"                 # 12% below the trigger
     assert store.get("AAPL")["order_id"] == "ord-123"
 
 
@@ -327,6 +342,10 @@ def test_renew_prefers_known_order_id_over_earlier_symbol_match(store):
     decoy = rh_order("TSPH")
     target = rh_order("")
     target.pop("symbol")
+    target["type"] = "limit"
+    target["time_in_force"] = "gtc"
+    target["stop_price"] = "10.00"
+    target["price"] = "9.00"
     c = FakeClient(book=[decoy, target])
     out = renew(
         c, store, "TSPH",
@@ -358,6 +377,10 @@ def test_live_sweep_skips_account_before_instrument_lookup(store):
 def test_renew_matches_known_order_id_when_symbol_is_missing(store):
     order = rh_order("")
     order.pop("symbol")
+    order["type"] = "limit"
+    order["time_in_force"] = "gtc"
+    order["stop_price"] = "10.00"
+    order["price"] = "9.00"
     c = FakeClient(book=[order])
     out = renew(
         c, store, "TSPH",

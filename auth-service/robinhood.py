@@ -318,9 +318,10 @@ def get_trailing_stop_orders(session: Session, only_percentage: bool = True) -> 
 
 
 def build_trailing_stop_payload(*, account_url: str, instrument_url: str, symbol: str,
-                                side: str, quantity, trail_percent, stop_price=None,
+                                side: str, quantity, trail_percent,
+                                stop_price=None, limit_price=None,
                                 time_in_force: str = "gtc") -> dict:
-    """Construct a percentage trailing-stop order payload.
+    """Construct a percentage trailing stop-limit order payload.
 
     Uses the `trailing_peg` shape (robin_stocks). We confirm this against a live
     read before ever POSTing — see get_trailing_stop_orders.
@@ -339,7 +340,8 @@ def build_trailing_stop_payload(*, account_url: str, instrument_url: str, symbol
     }
     if stop_price is not None:
         payload["stop_price"] = str(stop_price)
-        payload["price"] = str(stop_price)
+    if limit_price is not None:
+        payload["price"] = str(limit_price)
     return payload
 
 
