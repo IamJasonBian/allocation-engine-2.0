@@ -108,7 +108,7 @@ def maybe_stop_sweep(config, state, current_positions):
         return
     tickers = [t.strip().upper() for t in
                config["STOP_TICKERS"].split(",") if t.strip()]
-    qty_map, price_map = {}, {}
+    qty_map, price_map, instrument_map = {}, {}, {}
     for p in current_positions:
         sym = (p.get("symbol") or "").upper()
         if not sym:
@@ -117,6 +117,8 @@ def maybe_stop_sweep(config, state, current_positions):
         q = float(p.get("qty") or 0)
         if q and p.get("market_value"):
             price_map[sym] = float(p["market_value"]) / q
+        if p.get("instrument"):
+            instrument_map[sym] = p["instrument"]
     tickers = sorted(set(tickers) | set(qty_map))
     dry = config["STOP_SWEEP_DRY_RUN"]
     if not dry and not qty_map:
@@ -130,7 +132,8 @@ def maybe_stop_sweep(config, state, current_positions):
              tickers or "book-only", trail, dry)
     out = sw.sweep(state.client, state.store, tickers, trail_percent=trail,
                    dry_run=dry, qty_map=qty_map, price_map=price_map,
-                   account_url=sw.account_url_from_box())
+                   account_url=sw.account_url_from_box(),
+                   instrument_map=instrument_map)
     log.info("[stop-sweeper] sweep done: %d active in RH book, "
              "placed=%s, simulated=%s, renewed=%s, pruned=%s, skipped=%s, "
              "unresolved_active=%d",
