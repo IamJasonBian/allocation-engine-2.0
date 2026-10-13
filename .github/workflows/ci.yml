@@ -16,16 +16,16 @@ jobs:
           python-version: "3.12"
 
       - name: Install engine dependencies
-        run: pip install -r requirements.txt
+        run: pip install pytest -r requirements.txt
 
       - name: Schema deploy check
         run: python scripts/check_schemas.py
 
       - name: Engine tests
-        run: pytest tests/ -q
+        run: python -m pytest tests/ -q
 
       - name: Auth-service tests
         working-directory: auth-service
         run: |
           pip install -r requirements.txt
-          pytest tests/ -q
+          python -m pytest tests/ -q

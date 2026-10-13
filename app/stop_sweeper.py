@@ -69,7 +69,7 @@ class GuardrailViolation(ValueError):
 
 _ALLOWED_PAYLOAD_KEYS = {
     "account", "instrument", "symbol", "type", "time_in_force", "trigger",
-    "side", "quantity", "trailing_peg", "ref_id", "stop_price",
+    "side", "quantity", "trailing_peg", "ref_id", "stop_price", "price",
 }
 
 # MCP is read-only from this tool: market/portfolio reads are fine, anything
@@ -94,8 +94,8 @@ def validate_trailing_stop_payload(payload, live=False):
         raise GuardrailViolation("trigger must be 'stop' (no immediate orders)")
     if payload.get("side") != "sell":
         raise GuardrailViolation("side must be 'sell' — protective stops only")
-    if payload.get("type") != "market":
-        raise GuardrailViolation("type must be 'market' (no limit orders)")
+    if payload.get("type") != "limit":
+        raise GuardrailViolation("type must be 'limit' (protective stop-limit only)")
     if payload.get("time_in_force") != "gtc":
         raise GuardrailViolation("time_in_force must be 'gtc'")
     peg = payload.get("trailing_peg")
@@ -113,6 +113,15 @@ def validate_trailing_stop_payload(payload, live=False):
         raise GuardrailViolation("quantity must be numeric")
     if qty <= 0:
         raise GuardrailViolation("quantity must be positive")
+    try:
+        stop_price = float(payload.get("stop_price"))
+        limit_price = float(payload.get("price"))
+    except (TypeError, ValueError):
+        raise GuardrailViolation("stop_price and price must be numeric")
+    if stop_price <= 0 or limit_price <= 0:
+        raise GuardrailViolation("stop_price and price must be positive")
+    if payload.get("side") == "sell" and limit_price > stop_price:
+        raise GuardrailViolation("sell limit price must not exceed stop price")
     if live and (not payload.get("account") or not payload.get("instrument")):
         raise GuardrailViolation(
             "live placement requires account and instrument URLs")
@@ -380,27 +389,37 @@ def initial_stop_price(current_price, trail_percent, side="sell"):
     return round(float(current_price) * factor, 2)
 
 
+def initial_limit_price(stop_price, cushion_percent, side="sell"):
+    """Limit after triggering; the symbol mapping also sets the fill cushion."""
+    pct = float(cushion_percent) / 100.0
+    factor = (1 - pct) if side == "sell" else (1 + pct)
+    return round(float(stop_price) * factor, 2)
+
+
 def build_payload(symbol, side, quantity, trail_percent,
                   account_url="", instrument_url="", current_price=None):
-    """Percentage trailing-stop payload (trailing_peg + initial stop_price).
+    """Percentage trailing stop-limit payload.
 
-    account/instrument URLs are required by RH for live placement; when empty
-    (local dry-run) the box still logs/echoes the payload without sending.
+    The mapped percentage controls both trailing distance and the limit cushion
+    below the triggered stop. Existing market stops are not replaced.
     """
+    if current_price is None:
+        raise GuardrailViolation("stop-limit placement requires current_price")
+    stop_price = initial_stop_price(current_price, trail_percent, side)
     payload = {
         "account": account_url,
         "instrument": instrument_url,
         "symbol": symbol,
-        "type": "market",
+        "type": "limit",
         "time_in_force": "gtc",
         "trigger": "stop",
         "side": side,
         "quantity": str(quantity),
         "trailing_peg": {"type": "percentage", "percentage": str(trail_percent)},
+        "stop_price": str(stop_price),
+        "price": str(initial_limit_price(stop_price, trail_percent, side)),
         "ref_id": str(uuid.uuid4()),
     }
-    if current_price:
-        payload["stop_price"] = str(initial_stop_price(current_price, trail_percent, side))
     return payload
 
 
@@ -508,6 +527,8 @@ def sweep(client, store, tickers, trail_percent=TRAIL_PERCENT, dry_run=True,
     placed, simulated, renewed, skipped = [], [], [], []
     for t in (x.upper() for x in tickers):
         if t in covered:
+            # Grandfather older market trailing stops. The stop-limit shape and
+            # current symbol mapping apply only when creating a missing stop.
             if _expiring_soon(store.get(t)):
                 renewed.append(renew(client, store, t, dry_run=dry_run))
             continue
@@ -515,16 +536,16 @@ def sweep(client, store, tickers, trail_percent=TRAIL_PERCENT, dry_run=True,
         instrument_url, current_price = "", price_map.get(t)
         # RH trailing stops are whole-share only.
         whole_qty = int(float(qty_map.get(t) or 0))
+        if whole_qty < 1:
+            log.warning("sweep: %s skipped — no whole-share quantity "
+                        "(have %s)", t, qty_map.get(t))
+            skipped.append({"symbol": t, "reason": "fractional_or_no_qty"})
+            continue
+        if not current_price:
+            log.warning("sweep: %s skipped — no current price for stop", t)
+            skipped.append({"symbol": t, "reason": "no_price"})
+            continue
         if not dry_run:
-            if whole_qty < 1:
-                log.warning("sweep: %s skipped — no whole-share quantity "
-                            "(have %s)", t, qty_map.get(t))
-                skipped.append({"symbol": t, "reason": "fractional_or_no_qty"})
-                continue
-            if not current_price:
-                log.warning("sweep: %s skipped — no current price for stop", t)
-                skipped.append({"symbol": t, "reason": "no_price"})
-                continue
             instrument_url = instrument_resolver(t)
             if not instrument_url or not account_url:
                 log.warning("sweep: %s skipped — unresolved instrument/account "
@@ -532,7 +553,7 @@ def sweep(client, store, tickers, trail_percent=TRAIL_PERCENT, dry_run=True,
                 skipped.append({"symbol": t, "reason": "unresolved_urls"})
                 continue
 
-        place_qty = whole_qty if not dry_run else (whole_qty or 1)
+        place_qty = whole_qty
         t_trail = equity_stop_percent(t, trail_percent)
         if not dry_run and (placed or skipped):
             time.sleep(PLACE_DELAY_SECONDS)   # pace to dodge RH 429 throttling
@@ -584,11 +605,20 @@ def renew(client, store, symbol, dry_run=True,
     if not order:
         log.warning("renew: %s not in RH book — will be re-placed next sweep", symbol)
         return {"symbol": symbol, "action": "missing_in_rh"}
-    payload = build_payload(
-        symbol, order.get("side", "sell"), order.get("quantity", "1"),
-        (order.get("trailing_peg") or {}).get("percentage", TRAIL_PERCENT),
-        account_url=order.get("account", ""),
-        instrument_url=order.get("instrument", ""))
+    # Existing stop-market orders are intentionally grandfathered. Replacing
+    # one would silently change its execution semantics.
+    if order.get("type", "market") != "limit":
+        return {
+            "symbol": symbol,
+            "action": "renew_skipped",
+            "reason": "grandfathered_market_stop",
+        }
+    payload = {
+        key: order[key]
+        for key in _ALLOWED_PAYLOAD_KEYS
+        if key in order
+    }
+    payload["ref_id"] = str(uuid.uuid4())
     try:
         result = client.replace_stop(order["id"], payload, dry_run=dry_run)
     except (NotImplementedError, GuardrailViolation) as e:

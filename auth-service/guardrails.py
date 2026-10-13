@@ -73,10 +73,21 @@ def check_trailing_stop_payload(payload: dict) -> str | None:
         pct = 0
     if not 0 < pct <= 100:
         return "trailing_peg.percentage must be in (0, 100]"
-    if payload.get("type") != "market":
-        return "payload.type must be 'market' (got %r)" % payload.get("type")
-    if "price" in payload:
-        return "limit 'price' not allowed on a trailing stop"
+    if payload.get("type") != "limit":
+        return "payload.type must be 'limit' (got %r)" % payload.get("type")
+    try:
+        stop_price = float(payload.get("stop_price", 0))
+        limit_price = float(payload.get("price", 0))
+    except (TypeError, ValueError):
+        stop_price = limit_price = 0
+    if stop_price <= 0:
+        return "payload.stop_price must be > 0"
+    if limit_price <= 0:
+        return "payload.price must be > 0"
+    if payload.get("side") == "sell" and limit_price > stop_price:
+        return "sell payload.price must not exceed payload.stop_price"
+    if payload.get("side") == "buy" and limit_price < stop_price:
+        return "buy payload.price must not be below payload.stop_price"
     if payload.get("side") not in ("buy", "sell"):
         return "payload.side must be 'buy' or 'sell'"
     try:

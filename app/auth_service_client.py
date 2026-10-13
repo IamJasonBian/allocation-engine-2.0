@@ -47,8 +47,9 @@ class OTPRequired(AuthServiceError):
 
 def build_trailing_stop_payload(*, account_url, instrument_url, symbol, side,
                                 quantity, trail_percent, stop_price=None,
+                                limit_price=None,
                                 time_in_force="gtc"):
-    """Construct a percentage trailing-stop order payload (trailing_peg shape).
+    """Construct a percentage trailing stop-limit payload.
 
     Mirrors the auth-service's own builder so callers can pass friendly fields
     instead of a pre-assembled payload.
@@ -57,7 +58,7 @@ def build_trailing_stop_payload(*, account_url, instrument_url, symbol, side,
         "account": account_url,
         "instrument": instrument_url,
         "symbol": symbol,
-        "type": "market",
+        "type": "limit",
         "time_in_force": time_in_force,
         "trigger": "stop",
         "side": side,
@@ -67,6 +68,8 @@ def build_trailing_stop_payload(*, account_url, instrument_url, symbol, side,
     }
     if stop_price is not None:
         payload["stop_price"] = str(stop_price)
+    if limit_price is not None:
+        payload["price"] = str(limit_price)
     return payload
 
 

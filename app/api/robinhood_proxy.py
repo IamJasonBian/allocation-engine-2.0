@@ -72,7 +72,7 @@ def place_trailing_stop():
 
     Body JSON — either a pre-built ``payload`` object, or the fields to build one:
         account, instrument, symbol, side, quantity, trail_percent,
-        stop_price (optional), time_in_force (optional)
+        stop_price, limit_price, time_in_force (optional)
     Plus optional ``dry_run`` (defaults to the service DRY_RUN setting).
     """
     body = request.get_json(silent=True) or {}
@@ -80,7 +80,10 @@ def place_trailing_stop():
 
     payload = body.get("payload")
     if payload is None:
-        required = ("account", "instrument", "symbol", "side", "quantity", "trail_percent")
+        required = (
+            "account", "instrument", "symbol", "side", "quantity",
+            "trail_percent", "stop_price", "limit_price",
+        )
         missing = [f for f in required if body.get(f) is None]
         if missing:
             return jsonify({
@@ -94,7 +97,8 @@ def place_trailing_stop():
             side=body["side"],
             quantity=body["quantity"],
             trail_percent=body["trail_percent"],
-            stop_price=body.get("stop_price"),
+            stop_price=body["stop_price"],
+            limit_price=body["limit_price"],
             time_in_force=body.get("time_in_force", "gtc"),
         )
 
