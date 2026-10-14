@@ -51,6 +51,7 @@ BOX_BASE = Config.AUTH_SERVICE_URL
 BOX_TOKEN = Config.RH_AUTH_SERVICE_REQUEST_TOKEN
 
 TRAIL_PERCENT = Config.STOP_TRAIL_PERCENT
+QTY_FRACTION = Config.STOP_QTY_FRACTION
 OPTION_TP_PERCENT = Config.OPTION_TP_PERCENT
 GTC_LIFETIME_DAYS = 90          # RH cancels GTC orders after ~90 days
 EXPIRY_LEAD_DAYS = Config.STOP_EXPIRY_LEAD_DAYS
@@ -415,11 +416,10 @@ def initial_limit_price(stop_price, cushion_percent, side="sell"):
 
 def build_payload(symbol, side, quantity, trail_percent,
                   account_url="", instrument_url="", current_price=None,
-                  order_type="limit"):
-    """Percentage trailing stop payload (limit by default, market fallback).
+                  order_type="market"):
+    """Percentage trailing stop payload (market fill on trigger).
 
-    The mapped percentage controls trailing distance and, for stop-limits, the
-    fill cushion below the triggered stop. Existing market stops are not replaced.
+    RH does not rest trailing stop-limits. Existing market stops are not replaced.
     """
     if order_type not in ("limit", "market"):
         raise GuardrailViolation("order_type must be 'limit' or 'market'")
@@ -505,22 +505,21 @@ _RETRYABLE_SKIP_REASONS = frozenset({
 })
 
 
-def _limit_unsupported(detail):
-    return "limit orders not supported" in str(detail).lower()
-
-
 def sweep(client, store, tickers, trail_percent=TRAIL_PERCENT, dry_run=True,
           qty_map=None, price_map=None, account_url="",
           instrument_resolver=resolve_instrument_url,
           order_symbol_resolver=resolve_order_symbol,
-          instrument_map=None):
+          instrument_map=None, qty_fraction=None):
     """The start-of-day pass: mirror RH stops into sqlite, cover naked tickers.
 
     Live placement (dry_run=False) needs a WHOLE-share quantity (RH rejects
     fractional trailing stops), account/instrument URLs, and a current price
-    (to set the initial stop). Anything unresolvable is skipped and logged;
+    (to set the initial stop). New stops cover qty_fraction of the lot
+    (default STOP_QTY_FRACTION). Anything unresolvable is skipped and logged;
     a placement is only counted 'placed' if RH returns an order id.
     """
+    if qty_fraction is None:
+        qty_fraction = QTY_FRACTION
     log.info("sweep: reading active trailing stops from RH")
     orders = client.get_stops()
     covered = {}
@@ -568,11 +567,11 @@ def sweep(client, store, tickers, trail_percent=TRAIL_PERCENT, dry_run=True,
             continue
 
         instrument_url, current_price = "", price_map.get(t)
-        # RH trailing stops are whole-share only.
-        whole_qty = int(float(qty_map.get(t) or 0))
+        # RH trailing stops are whole-share only; cover a fraction of the lot.
+        whole_qty = int(float(qty_map.get(t) or 0) * float(qty_fraction))
         if whole_qty < 1:
             log.warning("sweep: %s skipped — no whole-share quantity "
-                        "(have %s)", t, qty_map.get(t))
+                        "(have %s × %.2f)", t, qty_map.get(t), qty_fraction)
             skipped.append({"symbol": t, "reason": "fractional_or_no_qty"})
             continue
         if not current_price:
@@ -595,12 +594,13 @@ def sweep(client, store, tickers, trail_percent=TRAIL_PERCENT, dry_run=True,
         t_trail = equity_stop_percent(t, trail_percent)
         if not dry_run and (placed or skipped):
             time.sleep(PLACE_DELAY_SECONDS)   # pace to dodge RH 429 throttling
-        log.info("sweep: %s placing %.1f%% trailing stop qty=%s (dry_run=%s)",
-                 t, t_trail, place_qty, dry_run)
+        log.info("sweep: %s placing %.1f%% trailing market qty=%s (%.0f%% of lot, dry_run=%s)",
+                 t, t_trail, place_qty, float(qty_fraction) * 100, dry_run)
         payload = build_payload(t, "sell", place_qty, t_trail,
                                 account_url=account_url,
                                 instrument_url=instrument_url,
-                                current_price=current_price)
+                                current_price=current_price,
+                                order_type="market")
         try:
             result = client.place_stop(payload, dry_run=dry_run)
         except GuardrailViolation as e:
@@ -609,20 +609,6 @@ def sweep(client, store, tickers, trail_percent=TRAIL_PERCENT, dry_run=True,
             continue
 
         ok, detail = _placement_ok(result)
-        if not ok and _limit_unsupported(detail) and payload.get("type") == "limit":
-            log.info("sweep: %s stop-limit unsupported — retrying as market", t)
-            payload = build_payload(t, "sell", place_qty, t_trail,
-                                    account_url=account_url,
-                                    instrument_url=instrument_url,
-                                    current_price=current_price,
-                                    order_type="market")
-            try:
-                result = client.place_stop(payload, dry_run=dry_run)
-            except GuardrailViolation as e:
-                log.warning("sweep: %s market fallback blocked by guardrail: %s", t, e)
-                skipped.append({"symbol": t, "reason": str(e)})
-                continue
-            ok, detail = _placement_ok(result)
         if not ok:
             log.warning("sweep: %s REJECTED by RH: %s", t, detail)
             skipped.append({"symbol": t, "reason": f"rh_rejected: {detail}"})
