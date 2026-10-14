@@ -41,7 +41,7 @@ from datetime import datetime, timedelta, timezone
 import requests
 
 from app.config import Config
-from app.risk.equity_stop_mapping import equity_stop_percent
+from app.risk.equity_stop_mapping import equity_stop_percent, equity_stop_qty_fraction
 
 log = logging.getLogger("stop_sweeper")
 
@@ -51,7 +51,6 @@ BOX_BASE = Config.AUTH_SERVICE_URL
 BOX_TOKEN = Config.RH_AUTH_SERVICE_REQUEST_TOKEN
 
 TRAIL_PERCENT = Config.STOP_TRAIL_PERCENT
-QTY_FRACTION = Config.STOP_QTY_FRACTION
 OPTION_TP_PERCENT = Config.OPTION_TP_PERCENT
 GTC_LIFETIME_DAYS = 90          # RH cancels GTC orders after ~90 days
 EXPIRY_LEAD_DAYS = Config.STOP_EXPIRY_LEAD_DAYS
@@ -514,12 +513,11 @@ def sweep(client, store, tickers, trail_percent=TRAIL_PERCENT, dry_run=True,
 
     Live placement (dry_run=False) needs a WHOLE-share quantity (RH rejects
     fractional trailing stops), account/instrument URLs, and a current price
-    (to set the initial stop). New stops cover qty_fraction of the lot
-    (default STOP_QTY_FRACTION). Anything unresolvable is skipped and logged;
-    a placement is only counted 'placed' if RH returns an order id.
+    (to set the initial stop). Mapped tickers use their coded qty_fraction;
+    others cover the full lot unless qty_fraction is passed. Anything
+    unresolvable is skipped and logged; a placement is only counted 'placed'
+    if RH returns an order id.
     """
-    if qty_fraction is None:
-        qty_fraction = QTY_FRACTION
     log.info("sweep: reading active trailing stops from RH")
     orders = client.get_stops()
     covered = {}
@@ -567,11 +565,14 @@ def sweep(client, store, tickers, trail_percent=TRAIL_PERCENT, dry_run=True,
             continue
 
         instrument_url, current_price = "", price_map.get(t)
-        # RH trailing stops are whole-share only; cover a fraction of the lot.
-        whole_qty = int(float(qty_map.get(t) or 0) * float(qty_fraction))
+        # RH trailing stops are whole-share only. Mapped names (MU, NBIS)
+        # use their coded lot fraction; everyone else covers the full lot.
+        lot_fraction = (qty_fraction if qty_fraction is not None
+                        else equity_stop_qty_fraction(t))
+        whole_qty = int(float(qty_map.get(t) or 0) * float(lot_fraction))
         if whole_qty < 1:
             log.warning("sweep: %s skipped — no whole-share quantity "
-                        "(have %s × %.2f)", t, qty_map.get(t), qty_fraction)
+                        "(have %s × %.2f)", t, qty_map.get(t), lot_fraction)
             skipped.append({"symbol": t, "reason": "fractional_or_no_qty"})
             continue
         if not current_price:
@@ -595,7 +596,7 @@ def sweep(client, store, tickers, trail_percent=TRAIL_PERCENT, dry_run=True,
         if not dry_run and (placed or skipped):
             time.sleep(PLACE_DELAY_SECONDS)   # pace to dodge RH 429 throttling
         log.info("sweep: %s placing %.1f%% trailing market qty=%s (%.0f%% of lot, dry_run=%s)",
-                 t, t_trail, place_qty, float(qty_fraction) * 100, dry_run)
+                 t, t_trail, place_qty, float(lot_fraction) * 100, dry_run)
         payload = build_payload(t, "sell", place_qty, t_trail,
                                 account_url=account_url,
                                 instrument_url=instrument_url,

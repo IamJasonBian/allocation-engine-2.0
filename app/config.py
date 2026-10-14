@@ -66,8 +66,6 @@ class Config:
     # Re-cover designated stops / coded limits this often (3h = 8 times/day).
     STOP_SWEEP_INTERVAL_SECONDS = int(os.getenv("STOP_SWEEP_INTERVAL_SECONDS", "10800"))
     STOP_TRAIL_PERCENT = float(os.getenv("STOP_TRAIL_PERCENT", "16"))
-    # Fraction of the position to cover with a new trailing stop (1.0 = full lot).
-    STOP_QTY_FRACTION = float(os.getenv("STOP_QTY_FRACTION", "0.25"))
     # Renew a GTC stop this many days before RH's ~90-day expiry.
     STOP_EXPIRY_LEAD_DAYS = int(os.getenv("STOP_EXPIRY_LEAD_DAYS", "7"))
     # Pace live placements — RH throttles bursts (~429 after a handful/second).

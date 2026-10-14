@@ -319,21 +319,21 @@ def test_live_sweep_places_whole_shares_with_stop_price(store):
     assert [p["symbol"] for p in out["placed"]] == ["AAPL"]
     payload, dry = c.placed[0]
     assert dry is False
-    assert payload["quantity"] == "10"                # 25% of 42 whole shares
+    assert payload["quantity"] == "42"                # unmapped names cover the full lot
     assert payload["type"] == "market"
     assert payload["stop_price"] == "88.0"            # 12% below 100
     assert "price" not in payload
     assert store.get("AAPL")["order_id"] == "ord-123"
 
 
-def test_sweep_skips_when_quarter_qty_is_below_one_share(store):
+def test_sweep_skips_when_mapped_quarter_qty_is_below_one_share(store):
     c = FakeClient()
     out = sweep(
-        c, store, ["AAPL"],
-        qty_map={"AAPL": 3}, price_map={"AAPL": 100},
+        c, store, ["MU"],
+        qty_map={"MU": 3}, price_map={"MU": 100},
     )
     assert out["simulated"] == []
-    assert out["skipped"] == [{"symbol": "AAPL", "reason": "fractional_or_no_qty"}]
+    assert out["skipped"] == [{"symbol": "MU", "reason": "fractional_or_no_qty"}]
     assert c.placed == []
 
 
