@@ -1,4 +1,4 @@
-"""Daily sweeps run from the engine loop: equity trailing stops and option take-profit.
+"""Sweeps run from the engine loop: equity trailing stops and option take-profit.
 
 Each sweep is independent — its own toggle, auth-service client, and store
 handle (held in a SweepState) — so either can be switched off per service.
@@ -11,6 +11,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from app import stop_sweeper as sw
+from app.risk.equity_stop_mapping import EQUITY_STOP_MAPPING
 
 log = logging.getLogger(__name__)
 
@@ -86,10 +87,12 @@ def maybe_option_take_profit_sweep(config, state):
 
 
 def maybe_stop_sweep(config, state, current_positions):
-    """Run the daily equity trailing-stop sweep if enabled and not yet done today.
+    """Run the equity trailing-stop sweep on the configured interval.
 
-    Mirrors the RH trailing-stop book into sqlite, covers naked tickers with a
-    STOP_TRAIL_PERCENT stop, and renews stops near GTC expiry.
+    Default is every 3 hours (8 times/day). Mirrors the RH trailing-stop book
+    into sqlite, covers naked tickers — including designated mapping names
+    (MU, NBIS) with their coded stop-limit percents — and renews stops near
+    GTC expiry.
 
     Args:
         config: Flask app config (keys from app.config.Config).
@@ -102,7 +105,7 @@ def maybe_stop_sweep(config, state, current_positions):
     if not config["AUTH_SERVICE_URL"] or not config["RH_AUTH_SERVICE_REQUEST_TOKEN"]:
         return
     state.ensure(config)
-    if state.store.swept_today():
+    if state.store.swept_within(config["STOP_SWEEP_INTERVAL_SECONDS"]):
         return
     if _before_hour_et(config["STOP_SWEEP_HOUR_ET"]):
         return
@@ -119,7 +122,7 @@ def maybe_stop_sweep(config, state, current_positions):
             price_map[sym] = float(p["market_value"]) / q
         if p.get("instrument"):
             instrument_map[sym] = p["instrument"]
-    tickers = sorted(set(tickers) | set(qty_map))
+    tickers = sorted(set(tickers) | set(qty_map) | set(EQUITY_STOP_MAPPING))
     dry = config["STOP_SWEEP_DRY_RUN"]
     if not dry and not qty_map:
         # Live sweeps need real position sizes; wait for a tick where
@@ -127,9 +130,10 @@ def maybe_stop_sweep(config, state, current_positions):
         log.info("[stop-sweeper] live sweep deferred — positions not loaded yet")
         return
     trail = config["STOP_TRAIL_PERCENT"]
-    log.info("[stop-sweeper] starting daily sweep "
-             "(tickers=%s, trail=%.0f%%, dry_run=%s)",
-             tickers or "book-only", trail, dry)
+    log.info("[stop-sweeper] starting sweep "
+             "(tickers=%s, trail=%.0f%%, interval=%ds, dry_run=%s)",
+             tickers or "book-only", trail,
+             config["STOP_SWEEP_INTERVAL_SECONDS"], dry)
     out = sw.sweep(state.client, state.store, tickers, trail_percent=trail,
                    dry_run=dry, qty_map=qty_map, price_map=price_map,
                    account_url=sw.account_url_from_box(),

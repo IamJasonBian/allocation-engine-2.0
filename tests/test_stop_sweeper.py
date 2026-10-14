@@ -308,6 +308,24 @@ def test_live_sweep_places_whole_shares_with_stop_price(store):
     assert store.get("AAPL")["order_id"] == "ord-123"
 
 
+def test_swept_within_is_false_before_first_sweep(store):
+    assert store.swept_within(10800) is False
+
+
+def test_swept_within_is_true_until_interval_elapses(store):
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime.now(timezone.utc)
+    store.set_meta("last_sweep_at", now.isoformat())
+    assert store.swept_within(10800) is True
+
+    store.set_meta("last_sweep_at", (now - timedelta(hours=2, minutes=59)).isoformat())
+    assert store.swept_within(10800) is True
+
+    store.set_meta("last_sweep_at", (now - timedelta(hours=3)).isoformat())
+    assert store.swept_within(10800) is False
+
+
 def test_live_sweep_uses_instrument_map_when_public_lookup_fails(store):
     """TSPH is not on the public RH instruments API; use the position URL."""
     c = OrderIdClient()

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Daily trailing-stop sweeper with a local SQLite cache/queue.
+"""Trailing-stop sweeper with a local SQLite cache/queue.
 
-One sweep at start of day:
+The engine loop re-covers designated names every 3 hours (8×/day):
   1. Read active trailing-stop orders from RH (through the auth-service) and
      mirror them into SQLite.
   2. For every ticker in the universe, ensure a percentage trailing stop
@@ -332,6 +332,13 @@ class StopStore:
     def swept_today(self):
         last = self.get_meta("last_sweep_at")
         return bool(last) and last[:10] == _now_iso()[:10]
+
+    def swept_within(self, seconds):
+        """True when the last successful sweep is still inside this window."""
+        dt = _parse_utc(self.get_meta("last_sweep_at"))
+        if dt is None:
+            return False
+        return datetime.now(timezone.utc) - dt < timedelta(seconds=float(seconds))
 
     def option_tp_swept_today(self):
         last = self.get_meta("last_option_tp_sweep_at")

@@ -1,4 +1,4 @@
-"""Worker loop: daily sweeps plus publishing the book (started by gunicorn.conf.py)."""
+"""Worker loop: sweeps plus publishing the book (started by gunicorn.conf.py)."""
 
 import os
 import time
@@ -175,7 +175,7 @@ def alert_option_drawdowns(events, alerted: set[str], risk_subject) -> set[str]:
 
 
 def run_engine_loop(app):
-    """Run the worker loop forever: read the book, run the daily sweeps, sync.
+    """Run the worker loop forever: read the book, run the sweeps, sync.
 
     Started only on the Render background worker (gunicorn.conf.py post_fork,
     RENDER_SERVICE_TYPE=worker); the API web service never runs it. Each tick reads Robinhood (via the
@@ -213,7 +213,7 @@ def run_engine_loop(app):
     last_db_sync = 0.0
     retry_hour = config["RH_RETRY_HOUR_ET"]
 
-    # Daily sweeps: each has its own toggle, auth-service client, and store.
+    # Sweeps: each has its own toggle, auth-service client, and store.
     stop_sweep_state = SweepState()
     opt_tp_sweep_state = SweepState()
 

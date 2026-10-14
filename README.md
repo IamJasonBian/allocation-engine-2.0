@@ -114,9 +114,10 @@ systemctl restart auth-service
 | `POLL_INTERVAL_SECONDS` | Engine loop interval | `30` |
 | `DRY_RUN` | Log orders without submitting | `true` |
 | `ENGINE_BROKER` | Broker for engine reconciliation | `alpaca` |
-| `STOP_SWEEP_ENABLED` | Run the daily equity trailing-stop sweep | `true` |
+| `STOP_SWEEP_ENABLED` | Run the equity trailing-stop sweep | `true` |
 | `STOP_SWEEP_DRY_RUN` | Simulate trailing stops without submitting them | `true` |
-| `STOP_SWEEP_HOUR_ET` | Earliest ET hour for the daily stop sweep | `0` |
+| `STOP_SWEEP_HOUR_ET` | Earliest ET hour for the first stop sweep | `0` |
+| `STOP_SWEEP_INTERVAL_SECONDS` | Re-cover designated stops this often (3h = 8×/day) | `10800` |
 | `STOP_TRAIL_PERCENT` | Trailing-stop distance | `16` |
 | `PORT` | Server port | `10000` |
 
