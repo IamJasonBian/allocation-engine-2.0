@@ -22,8 +22,11 @@ def order_events(date=None):
     """
     asset_type = request.args.get("asset_type")
     limit = int(request.args.get("limit", "500"))
+    symbols = {s.strip().upper() for s in request.args.get("symbols", "").split(",") if s.strip()}
 
     events = get_events(date=date, asset_type=asset_type, limit=limit)
+    if symbols:
+        events = [e for e in events if str(e.get("symbol") or "").upper() in symbols]
 
     return jsonify({
         "date": date,

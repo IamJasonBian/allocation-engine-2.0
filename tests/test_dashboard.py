@@ -25,6 +25,8 @@ def test_dashboard_serves_html(client):
     assert "5thstreetcapital.org/.netlify/functions" in body
     assert "order-book-snapshot" in body
     assert "db-bot-activity" in body
+    assert "const DESK = { MU: 4, NBIS: 6 }" in body
+    assert "isDesk" in body
 
 
 def test_dashboard_not_under_api_prefix(client):
