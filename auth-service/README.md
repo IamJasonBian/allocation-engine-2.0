@@ -125,8 +125,28 @@ All POSTs and order reads require `Authorization: Bearer <exec-token>`.
 | GET    | `/orders/trailing_stop`            | active percentage trailing-stop orders    |
 | POST   | `/orders/trailing_stop`            | relay a place payload (`dry_run` default) |
 | POST   | `/orders/trailing_stop/replace`    | relay a replace payload (`dry_run` default)|
+| POST   | `/orders/options/limit`            | single-leg option limit (`dry_run` default)|
 | POST   | `/exec`                            | run an external command (shell)           |
 | POST   | `/exec/mcp`                        | relay a JSON-RPC call to the Robinhood MCP |
+
+`/orders/options/limit` accepts a **single-leg intent** (not a raw Robinhood
+payload). Split **contract identity** from **trade action** — Robinhood's API
+uses a `legs[]` array per contract and order-level premium economics:
+
+```json
+{"order": {
+  "contract": {"chain_symbol": "MU", "option_type": "call", "strike": 95,
+               "expiration": "2026-03-20"},
+  "action": "buy_to_open",
+  "quantity": 1, "limit_price": "2.50", "time_in_force": "gtc",
+  "ref_id": "<uuid>"
+}, "dry_run": true}
+```
+
+The box resolves the option instrument URL and account. Guardrails: whole
+contracts, `quantity * limit_price * 100 <= [options] limit_max_notional`, valid
+premium tick, `gfd`/`gtc`, UUID `ref_id` (reuse on retry). Engine runtime
+`option_orders` use flat fields — see `options_model.flatten_runtime_order`.
 
 `/exec/mcp` forwards a JSON-RPC payload to the **official Robinhood MCP**
 (`https://agent.robinhood.com/mcp/trading`, HTTP transport) and relays the status
