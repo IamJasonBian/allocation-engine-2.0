@@ -63,9 +63,20 @@ class TrailingStopPayloadTests(unittest.TestCase):
         self.assertIn("percentage", guardrails.check_trailing_stop_payload(
             _valid_trailing_payload(trailing_peg={"type": "price", "price": "5.00"})))
 
-    def test_non_limit_type_blocked(self):
-        self.assertIn("limit", guardrails.check_trailing_stop_payload(
+    def test_market_trailing_stop_without_price_passes(self):
+        payload = _valid_trailing_payload(type="market")
+        del payload["price"]
+        self.assertIsNone(guardrails.check_trailing_stop_payload(payload))
+
+    def test_market_trailing_stop_with_limit_price_blocked(self):
+        self.assertIn("price", guardrails.check_trailing_stop_payload(
             _valid_trailing_payload(type="market")))
+
+    def test_unknown_type_blocked(self):
+        reason = guardrails.check_trailing_stop_payload(
+            _valid_trailing_payload(type="stop"))
+        self.assertIsNotNone(reason)
+        self.assertIn("type", reason)
 
     def test_bad_side_blocked(self):
         self.assertIn("side", guardrails.check_trailing_stop_payload(

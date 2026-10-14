@@ -94,8 +94,9 @@ def validate_trailing_stop_payload(payload, live=False):
         raise GuardrailViolation("trigger must be 'stop' (no immediate orders)")
     if payload.get("side") != "sell":
         raise GuardrailViolation("side must be 'sell' — protective stops only")
-    if payload.get("type") != "limit":
-        raise GuardrailViolation("type must be 'limit' (protective stop-limit only)")
+    order_type = payload.get("type")
+    if order_type not in ("limit", "market"):
+        raise GuardrailViolation("type must be 'limit' or 'market'")
     if payload.get("time_in_force") != "gtc":
         raise GuardrailViolation("time_in_force must be 'gtc'")
     peg = payload.get("trailing_peg")
@@ -115,13 +116,22 @@ def validate_trailing_stop_payload(payload, live=False):
         raise GuardrailViolation("quantity must be positive")
     try:
         stop_price = float(payload.get("stop_price"))
-        limit_price = float(payload.get("price"))
     except (TypeError, ValueError):
-        raise GuardrailViolation("stop_price and price must be numeric")
-    if stop_price <= 0 or limit_price <= 0:
-        raise GuardrailViolation("stop_price and price must be positive")
-    if payload.get("side") == "sell" and limit_price > stop_price:
-        raise GuardrailViolation("sell limit price must not exceed stop price")
+        raise GuardrailViolation("stop_price must be numeric")
+    if stop_price <= 0:
+        raise GuardrailViolation("stop_price must be positive")
+    if order_type == "market":
+        if payload.get("price") not in (None, ""):
+            raise GuardrailViolation("limit price not allowed on a trailing stop-market")
+    else:
+        try:
+            limit_price = float(payload.get("price"))
+        except (TypeError, ValueError):
+            raise GuardrailViolation("price must be numeric")
+        if limit_price <= 0:
+            raise GuardrailViolation("price must be positive")
+        if payload.get("side") == "sell" and limit_price > stop_price:
+            raise GuardrailViolation("sell limit price must not exceed stop price")
     if live and (not payload.get("account") or not payload.get("instrument")):
         raise GuardrailViolation(
             "live placement requires account and instrument URLs")
@@ -404,29 +414,33 @@ def initial_limit_price(stop_price, cushion_percent, side="sell"):
 
 
 def build_payload(symbol, side, quantity, trail_percent,
-                  account_url="", instrument_url="", current_price=None):
-    """Percentage trailing stop-limit payload.
+                  account_url="", instrument_url="", current_price=None,
+                  order_type="limit"):
+    """Percentage trailing stop payload (limit by default, market fallback).
 
-    The mapped percentage controls both trailing distance and the limit cushion
-    below the triggered stop. Existing market stops are not replaced.
+    The mapped percentage controls trailing distance and, for stop-limits, the
+    fill cushion below the triggered stop. Existing market stops are not replaced.
     """
+    if order_type not in ("limit", "market"):
+        raise GuardrailViolation("order_type must be 'limit' or 'market'")
     if current_price is None:
-        raise GuardrailViolation("stop-limit placement requires current_price")
+        raise GuardrailViolation("stop placement requires current_price")
     stop_price = initial_stop_price(current_price, trail_percent, side)
     payload = {
         "account": account_url,
         "instrument": instrument_url,
         "symbol": symbol,
-        "type": "limit",
+        "type": order_type,
         "time_in_force": "gtc",
         "trigger": "stop",
         "side": side,
         "quantity": str(quantity),
         "trailing_peg": {"type": "percentage", "percentage": str(trail_percent)},
         "stop_price": str(stop_price),
-        "price": str(initial_limit_price(stop_price, trail_percent, side)),
         "ref_id": str(uuid.uuid4()),
     }
+    if order_type == "limit":
+        payload["price"] = str(initial_limit_price(stop_price, trail_percent, side))
     return payload
 
 
@@ -489,6 +503,10 @@ def _placement_ok(result):
 _RETRYABLE_SKIP_REASONS = frozenset({
     "unresolved_instrument", "unresolved_account", "unresolved_urls", "no_price",
 })
+
+
+def _limit_unsupported(detail):
+    return "limit orders not supported" in str(detail).lower()
 
 
 def sweep(client, store, tickers, trail_percent=TRAIL_PERCENT, dry_run=True,
@@ -591,6 +609,20 @@ def sweep(client, store, tickers, trail_percent=TRAIL_PERCENT, dry_run=True,
             continue
 
         ok, detail = _placement_ok(result)
+        if not ok and _limit_unsupported(detail) and payload.get("type") == "limit":
+            log.info("sweep: %s stop-limit unsupported — retrying as market", t)
+            payload = build_payload(t, "sell", place_qty, t_trail,
+                                    account_url=account_url,
+                                    instrument_url=instrument_url,
+                                    current_price=current_price,
+                                    order_type="market")
+            try:
+                result = client.place_stop(payload, dry_run=dry_run)
+            except GuardrailViolation as e:
+                log.warning("sweep: %s market fallback blocked by guardrail: %s", t, e)
+                skipped.append({"symbol": t, "reason": str(e)})
+                continue
+            ok, detail = _placement_ok(result)
         if not ok:
             log.warning("sweep: %s REJECTED by RH: %s", t, detail)
             skipped.append({"symbol": t, "reason": f"rh_rejected: {detail}"})
