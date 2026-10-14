@@ -110,14 +110,30 @@ def test_built_payload_passes_guard():
 
 @pytest.mark.parametrize("mutation,why", [
     ({"side": "buy"}, "buy order"),
-    ({"type": "market"}, "market order"),
     ({"trailing_peg": None}, "missing trailing peg"),
     ({"trigger": "immediate"}, "immediate order"),
     ({"price": "250.00"}, "limit above sell stop"),
+    ({"type": "stop"}, "unknown order type"),
 ])
 def test_guard_rejects_destructive_payloads(mutation, why):
     with pytest.raises(GuardrailViolation):
         validate_trailing_stop_payload(valid_payload(**mutation)), why
+
+
+def test_guard_allows_market_trailing_stop():
+    payload = valid_payload()
+    payload["type"] = "market"
+    payload.pop("price")
+    validate_trailing_stop_payload(payload)
+
+
+def test_build_payload_market_omits_limit_price():
+    payload = build_payload("NBIS", "sell", 130, 6, current_price=100,
+                            order_type="market")
+    assert payload["type"] == "market"
+    assert "price" not in payload
+    assert payload["stop_price"] == "94.0"
+    validate_trailing_stop_payload(payload)
 
 
 def test_live_placement_requires_account_and_instrument():
@@ -420,6 +436,26 @@ def test_sweep_does_not_latch_when_renew_cannot_confirm_order(store):
     out = sweep(DropClient(), store, ["IWN"])
     assert out["renewed"][0]["action"] == "missing_in_rh"
     assert not store.swept_today()
+
+
+def test_sweep_falls_back_to_market_when_limit_unsupported(store):
+    class LimitUnsupportedClient(OrderIdClient):
+        def place_stop(self, payload, dry_run=True):
+            validate_trailing_stop_payload(payload, live=not dry_run)
+            self.placed.append((payload, dry_run))
+            if payload.get("type") == "limit":
+                return {"non_field_errors": ["Trailing stop limit orders not supported."]}
+            return {"id": "ord-nbis", "state": "queued", **payload}
+
+    c = LimitUnsupportedClient()
+    out = sweep(c, store, ["NBIS"], dry_run=False, trail_percent=12,
+                qty_map={"NBIS": 130}, price_map={"NBIS": 100.0},
+                account_url="https://api.robinhood.com/accounts/X/",
+                instrument_resolver=lambda s: f"https://api.robinhood.com/instruments/{s}/")
+    assert [p["symbol"] for p in out["placed"]] == ["NBIS"]
+    assert [payload["type"] for payload, _ in c.placed] == ["limit", "market"]
+    assert c.placed[1][0]["trailing_peg"]["percentage"] == "6.0"
+    assert "price" not in c.placed[1][0]
 
 
 def test_rh_rejection_without_id_is_not_placed(store):
