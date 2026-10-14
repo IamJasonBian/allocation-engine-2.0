@@ -104,7 +104,8 @@ def valid_payload(**over):
 
 def test_built_payload_passes_guard():
     payload = valid_payload()
-    assert payload["type"] == "limit"
+    assert payload["type"] == "market"
+    assert "price" not in payload
     validate_trailing_stop_payload(payload)
 
 
@@ -123,7 +124,7 @@ def test_guard_rejects_destructive_payloads(mutation, why):
 def test_guard_allows_market_trailing_stop():
     payload = valid_payload()
     payload["type"] = "market"
-    payload.pop("price")
+    payload.pop("price", None)
     validate_trailing_stop_payload(payload)
 
 
@@ -188,6 +189,7 @@ def test_sweep_places_only_for_uncovered(store):
     out = sweep(
         c, store, ["AAPL", "IWN"],
         qty_map={"AAPL": 1}, price_map={"AAPL": 100},
+        qty_fraction=1.0,
     )
     assert out["placed"] == []
     assert [p["symbol"] for p in out["simulated"]] == ["AAPL"]
@@ -203,6 +205,7 @@ def test_sweep_applies_equity_stop_mapping(store):
         c, store, ["AAPL", "MU", "NBIS"], trail_percent=12,
         qty_map={"AAPL": 1, "MU": 1, "NBIS": 1},
         price_map={"AAPL": 100, "MU": 100, "NBIS": 100},
+        qty_fraction=1.0,
     )
 
     percentages = {
@@ -210,17 +213,13 @@ def test_sweep_applies_equity_stop_mapping(store):
         for payload, _ in c.placed
     }
     assert percentages == {"AAPL": 12.0, "MU": 4.0, "NBIS": 6.0}
-    prices = {
-        payload["symbol"]: (
-            float(payload["stop_price"]), float(payload["price"])
-        )
+    stops = {
+        payload["symbol"]: float(payload["stop_price"])
         for payload, _ in c.placed
     }
-    assert prices == {
-        "AAPL": (88.0, 77.44),
-        "MU": (96.0, 92.16),
-        "NBIS": (94.0, 88.36),
-    }
+    assert stops == {"AAPL": 88.0, "MU": 96.0, "NBIS": 94.0}
+    assert all(payload["type"] == "market" and "price" not in payload
+               for payload, _ in c.placed)
     assert {row["symbol"] for row in out["simulated"]} == {
         "AAPL", "MU", "NBIS",
     }
@@ -296,11 +295,14 @@ def test_renew_skips_buy_side_stop_instead_of_crashing(store):
     assert c.replaced == []
 
 
-def _live_kwargs(qty=5, price=100.0):
-    return dict(dry_run=False, trail_percent=12, qty_map={"AAPL": qty},
-                price_map={"AAPL": price},
-                account_url="https://api.robinhood.com/accounts/X/",
-                instrument_resolver=lambda s: f"https://api.robinhood.com/instruments/{s}/")
+def _live_kwargs(qty=5, price=100.0, qty_fraction=None):
+    kwargs = dict(dry_run=False, trail_percent=12, qty_map={"AAPL": qty},
+                  price_map={"AAPL": price},
+                  account_url="https://api.robinhood.com/accounts/X/",
+                  instrument_resolver=lambda s: f"https://api.robinhood.com/instruments/{s}/")
+    if qty_fraction is not None:
+        kwargs["qty_fraction"] = qty_fraction
+    return kwargs
 
 
 class OrderIdClient(FakeClient):
@@ -317,11 +319,22 @@ def test_live_sweep_places_whole_shares_with_stop_price(store):
     assert [p["symbol"] for p in out["placed"]] == ["AAPL"]
     payload, dry = c.placed[0]
     assert dry is False
-    assert payload["quantity"] == "42"                # floored to whole shares
-    assert payload["type"] == "limit"
+    assert payload["quantity"] == "10"                # 25% of 42 whole shares
+    assert payload["type"] == "market"
     assert payload["stop_price"] == "88.0"            # 12% below 100
-    assert payload["price"] == "77.44"                 # 12% below the trigger
+    assert "price" not in payload
     assert store.get("AAPL")["order_id"] == "ord-123"
+
+
+def test_sweep_skips_when_quarter_qty_is_below_one_share(store):
+    c = FakeClient()
+    out = sweep(
+        c, store, ["AAPL"],
+        qty_map={"AAPL": 3}, price_map={"AAPL": 100},
+    )
+    assert out["simulated"] == []
+    assert out["skipped"] == [{"symbol": "AAPL", "reason": "fractional_or_no_qty"}]
+    assert c.placed == []
 
 
 def test_swept_within_is_false_before_first_sweep(store):
@@ -349,6 +362,7 @@ def test_live_sweep_uses_instrument_map_when_public_lookup_fails(store):
         c, store, ["TSPH"],
         dry_run=False, trail_percent=12,
         qty_map={"TSPH": 20}, price_map={"TSPH": 10.0},
+        qty_fraction=1.0,
         account_url="https://api.robinhood.com/accounts/X/",
         instrument_resolver=lambda _: "",
         instrument_map={"TSPH": "https://api.robinhood.com/instruments/tsph/"},
@@ -364,6 +378,7 @@ def test_live_sweep_does_not_latch_when_instrument_unresolved(store):
         c, store, ["TSPH"],
         dry_run=False, trail_percent=12,
         qty_map={"TSPH": 20}, price_map={"TSPH": 10.0},
+        qty_fraction=1.0,
         account_url="https://api.robinhood.com/accounts/X/",
         instrument_resolver=lambda _: "",
     )
@@ -401,6 +416,7 @@ def test_live_sweep_skips_account_before_instrument_lookup(store):
         OrderIdClient(), store, ["AAPL"],
         dry_run=False, trail_percent=12,
         qty_map={"AAPL": 5}, price_map={"AAPL": 100.0},
+        qty_fraction=1.0,
         account_url="",
         instrument_resolver=resolver,
     )
@@ -438,24 +454,19 @@ def test_sweep_does_not_latch_when_renew_cannot_confirm_order(store):
     assert not store.swept_today()
 
 
-def test_sweep_falls_back_to_market_when_limit_unsupported(store):
-    class LimitUnsupportedClient(OrderIdClient):
-        def place_stop(self, payload, dry_run=True):
-            validate_trailing_stop_payload(payload, live=not dry_run)
-            self.placed.append((payload, dry_run))
-            if payload.get("type") == "limit":
-                return {"non_field_errors": ["Trailing stop limit orders not supported."]}
-            return {"id": "ord-nbis", "state": "queued", **payload}
-
-    c = LimitUnsupportedClient()
+def test_sweep_places_market_at_quarter_qty(store):
+    c = OrderIdClient()
     out = sweep(c, store, ["NBIS"], dry_run=False, trail_percent=12,
                 qty_map={"NBIS": 130}, price_map={"NBIS": 100.0},
                 account_url="https://api.robinhood.com/accounts/X/",
                 instrument_resolver=lambda s: f"https://api.robinhood.com/instruments/{s}/")
     assert [p["symbol"] for p in out["placed"]] == ["NBIS"]
-    assert [payload["type"] for payload, _ in c.placed] == ["limit", "market"]
-    assert c.placed[1][0]["trailing_peg"]["percentage"] == "6.0"
-    assert "price" not in c.placed[1][0]
+    assert len(c.placed) == 1
+    payload, _ = c.placed[0]
+    assert payload["type"] == "market"
+    assert payload["quantity"] == "32"
+    assert payload["trailing_peg"]["percentage"] == "6.0"
+    assert "price" not in payload
 
 
 def test_rh_rejection_without_id_is_not_placed(store):
