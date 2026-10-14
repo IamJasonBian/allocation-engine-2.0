@@ -61,8 +61,12 @@ class Config:
     STOP_SWEEP_ENABLED = os.getenv("STOP_SWEEP_ENABLED", "true").lower() == "true"
     # Sweeper writes stay dry-run unless explicitly armed.
     STOP_SWEEP_DRY_RUN = os.getenv("STOP_SWEEP_DRY_RUN", "true").lower() == "true"
-    # Earliest ET hour for the daily sweep (0 = first tick of the day).
-    STOP_SWEEP_HOUR_ET = int(os.getenv("STOP_SWEEP_HOUR_ET", "0"))
+    # ET hours to sweep at, comma-separated. Each slot runs once, on the
+    # first tick at or after that hour.
+    STOP_SWEEP_HOURS_ET = [
+        int(h) for h in os.getenv("STOP_SWEEP_HOURS_ET", "9,12,15").split(",")
+        if h.strip()
+    ]
     STOP_TRAIL_PERCENT = float(os.getenv("STOP_TRAIL_PERCENT", "16"))
     # Renew a GTC stop this many days before RH's ~90-day expiry.
     STOP_EXPIRY_LEAD_DAYS = int(os.getenv("STOP_EXPIRY_LEAD_DAYS", "7"))
