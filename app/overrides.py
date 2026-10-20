@@ -5,20 +5,27 @@ is the earnings window: same shape with ``start_time`` / ``end_time``. A custom
 row wins when ``at`` is in ``[start_time, end_time)``.
 
 Engine-event names start with NBIS, MU, NVDA, QQQ, NET, SPY. Single names
-proxy to QQQ; QQQ proxies to SPY. Windows are the next print (AMC = print
-16:00 ET → next close; BMO = prior close → print close). QQQ/SPY share the
-November 2026 tech-print week when NET/NBIS/NVDA report.
+proxy to QQQ; QQQ proxies to SPY. Each name has the next two prints hardcoded.
+AMC = print 16:00 ET → next close; BMO = prior close → print close.
+
+TODO: replace the hardcoded windows with TwelveData
+  GET https://api.twelvedata.com/earnings?symbol=NVDA&period=next
+  (date + Pre Market / After Hours). Allow-list ``earnings`` on the existing
+  5thstreetcapital twelvedata proxy instead of holding a second key.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
+
+_ET = ZoneInfo("America/New_York")
 
 
-def _utc(year: int, month: int, day: int, hour: int = 21) -> datetime:
-    """UTC timestamp. After 2026-11-01 US DST end, 21:00 UTC is 16:00 ET."""
-    return datetime(year, month, day, hour, 0, tzinfo=timezone.utc)
+def _et_close(year: int, month: int, day: int) -> datetime:
+    """16:00 America/New_York, stored as UTC."""
+    return datetime(year, month, day, 16, 0, tzinfo=_ET).astimezone(timezone.utc)
 
 
 @dataclass(frozen=True)
@@ -49,32 +56,25 @@ DEFAULT_OVERRIDES: tuple[DefaultOverride, ...] = (
     DefaultOverride(symbol="SPY", proxy="SPY"),
 )
 
-# Next earnings windows (as of 2026-10-20). QQQ/SPY cover the Nov print week.
+# Hardcoded next two prints (as of 2026-10-20). See module TODO for the fetch.
 CUSTOM_OVERRIDES: tuple[CustomOverride, ...] = (
-    CustomOverride(  # NET Q3 FY26 AMC 2026-11-05 (est.)
-        symbol="NET", proxy="QQQ",
-        start_time=_utc(2026, 11, 5), end_time=_utc(2026, 11, 6),
-    ),
-    CustomOverride(  # NBIS Q3 FY26 BMO 2026-11-10 (est.)
-        symbol="NBIS", proxy="QQQ",
-        start_time=_utc(2026, 11, 9), end_time=_utc(2026, 11, 10),
-    ),
-    CustomOverride(  # NVDA Q3 FY27 AMC 2026-11-17 (confirmed)
-        symbol="NVDA", proxy="QQQ",
-        start_time=_utc(2026, 11, 17), end_time=_utc(2026, 11, 18),
-    ),
-    CustomOverride(  # MU Q1 FY27 AMC 2026-12-23 (est.)
-        symbol="MU", proxy="QQQ",
-        start_time=_utc(2026, 12, 23), end_time=_utc(2026, 12, 24),
-    ),
-    CustomOverride(  # index: Nov tech-print week (NET / NBIS / NVDA)
-        symbol="QQQ", proxy="SPY",
-        start_time=_utc(2026, 11, 5), end_time=_utc(2026, 11, 18),
-    ),
-    CustomOverride(
-        symbol="SPY", proxy="SPY",
-        start_time=_utc(2026, 11, 5), end_time=_utc(2026, 11, 18),
-    ),
+    # NET: 2026-11-05 AMC (confirmed), 2027-02-11 AMC (est.)
+    CustomOverride("NET", "QQQ", _et_close(2026, 11, 5), _et_close(2026, 11, 6)),
+    CustomOverride("NET", "QQQ", _et_close(2027, 2, 11), _et_close(2027, 2, 12)),
+    # NBIS: 2026-11-10 BMO (est.), 2027-02-11 BMO (est.)
+    CustomOverride("NBIS", "QQQ", _et_close(2026, 11, 9), _et_close(2026, 11, 10)),
+    CustomOverride("NBIS", "QQQ", _et_close(2027, 2, 10), _et_close(2027, 2, 11)),
+    # NVDA: 2026-11-17 AMC (confirmed), 2027-02-24 AMC (est.)
+    CustomOverride("NVDA", "QQQ", _et_close(2026, 11, 17), _et_close(2026, 11, 18)),
+    CustomOverride("NVDA", "QQQ", _et_close(2027, 2, 24), _et_close(2027, 2, 25)),
+    # MU: 2026-12-23 AMC (est.), 2027-03-24 AMC (est.)
+    CustomOverride("MU", "QQQ", _et_close(2026, 12, 23), _et_close(2026, 12, 24)),
+    CustomOverride("MU", "QQQ", _et_close(2027, 3, 24), _et_close(2027, 3, 25)),
+    # QQQ/SPY: next two book clusters (Nov tech week, then Feb tech week)
+    CustomOverride("QQQ", "SPY", _et_close(2026, 11, 5), _et_close(2026, 11, 18)),
+    CustomOverride("QQQ", "SPY", _et_close(2027, 2, 11), _et_close(2027, 2, 25)),
+    CustomOverride("SPY", "SPY", _et_close(2026, 11, 5), _et_close(2026, 11, 18)),
+    CustomOverride("SPY", "SPY", _et_close(2027, 2, 11), _et_close(2027, 2, 25)),
 )
 
 

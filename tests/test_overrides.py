@@ -23,17 +23,19 @@ def test_resolve_proxy_uses_default_when_no_custom_window():
     assert resolve_proxy("AAPL") is None
 
 
-def test_engine_event_tickers_have_standing_and_earnings_overrides():
+def test_engine_event_tickers_have_standing_and_two_earnings_windows():
     defaults = {row.symbol: row.proxy for row in DEFAULT_OVERRIDES}
-    customs = {row.symbol: row for row in CUSTOM_OVERRIDES}
     assert set(ENGINE_EVENT_TICKERS) == {
         "NBIS", "MU", "NVDA", "QQQ", "NET", "SPY",
     }
     for symbol in ENGINE_EVENT_TICKERS:
         assert symbol in defaults
-        row = customs[symbol]
-        assert row.start_time < row.end_time
-        assert row.proxy
+        rows = [r for r in CUSTOM_OVERRIDES if r.symbol == symbol]
+        assert len(rows) == 2
+        assert rows[0].end_time <= rows[1].start_time
+        for row in rows:
+            assert row.start_time < row.end_time
+            assert row.proxy
 
 
 def test_net_earnings_window_uses_qqq():
