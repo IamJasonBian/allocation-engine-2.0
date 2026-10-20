@@ -23,6 +23,22 @@ SYMBOL_MAP = {
 }
 
 
+def _quote_mid(quote) -> float:
+    """Return the bid/ask mid, or whichever side is present when one is missing.
+
+    Args:
+        quote: Alpaca latest quote with ``bid_price`` / ``ask_price``.
+
+    Returns:
+        The mid price, the lone side's price, or 0.0 when both are empty.
+    """
+    bid = float(quote.bid_price or 0)
+    ask = float(quote.ask_price or 0)
+    if bid > 0 and ask > 0:
+        return round((bid + ask) / 2, 4)
+    return ask or bid
+
+
 def _map_symbol(symbol: str) -> str:
     return SYMBOL_MAP.get(symbol, symbol)
 
@@ -152,7 +168,7 @@ class AlpacaTrader(BrokerClient):
                 quotes = self.data_client.get_stock_latest_quote(req)
                 reverse_map = {v: k for k, v in SYMBOL_MAP.items()}
                 for sym, quote in quotes.items():
-                    price = float(quote.ask_price) if quote.ask_price else float(quote.bid_price)
+                    price = _quote_mid(quote)
                     prices[reverse_map.get(sym, sym)] = price
             except Exception:
                 log.exception("Failed to fetch Alpaca stock prices for %s", stock_syms)
@@ -166,7 +182,7 @@ class AlpacaTrader(BrokerClient):
                 req = CryptoLatestQuoteRequest(symbol_or_symbols=crypto_syms)
                 quotes = crypto_client.get_crypto_latest_quote(req)
                 for sym, quote in quotes.items():
-                    price = float(quote.ask_price) if quote.ask_price else float(quote.bid_price)
+                    price = _quote_mid(quote)
                     prices[sym] = price
             except Exception:
                 log.exception("Failed to fetch Alpaca crypto prices for %s", crypto_syms)
@@ -183,7 +199,7 @@ class AlpacaTrader(BrokerClient):
             raise ValueError(f"No quote found for {symbol}")
         return {
             "symbol": symbol,
-            "price": float(quote.ask_price) if quote.ask_price else float(quote.bid_price),
+            "price": _quote_mid(quote),
             "bidPrice": float(quote.bid_price) if quote.bid_price else None,
             "askPrice": float(quote.ask_price) if quote.ask_price else None,
             "previousClose": None,
