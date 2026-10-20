@@ -178,14 +178,19 @@ def run_engine_loop(app):
     """Run the worker loop forever: read the book, run the sweeps, sync.
 
     Started only on the Render background worker (gunicorn.conf.py post_fork,
-    RENDER_SERVICE_TYPE=worker); the API web service never runs it. Each tick reads Robinhood (via the
-    auth-service box), runs the equity stop and option take-profit sweeps
-    (app/utils_shared.py), and publishes the book to Redis, option history,
-    the Trading DB, and S3. It places no other orders.
+    RENDER_SERVICE_TYPE=worker); the API web service never runs it. Mints a
+    ``log_task_id`` on first entry and keeps it for this gunicorn worker until
+    the process restarts. Each tick reads Robinhood (via the auth-service box),
+    runs the equity stop and option take-profit sweeps (app/utils_shared.py),
+    and publishes the book to Redis, option history, the Trading DB, and S3.
+    It places no other orders.
 
     Args:
         app: Flask app whose config (app.config.Config) drives the loop.
     """
+    from app.log_task import ensure_task_id
+    task_id = ensure_task_id()
+
     from app.brokers import get_broker, clear_broker
     from app.brokers.robinhood_client import RobinhoodTrader, seconds_until_hour_et
     from app.redis_store import sync_to_redis
@@ -225,12 +230,13 @@ def run_engine_loop(app):
 
     log.info(
         "[engine] worker loop started (interval=%ds, dry_run=%s, broker=%s, "
-        "stop_sweep_enabled=%s, stop_sweep_dry_run=%s)",
+        "stop_sweep_enabled=%s, stop_sweep_dry_run=%s, log_task_id=%s)",
         interval,
         config["DRY_RUN"],
         config["ENGINE_BROKER"],
         config["STOP_SWEEP_ENABLED"],
         config["STOP_SWEEP_DRY_RUN"],
+        task_id,
     )
     if config["STOP_SWEEP_ENABLED"] and config["STOP_SWEEP_DRY_RUN"]:
         log.critical(
