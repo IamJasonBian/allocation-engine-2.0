@@ -23,9 +23,24 @@ from zoneinfo import ZoneInfo
 _ET = ZoneInfo("America/New_York")
 
 
+def normalize_timestamp(value: datetime | str) -> datetime:
+    """Coerce a datetime or ISO string to aware UTC.
+
+    Naive values and ``Z`` suffixes are treated as UTC. Aware values (ET,
+    offset ISO strings) convert to UTC so window compares never mix zones.
+    """
+    if isinstance(value, datetime):
+        dt = value
+    else:
+        dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
 def _et_close(year: int, month: int, day: int) -> datetime:
     """16:00 America/New_York, stored as UTC."""
-    return datetime(year, month, day, 16, 0, tzinfo=_ET).astimezone(timezone.utc)
+    return normalize_timestamp(datetime(year, month, day, 16, 0, tzinfo=_ET))
 
 
 @dataclass(frozen=True)
@@ -40,6 +55,10 @@ class CustomOverride:
     proxy: str
     start_time: datetime
     end_time: datetime
+
+    def __post_init__(self):
+        object.__setattr__(self, "start_time", normalize_timestamp(self.start_time))
+        object.__setattr__(self, "end_time", normalize_timestamp(self.end_time))
 
 
 ENGINE_EVENT_TICKERS: tuple[str, ...] = (
@@ -78,14 +97,14 @@ CUSTOM_OVERRIDES: tuple[CustomOverride, ...] = (
 )
 
 
-def resolve_proxy(symbol: str, at: datetime | None = None) -> str | None:
+def resolve_proxy(symbol: str, at: datetime | str | None = None) -> str | None:
     """Return the active proxy for ``symbol``.
 
     A custom row wins when ``at`` is in ``[start_time, end_time)``. Otherwise
     the default row is used. Unknown symbols return None.
     """
     key = symbol.upper()
-    when = at or datetime.now(timezone.utc)
+    when = normalize_timestamp(at) if at is not None else datetime.now(timezone.utc)
     for row in CUSTOM_OVERRIDES:
         if row.symbol.upper() == key and row.start_time <= when < row.end_time:
             return row.proxy
