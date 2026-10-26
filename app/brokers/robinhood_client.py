@@ -246,15 +246,22 @@ class RobinhoodTrader(BrokerClient):
 
     # -- order history & P&L ------------------------------------------------
 
-    def order_history(self, limit: int = 50) -> list[dict]:
-        """Return recent filled/completed orders."""
+    def order_history(self, limit: int = 50, symbols: set[str] | None = None) -> list[dict]:
+        """Return recent filled/completed orders.
+
+        When ``symbols`` is set, keep scanning the RH book until ``limit``
+        matching rows are collected so a designated-name tail can fill.
+        """
         self._ensure_auth()
+        wanted = {s.upper() for s in symbols} if symbols else None
         all_orders = rh.orders.get_all_stock_orders()
         result = []
         for o in (all_orders or []):
             if not isinstance(o, dict):
                 continue
             symbol = _symbol_from_instrument(o.get("instrument", ""))
+            if wanted and symbol.upper() not in wanted:
+                continue
             avg_price = o.get("average_price")
             result.append({
                 "id": o.get("id"),
