@@ -1,0 +1,48 @@
+# IB Gateway (headless) via gnzsnz/ib-gateway-docker.
+# Bundles IBC (login automation) + Xvfb (virtual X display) + socat (port forward),
+# so the Gateway runs unattended and exposes the TWS socket API on the host.
+#
+# Local usage (paper):
+#   1. Copy .env.example -> .env and fill TWS_USERID / TWS_PASSWORD
+#   2. docker compose up
+#   3. Point the engine at it: IBKR_HOST=127.0.0.1 IBKR_PORT=4002 IBKR_PAPER=true
+#
+# Ports:
+#   4001 -> live API     4002 -> paper API
+#   5900 -> VNC (optional, for debugging the Gateway UI; gnzsnz exposes a VNC server)
+services:
+  ib-gateway:
+    image: ghcr.io/gnzsnz/ib-gateway:latest
+    restart: always
+    environment:
+      # --- Credentials (do NOT commit; supply via .env / Render secrets) ---
+      TWS_USERID: ${TWS_USERID}
+      TWS_PASSWORD: ${TWS_PASSWORD}
+      # paper | live  -> selects which port IBC logs into (4002 / 4001)
+      TRADING_MODE: ${TRADING_MODE:-paper}
+
+      # --- API hardening ---
+      # false = allow order placement/cancel (required for live trading).
+      # Set true to make the API read-only (market data + positions only).
+      READ_ONLY_API: ${READ_ONLY_API:-no}
+
+      # --- Persistence ---
+      # Persist Gateway/IBC settings + jts.ini across restarts so the
+      # "trusted IP" and UI prefs survive container recreation.
+      TWS_SETTINGS_PATH: /home/ibgateway/Jts
+
+      # --- Daily auto-restart / re-login ---
+      # IBC restarts the Gateway daily. Schedule it in a quiet overnight
+      # window (ET), well clear of the 09:30 ET open. 23:45 ET is the default
+      # we standardize on; adjust for the container's TZ.
+      AUTO_RESTART_TIME: ${AUTO_RESTART_TIME:-23:45}
+      TZ: ${TZ:-America/New_York}
+
+      # --- Bind controls ---
+      # Bind the API to all interfaces inside the container so socat/Render
+      # private networking can reach it. Trusted IPs are still enforced by IBC.
+      BIND_ADDRESS: ${BIND_ADDRESS:-0.0.0.0}
+    ports:
+      - "${IB_API_PORT:-4002}:${IB_API_PORT:-4002}"
+      # Uncomment to inspect the Gateway GUI over VNC while debugging:
+      # - "5900:5900"
