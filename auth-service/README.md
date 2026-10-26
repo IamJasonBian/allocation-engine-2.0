@@ -125,8 +125,17 @@ All POSTs and order reads require `Authorization: Bearer <exec-token>`.
 | GET    | `/orders/trailing_stop`            | active percentage trailing-stop orders    |
 | POST   | `/orders/trailing_stop`            | relay a place payload (`dry_run` default) |
 | POST   | `/orders/trailing_stop/replace`    | relay a replace payload (`dry_run` default)|
+| POST   | `/orders/limit`                    | place a limit order (`dry_run` default)   |
 | POST   | `/exec`                            | run an external command (shell)           |
 | POST   | `/exec/mcp`                        | relay a JSON-RPC call to the Robinhood MCP |
+
+`/orders/limit` takes an *intent*, not a raw payload — the box resolves the
+instrument and account itself, so the requested symbol is what trades:
+`{"order": {"symbol": "MU", "side": "buy", "quantity": 2, "limit_price": "95.50",
+"time_in_force": "gfd", "ref_id": "<uuid>"}, "dry_run": true}`. Guardrails:
+whole shares,
+`quantity * limit_price <= [limit] max_notional`, valid tick, `gfd`/`gtc`, and a
+UUID `ref_id` (Robinhood's idempotency key — reuse it when retrying).
 
 `/exec/mcp` forwards a JSON-RPC payload to the **official Robinhood MCP**
 (`https://agent.robinhood.com/mcp/trading`, HTTP transport) and relays the status
