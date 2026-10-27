@@ -1,0 +1,21 @@
+{"probe": "ac-otp-detection", "raised": "OTPRequired", "is_otp": true}
+{"probe": "ac-auth-status-no-raise", "result": {"authenticated": false, "otp_needed": true, "detail": "OTP needed"}}
+{"probe": "ac-box-token-sqlite-cache:otp", "result": null}
+{"probe": "ac-client-timeout-vs-box-wait", "result": null, "waited_s": 1.0, "log": ["WARNING app.box_session [box-session] token fetch failed (box /token missing or unreachable?): auth-service request failed: HTTPConnectionPool(host='127.0.0.1',"]}
+{"probe": "rh-init-auth-nonfatal", "authenticated": false, "challenge": false, "log": ["INFO app.brokers.robinhood_client [rh] Authenticating via auth-service box (no local login)...", "WARNING app.box_session [box-session] token fetch failed (box /token missing or unreachable?): AUTH_SERVICE_URL is not set", "INFO app.brokers.robinhood_client [rh] __init__ complete (authenticated=False)"]}
+{"probe": "rh-ensure-auth-raises", "raised": "RuntimeError", "msg": "not authenticated \u2014 box token unavailable"}
+{"probe": "rh-submit-gtc-swallow:limit-no-price", "result": {"id": "o1", "symbol": "SPY", "status": "queued"}, "sent_kwargs": {"timeInForce": "gtc", "jsonify": true, "market_hours": "regular_hours"}, "has_limitPrice": false}
+{"probe": "rh-submit-gtc-swallow:exception", "result": null}
+{"probe": "rh-open-orders-workaround", "result": ["a"]}
+{"probe": "rh-option-entry-cents+mark-fallback", "purchase_price": 1.77, "mark_price": 1.77, "unrealized_pl": 0.0, "option_type": "call", "position_type": "long", "greeks": {"delta": null, "gamma": null, "theta": null, "vega": null, "iv": null}}
+{"probe": "rh-cancel-not-idempotent", "called_rh_with": ["zzz"]}
+{"probe": "rh-submit-bypasses-box-guardrails:routes", "routes": ["/api/trade/order/<broker_name>", "/api/trade/order", "/api/trade/buy/<broker_name>", "/api/trade/buy", "/api/trade/sell/<broker_name>", "/api/trade/sell", "/api/trade/cancel/<order_id>/<broker_name>", "/api/trade/cancel/<order_id>", "/api/trade/cancel", "/api/trade/cancel-all/<broker_name>", "/api/trade/cancel-all"]}
+{"probe": "rh-submit-bypasses-box-guardrails", "service_DRY_RUN": true, "body_dry_run": null, "status": 400, "json": {"details": ["side must be 'BUY' or 'SELL'"], "error": "Validation failed"}, "broker_called": 0}
+{"probe": "rh-submit-bypasses-box-guardrails", "service_DRY_RUN": true, "body_dry_run": false, "status": 400, "json": {"details": ["side must be 'BUY' or 'SELL'"], "error": "Validation failed"}, "broker_called": 0}
+{"probe": "ibkr-connect-error", "raised": "ConnectionError", "msg": "Could not reach IB Gateway/TWS at 127.0.0.1:1. The gateway process must be running with the API socket enabled (see docs"}
+{"probe": "ibkr-submit-fallback-market", "result": {"id": "7", "symbol": "SPY", "status": "Submitted"}, "sent_type": "MKT", "tif": "GTC"}
+{"probe": "ibkr-paper-flag-advisory", "paper_flag": true, "connect_log": ["INFO app.brokers.ibkr_client IBKR connected 127.0.0.1:4002 clientId=1 accounts=['U1234567']"]}
+{"probe": "ibkr-option-contracts", "raised": "ValueError", "msg": "option_type must be call/put or C/P"}
+{"probe": "ibkr-option-contracts:ok", "contract": ["OPT", "SPY", "20261120", 230.0, "C", "SMART", "USD"]}
+{"probe": "ibkr-cancel-missing-warns", "result": null, "log": ["WARNING app.brokers.ibkr_client cancel_order: no open order with id nope"]}
+{"probe": "ibkr-cancel-all-global", "sent": "GLOBAL_CANCEL"}
