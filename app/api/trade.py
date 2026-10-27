@@ -1,10 +1,15 @@
 """Trading API — submit and cancel orders."""
 
 from flask import Blueprint, jsonify, request, current_app
+from app.api.robinhood_proxy import _require_token
 from app.brokers import get_broker
 from app.enums import OrderSide, OrderType
 
 bp = Blueprint("trade", __name__)
+
+# Every route here places or cancels real orders, so all of them sit behind the
+# dashboard bearer token (fail closed when unset).
+bp.before_request(_require_token)
 
 
 @bp.route("/trade/order", methods=["POST"])
@@ -70,7 +75,9 @@ def place_order(broker_name=None):
             return jsonify({"error": "all_day_hours requires whole shares"}), 400
 
     # --- check dry_run ---
-    dry_run = body.get("dry_run", body.get("dryRun", current_app.config.get("DRY_RUN", True)))
+    # Service DRY_RUN is a ceiling: a request may ask for a dry run, never arm a live one.
+    dry_run = (current_app.config.get("DRY_RUN", True)
+               or body.get("dry_run", body.get("dryRun", False)))
 
     order_dict = {
         "symbol": symbol.upper(),
