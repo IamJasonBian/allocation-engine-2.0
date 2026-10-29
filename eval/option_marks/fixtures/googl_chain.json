@@ -1,0 +1,17 @@
+{
+  "symbol": "GOOGL",
+  "spot": 324.89,
+  "as_of": "2026-10-28",
+  "expiry": "2026-11-21",
+  "dte": 24,
+  "note": "Refresh before earnings: spot/last/vol/oi from broker or chain dump. Used for bounce-sleeve ~0.22Δ call eval.",
+  "calls": [
+    {"k": 340, "last": 18.5, "oi": 4200, "vol": 890},
+    {"k": 350, "last": 14.2, "oi": 8100, "vol": 1200},
+    {"k": 360, "last": 10.8, "oi": 12500, "vol": 2100},
+    {"k": 370, "last": 8.1, "oi": 9800, "vol": 1800},
+    {"k": 380, "last": 6.0, "oi": 11200, "vol": 950},
+    {"k": 390, "last": 4.35, "oi": 7600, "vol": 620},
+    {"k": 400, "last": 3.1, "oi": 15400, "vol": 1100}
+  ]
+}

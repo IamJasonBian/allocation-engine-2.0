@@ -1,0 +1,16 @@
+{
+  "symbol": "GOOGL",
+  "spot": 308.65,
+  "as_of": "2026-10-29",
+  "expiry": "2026-11-21",
+  "dte": 23,
+  "note": "Post-earnings -5% spot; refresh call last prices from live chain.",
+  "calls": [
+    {"k": 320, "last": 14.5, "oi": 6200, "vol": 1800},
+    {"k": 330, "last": 11.0, "oi": 7800, "vol": 2100},
+    {"k": 340, "last": 8.2, "oi": 9200, "vol": 1900},
+    {"k": 350, "last": 6.0, "oi": 8100, "vol": 1600},
+    {"k": 360, "last": 4.3, "oi": 12500, "vol": 1200},
+    {"k": 370, "last": 3.0, "oi": 9800, "vol": 800}
+  ]
+}
