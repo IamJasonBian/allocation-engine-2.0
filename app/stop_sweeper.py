@@ -41,7 +41,9 @@ from datetime import datetime, timedelta, timezone
 import requests
 
 from app.config import Config
-from app.risk.equity_stop_mapping import equity_stop_percent, equity_stop_qty_fraction
+from app.risk.equity_stop_mapping import (
+    equity_stop_percent, equity_stop_qty_fraction, is_stop_frozen,
+)
 
 log = logging.getLogger("stop_sweeper")
 
@@ -544,6 +546,7 @@ def sweep(client, store, tickers, trail_percent=TRAIL_PERCENT, dry_run=True,
             "renewed": [],
             "pruned": [],
             "skipped": [],
+            "frozen": [],
             "unresolved_active_orders": unresolved_active_orders,
         }
     pruned = store.prune_missing(set(covered) | {t.upper() for t in tickers})
@@ -552,8 +555,15 @@ def sweep(client, store, tickers, trail_percent=TRAIL_PERCENT, dry_run=True,
 
     qty_map = {k.upper(): v for k, v in (qty_map or {}).items()}
     price_map = {k.upper(): v for k, v in (price_map or {}).items()}
-    placed, simulated, renewed, skipped = [], [], [], []
+    placed, simulated, renewed, skipped, frozen = [], [], [], [], []
     for t in (x.upper() for x in tickers):
+        if is_stop_frozen(t):
+            # Frozen: no new stop, no renewal; any resting stop stays as-is.
+            log.info("sweep: %s frozen — not placing or renewing "
+                     "(resting RH stop: %s)", t,
+                     covered[t].get("id") if t in covered else "none")
+            frozen.append(t)
+            continue
         if t in covered:
             # Grandfather older market trailing stops. The stop-limit shape and
             # current symbol mapping apply only when creating a missing stop.
@@ -633,7 +643,7 @@ def sweep(client, store, tickers, trail_percent=TRAIL_PERCENT, dry_run=True,
         store.set_meta("last_sweep_at", _now_iso())
     return {"active_from_rh": len(covered), "placed": placed,
             "simulated": simulated, "renewed": renewed, "pruned": pruned,
-            "skipped": skipped, "unresolved_active_orders": []}
+            "skipped": skipped, "frozen": frozen, "unresolved_active_orders": []}
 
 
 def renew(client, store, symbol, dry_run=True,

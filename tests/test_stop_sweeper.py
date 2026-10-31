@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 import pytest
 
 from app import stop_sweeper as sw
+from app.risk import equity_stop_mapping
 from app.stop_sweeper import (
     GuardrailViolation,
     StopStore,
@@ -90,6 +91,19 @@ def rh_order(symbol, side="sell", pct="16", order_id=None, created=None):
 @pytest.fixture
 def store(tmp_path):
     return StopStore(str(tmp_path / "stops.sqlite3"))
+
+
+SHIPPED_FROZEN_TICKERS = equity_stop_mapping.FROZEN_TICKERS
+
+
+@pytest.fixture(autouse=True)
+def no_frozen_tickers(monkeypatch):
+    """Tests use AAPL as a generic name; freeze only where a test asks to."""
+    monkeypatch.setattr(equity_stop_mapping, "FROZEN_TICKERS", frozenset())
+
+
+def freeze(monkeypatch, *symbols):
+    monkeypatch.setattr(equity_stop_mapping, "FROZEN_TICKERS", frozenset(symbols))
 
 
 # --------------------------------------------------------------------------- #
@@ -558,3 +572,37 @@ def test_sweep_options_take_profit_skips_duplicate_open_order(store):
     out = sweep_options_take_profit(client, store, tp_percent=50, dry_run=True)
     assert out["placed"] == []
     assert any(s.get("reason") == "tp_limit_already_open" for s in out["skipped"])
+
+
+# --------------------------------------------------------------------------- #
+# frozen tickers — the sweep never places or renews a stop on these
+# --------------------------------------------------------------------------- #
+
+def test_aapl_ships_frozen():
+    assert "AAPL" in SHIPPED_FROZEN_TICKERS
+
+
+def test_frozen_naked_ticker_gets_no_stop(store, monkeypatch, caplog):
+    caplog.set_level("INFO", logger="stop_sweeper")
+    freeze(monkeypatch, "AAPL")
+    c = OrderIdClient()
+    out = sweep(c, store, ["aapl", "MSFT"],
+                **{**_live_kwargs(qty=5),
+                   "qty_map": {"AAPL": 5, "MSFT": 5},
+                   "price_map": {"AAPL": 100.0, "MSFT": 100.0}})
+    assert out["frozen"] == ["AAPL"]
+    assert [p["symbol"] for p in out["placed"]] == ["MSFT"]
+    assert [p["symbol"] for p, _ in c.placed] == ["MSFT"]
+    assert store.get("AAPL") is None
+    assert store.get_meta("last_sweep_at"), "a frozen skip must not block the latch"
+    assert "AAPL frozen" in caplog.text and "resting RH stop: none" in caplog.text
+
+
+def test_frozen_ticker_existing_stop_is_not_renewed(store, monkeypatch):
+    freeze(monkeypatch, "AAPL")
+    old = {**rh_order("AAPL", created="2026-04-10T00:00:00+00:00"), "type": "limit"}
+    c = FakeClient(book=[old])
+    out = sweep(c, store, ["AAPL"])
+    assert out["frozen"] == ["AAPL"]
+    assert out["renewed"] == [] and c.replaced == []
+    assert store.get("AAPL")["order_id"] == old["id"], "still mirrored, untouched"
