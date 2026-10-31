@@ -140,13 +140,14 @@ def maybe_stop_sweep(config, state, current_positions):
                    instrument_map=instrument_map)
     log.info("[stop-sweeper] sweep done: %d active in RH book, "
              "placed=%s, simulated=%s, renewed=%s, pruned=%s, skipped=%s, "
-             "unresolved_active=%d",
+             "frozen=%s, unresolved_active=%d",
              out["active_from_rh"],
              [p["symbol"] for p in out["placed"]] or "none",
              [p["symbol"] for p in out["simulated"]] or "none",
              [r.get("symbol") for r in out["renewed"]] or "none",
              out["pruned"] or "none",
              [s["symbol"] for s in out.get("skipped", [])] or "none",
+             out.get("frozen") or "none",
              len(out["unresolved_active_orders"]))
     if dry:
         return

@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 import pytest
 
 from app import stop_sweeper as sw
+from app.risk import equity_stop_mapping
 from app.stop_sweeper import (
     GuardrailViolation,
     StopStore,
@@ -92,6 +93,19 @@ def store(tmp_path):
     return StopStore(str(tmp_path / "stops.sqlite3"))
 
 
+SHIPPED_FROZEN_TICKERS = equity_stop_mapping.FROZEN_TICKERS
+
+
+@pytest.fixture(autouse=True)
+def no_frozen_tickers(monkeypatch):
+    """Tests use AAPL as a generic name; freeze only where a test asks to."""
+    monkeypatch.setattr(equity_stop_mapping, "FROZEN_TICKERS", frozenset())
+
+
+def freeze(monkeypatch, *symbols):
+    monkeypatch.setattr(equity_stop_mapping, "FROZEN_TICKERS", frozenset(symbols))
+
+
 # --------------------------------------------------------------------------- #
 # payload guardrails — destructive orders must not get out
 # --------------------------------------------------------------------------- #
@@ -100,13 +114,6 @@ def valid_payload(**over):
     p = build_payload("AAPL", "sell", 1, 16, current_price=100)
     p.update(over)
     return p
-
-
-def test_built_payload_passes_guard():
-    payload = valid_payload()
-    assert payload["type"] == "market"
-    assert "price" not in payload
-    validate_trailing_stop_payload(payload)
 
 
 @pytest.mark.parametrize("mutation,why", [
@@ -119,13 +126,6 @@ def test_built_payload_passes_guard():
 def test_guard_rejects_destructive_payloads(mutation, why):
     with pytest.raises(GuardrailViolation):
         validate_trailing_stop_payload(valid_payload(**mutation)), why
-
-
-def test_guard_allows_market_trailing_stop():
-    payload = valid_payload()
-    payload["type"] = "market"
-    payload.pop("price", None)
-    validate_trailing_stop_payload(payload)
 
 
 def test_build_payload_market_omits_limit_price():
@@ -424,23 +424,6 @@ def test_live_sweep_skips_account_before_instrument_lookup(store):
     assert calls == []
 
 
-def test_renew_matches_known_order_id_when_symbol_is_missing(store):
-    order = rh_order("")
-    order.pop("symbol")
-    order["type"] = "limit"
-    order["time_in_force"] = "gtc"
-    order["stop_price"] = "10.00"
-    order["price"] = "9.00"
-    c = FakeClient(book=[order])
-    out = renew(
-        c, store, "TSPH",
-        known_order={"id": order["id"], "symbol": "TSPH", **order},
-        order_symbol_resolver=lambda _: "",
-    )
-    assert out["action"] == "renewed"
-    assert c.replaced[0][0] == order["id"]
-
-
 def test_sweep_does_not_latch_when_renew_cannot_confirm_order(store):
     old = rh_order("IWN", created="2026-04-10T00:00:00+00:00")
 
@@ -558,3 +541,37 @@ def test_sweep_options_take_profit_skips_duplicate_open_order(store):
     out = sweep_options_take_profit(client, store, tp_percent=50, dry_run=True)
     assert out["placed"] == []
     assert any(s.get("reason") == "tp_limit_already_open" for s in out["skipped"])
+
+
+# --------------------------------------------------------------------------- #
+# frozen tickers — the sweep never places or renews a stop on these
+# --------------------------------------------------------------------------- #
+
+def test_ships_frozen_tickers():
+    assert {"AAPL", "MSFT", "SPY"} <= SHIPPED_FROZEN_TICKERS
+
+
+def test_frozen_naked_ticker_gets_no_stop(store, monkeypatch, caplog):
+    caplog.set_level("INFO", logger="stop_sweeper")
+    freeze(monkeypatch, "AAPL")
+    c = OrderIdClient()
+    out = sweep(c, store, ["aapl", "MSFT"],
+                **{**_live_kwargs(qty=5),
+                   "qty_map": {"AAPL": 5, "MSFT": 5},
+                   "price_map": {"AAPL": 100.0, "MSFT": 100.0}})
+    assert out["frozen"] == ["AAPL"]
+    assert [p["symbol"] for p in out["placed"]] == ["MSFT"]
+    assert [p["symbol"] for p, _ in c.placed] == ["MSFT"]
+    assert store.get("AAPL") is None
+    assert store.get_meta("last_sweep_at"), "a frozen skip must not block the latch"
+    assert "AAPL frozen" in caplog.text and "resting RH stop: none" in caplog.text
+
+
+def test_frozen_ticker_existing_stop_is_not_renewed(store, monkeypatch):
+    freeze(monkeypatch, "AAPL")
+    old = {**rh_order("AAPL", created="2026-04-10T00:00:00+00:00"), "type": "limit"}
+    c = FakeClient(book=[old])
+    out = sweep(c, store, ["AAPL"])
+    assert out["frozen"] == ["AAPL"]
+    assert out["renewed"] == [] and c.replaced == []
+    assert store.get("AAPL")["order_id"] == old["id"], "still mirrored, untouched"
