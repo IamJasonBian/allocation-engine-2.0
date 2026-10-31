@@ -8,7 +8,7 @@ EQUITY_STOP_MAPPING: dict[str, dict[str, float]] = {
 
 # Tickers the stop sweep never places or renews a trailing stop on. Hardcoded
 # for now; an existing stop on one is left exactly as it rests in RH.
-FROZEN_TICKERS: frozenset[str] = frozenset({"AAPL"})
+FROZEN_TICKERS: frozenset[str] = frozenset({"AAPL", "MSFT", "SPY"})
 
 
 def is_stop_frozen(symbol: str) -> bool:

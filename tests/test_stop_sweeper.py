@@ -547,8 +547,8 @@ def test_sweep_options_take_profit_skips_duplicate_open_order(store):
 # frozen tickers — the sweep never places or renews a stop on these
 # --------------------------------------------------------------------------- #
 
-def test_aapl_ships_frozen():
-    assert "AAPL" in SHIPPED_FROZEN_TICKERS
+def test_ships_frozen_tickers():
+    assert {"AAPL", "MSFT", "SPY"} <= SHIPPED_FROZEN_TICKERS
 
 
 def test_frozen_naked_ticker_gets_no_stop(store, monkeypatch, caplog):
