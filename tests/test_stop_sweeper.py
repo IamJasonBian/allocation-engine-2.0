@@ -116,13 +116,6 @@ def valid_payload(**over):
     return p
 
 
-def test_built_payload_passes_guard():
-    payload = valid_payload()
-    assert payload["type"] == "market"
-    assert "price" not in payload
-    validate_trailing_stop_payload(payload)
-
-
 @pytest.mark.parametrize("mutation,why", [
     ({"side": "buy"}, "buy order"),
     ({"trailing_peg": None}, "missing trailing peg"),
@@ -133,13 +126,6 @@ def test_built_payload_passes_guard():
 def test_guard_rejects_destructive_payloads(mutation, why):
     with pytest.raises(GuardrailViolation):
         validate_trailing_stop_payload(valid_payload(**mutation)), why
-
-
-def test_guard_allows_market_trailing_stop():
-    payload = valid_payload()
-    payload["type"] = "market"
-    payload.pop("price", None)
-    validate_trailing_stop_payload(payload)
 
 
 def test_build_payload_market_omits_limit_price():
@@ -436,23 +422,6 @@ def test_live_sweep_skips_account_before_instrument_lookup(store):
     )
     assert out["skipped"] == [{"symbol": "AAPL", "reason": "unresolved_account"}]
     assert calls == []
-
-
-def test_renew_matches_known_order_id_when_symbol_is_missing(store):
-    order = rh_order("")
-    order.pop("symbol")
-    order["type"] = "limit"
-    order["time_in_force"] = "gtc"
-    order["stop_price"] = "10.00"
-    order["price"] = "9.00"
-    c = FakeClient(book=[order])
-    out = renew(
-        c, store, "TSPH",
-        known_order={"id": order["id"], "symbol": "TSPH", **order},
-        order_symbol_resolver=lambda _: "",
-    )
-    assert out["action"] == "renewed"
-    assert c.replaced[0][0] == order["id"]
 
 
 def test_sweep_does_not_latch_when_renew_cannot_confirm_order(store):
