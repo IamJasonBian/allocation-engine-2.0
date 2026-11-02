@@ -1,10 +1,15 @@
 """Trading API — submit and cancel orders."""
 
 from flask import Blueprint, jsonify, request, current_app
+from app.api.robinhood_proxy import _require_token
 from app.brokers import get_broker
 from app.enums import OrderSide, OrderType
 
 bp = Blueprint("trade", __name__)
+
+# Every route here places or cancels live orders, so the whole blueprint sits
+# behind the same Bearer token as the robinhood proxy (fails closed if unset).
+bp.before_request(_require_token)
 
 
 @bp.route("/trade/order", methods=["POST"])
