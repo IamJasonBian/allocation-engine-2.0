@@ -50,3 +50,9 @@ def test_authorized_order_still_dry_runs():
     body = r.get_json()
     assert r.status_code == 200 and body["dry_run"] is True
     assert body["status"] == "simulated"
+
+
+def test_non_ascii_token_is_rejected_not_500():
+    r = _client(TOKEN).post("/api/trade/order", json={},
+                            headers={"Authorization": "Bearer tökén"})
+    assert r.status_code == 401

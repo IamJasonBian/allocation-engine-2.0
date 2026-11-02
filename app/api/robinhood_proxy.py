@@ -30,7 +30,7 @@ def _require_token():
     if not required:
         return jsonify({"error": "DASHBOARD_REQUEST_TOKEN not configured"}), 503
     sent = (request.headers.get("Authorization") or "").removeprefix("Bearer ").strip()
-    if not hmac.compare_digest(sent, required):
+    if not hmac.compare_digest(sent.encode(), required.encode()):
         return jsonify({"error": "unauthorized"}), 401
     return None
 
