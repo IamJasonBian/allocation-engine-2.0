@@ -234,6 +234,41 @@ class RobinhoodTrader(BrokerClient):
             log.error("Robinhood order error for %s %s %s: %s", side, qty, symbol, e)
             return None
 
+    def place_option_spread(self, spread: dict) -> dict | None:
+        """Submit a two-leg vertical debit spread as a single limit order.
+
+        Args:
+            spread: Validated spread dict with symbol, expiration (YYYY-MM-DD),
+                option_type, long_strike, short_strike, quantity, limit_price.
+
+        Returns:
+            ``{"id", "state"}`` for the submitted order, or None if rejected.
+        """
+        self._ensure_auth()
+        legs = [
+            {"expirationDate": spread["expiration"], "strike": spread["long_strike"],
+             "optionType": spread["option_type"], "effect": "open", "action": "buy"},
+            {"expirationDate": spread["expiration"], "strike": spread["short_strike"],
+             "optionType": spread["option_type"], "effect": "open", "action": "sell"},
+        ]
+        try:
+            # Keyword args: robin_stocks' debit-spread wrappers swap
+            # timeInForce/account_number positionally, so call this directly.
+            result = rh.orders.order_option_spread(
+                direction="debit", price=float(spread["limit_price"]),
+                symbol=spread["symbol"], quantity=int(spread["quantity"]),
+                spread=legs, account_number=self.account_number or None,
+                timeInForce="gfd", jsonify=True,
+            )
+        except Exception as e:
+            log.error("Robinhood option spread error for %s: %s", spread["symbol"], e)
+            return None
+        if result and result.get("id"):
+            log.info("RH option spread submitted: %s -> %s", spread["symbol"], result["id"])
+            return {"id": result["id"], "state": result.get("state")}
+        log.error("RH option spread rejected: %s", result)
+        return None
+
     def cancel_order(self, order_id: str):
         self._ensure_auth()
         rh.orders.cancel_stock_order(order_id)

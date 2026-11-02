@@ -1,5 +1,8 @@
 """Trading API — submit and cancel orders."""
 
+import os
+from datetime import date, datetime
+
 from flask import Blueprint, jsonify, request, current_app
 from app.api.robinhood_proxy import _require_token
 from app.brokers import get_broker
@@ -163,3 +166,93 @@ def cancel_all(broker_name=None):
         return jsonify({"status": "all_cancelled", "broker": broker_name})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+# --- guarded vertical debit spreads ------------------------------------------
+
+def _spread_limits() -> dict:
+    """Hard caps for /trade/option-spread, overridable via env."""
+    return {
+        "tickers": {t.strip().upper() for t in
+                    os.getenv("OPTION_SPREAD_TICKERS", "AMD").split(",") if t.strip()},
+        "max_qty": int(os.getenv("OPTION_SPREAD_MAX_QTY", "2")),
+        "max_risk": float(os.getenv("OPTION_SPREAD_MAX_RISK_USD", "3000")),
+        "max_days": int(os.getenv("OPTION_SPREAD_MAX_DAYS", "10")),
+    }
+
+
+def validate_spread(body: dict, today: date | None = None) -> tuple[dict | None, list[str]]:
+    """Validate a call/put vertical debit spread request against the hard caps.
+
+    Args:
+        body: Request JSON (symbol, expiration, option_type, long_strike,
+            short_strike, quantity, limit_price).
+        today: Override for the current date (tests).
+
+    Returns:
+        ``(spread, errors)``; ``spread`` is the normalized dict when errors is empty.
+    """
+    lim, errs = _spread_limits(), []
+    symbol = str(body.get("symbol", "")).upper()
+    if symbol not in lim["tickers"]:
+        errs.append(f"symbol must be one of {sorted(lim['tickers'])}")
+    otype = str(body.get("option_type", "call")).lower()
+    if otype not in ("call", "put"):
+        errs.append("option_type must be 'call' or 'put'")
+    try:
+        long_k, short_k = float(body["long_strike"]), float(body["short_strike"])
+        qty, px = int(body["quantity"]), float(body["limit_price"])
+    except (KeyError, TypeError, ValueError):
+        return None, errs + ["long_strike, short_strike, quantity, limit_price are required numbers"]
+    if not 1 <= qty <= lim["max_qty"]:
+        errs.append(f"quantity must be 1..{lim['max_qty']}")
+    width = abs(short_k - long_k)
+    if width <= 0:
+        errs.append("strikes must differ")
+    elif (otype == "call") != (long_k < short_k):
+        errs.append("debit spread needs long strike below short for calls, above for puts")
+    if not 0 < px < width:
+        errs.append("limit_price must be >0 and below the strike width")
+    if px * 100 * qty > lim["max_risk"]:
+        errs.append(f"total debit exceeds ${lim['max_risk']:.0f} cap")
+    try:
+        exp = datetime.strptime(str(body.get("expiration")), "%Y-%m-%d").date()
+        days = (exp - (today or date.today())).days
+        if not 0 <= days <= lim["max_days"]:
+            errs.append(f"expiration must be within {lim['max_days']} days")
+    except ValueError:
+        errs.append("expiration must be YYYY-MM-DD")
+    if errs:
+        return None, errs
+    return {"symbol": symbol, "expiration": body["expiration"], "option_type": otype,
+            "long_strike": long_k, "short_strike": short_k, "quantity": qty,
+            "limit_price": round(px, 2)}, []
+
+
+@bp.route("/trade/option-spread", methods=["POST"])
+@bp.route("/trade/option-spread/<broker_name>", methods=["POST"])
+def place_option_spread(broker_name=None):
+    """Place a capped vertical debit spread (limit, good-for-day). Dry-run by default.
+
+    Live submission needs ``"dry_run": false`` in the body AND the global
+    DRY_RUN config off, so a single flag can't send a real order.
+    """
+    broker_name = broker_name or current_app.config["DEFAULT_BROKER"]
+    body = request.get_json(silent=True) or {}
+    spread, errs = validate_spread(body)
+    if errs:
+        return jsonify({"error": "Validation failed", "details": errs}), 400
+    dry_run = body.get("dry_run", True) is not False or current_app.config.get("DRY_RUN", True)
+    if dry_run:
+        return jsonify({"status": "simulated", "dry_run": True,
+                        "broker": broker_name, "spread": spread,
+                        "max_loss_usd": round(spread["limit_price"] * 100 * spread["quantity"], 2)})
+    broker = get_broker(broker_name)
+    if not hasattr(broker, "place_option_spread"):
+        return jsonify({"error": f"{broker_name} does not support option spreads"}), 501
+    result = broker.place_option_spread(spread)
+    if result is None:
+        return jsonify({"error": "Broker rejected the spread", "spread": spread}), 502
+    return jsonify({"status": "submitted", "broker": broker_name,
+                    "orderId": result["id"], "state": result.get("state"),
+                    "spread": spread}), 201
