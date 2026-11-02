@@ -247,9 +247,11 @@ class RobinhoodTrader(BrokerClient):
         self._ensure_auth()
         legs = [
             {"expirationDate": spread["expiration"], "strike": spread["long_strike"],
-             "optionType": spread["option_type"], "effect": "open", "action": "buy"},
+             "optionType": spread["option_type"], "effect": "open", "action": "buy",
+             "ratio_quantity": 1},
             {"expirationDate": spread["expiration"], "strike": spread["short_strike"],
-             "optionType": spread["option_type"], "effect": "open", "action": "sell"},
+             "optionType": spread["option_type"], "effect": "open", "action": "sell",
+             "ratio_quantity": 1},
         ]
         try:
             # Keyword args: robin_stocks' debit-spread wrappers swap

@@ -50,3 +50,29 @@ def test_dry_run_by_default_even_when_global_dry_run_off(monkeypatch):
     r = _client(dry=False).post("/api/trade/option-spread", json=GOOD, headers=AUTH)
     assert r.status_code == 200 and r.get_json()["status"] == "simulated"
     assert r.get_json()["max_loss_usd"] == 1280.0
+
+
+def test_place_option_spread_legs_include_ratio_quantity(monkeypatch):
+    """robin_stocks reads leg['ratio_quantity'] (undocumented); a missing key
+    raised KeyError and RH never saw the order."""
+    from app.brokers.robinhood_client import RobinhoodTrader
+
+    seen = {}
+
+    def fake_order_option_spread(**kw):
+        seen.update(kw)
+        for leg in kw["spread"]:
+            assert leg["ratio_quantity"] == 1
+        return {"id": "oid-1", "state": "queued"}
+
+    monkeypatch.setattr("app.brokers.robinhood_client.rh.orders.order_option_spread",
+                        fake_order_option_spread)
+    t = RobinhoodTrader.__new__(RobinhoodTrader)
+    t.account_number, t._authenticated = "TEST-ACCT", True
+    monkeypatch.setattr(t, "_ensure_auth", lambda: None)
+    out = t.place_option_spread({"symbol": "AMD", "expiration": "2026-11-04",
+                                 "option_type": "call", "long_strike": 470.0,
+                                 "short_strike": 510.0, "quantity": 1, "limit_price": 12.8})
+    assert out == {"id": "oid-1", "state": "queued"}
+    assert [l["action"] for l in seen["spread"]] == ["buy", "sell"]
+    assert seen["direction"] == "debit" and seen["timeInForce"] == "gfd"
