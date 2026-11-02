@@ -54,3 +54,17 @@ def test_profit_and_flat_do_not_alert():
 def test_off_after_cutoff_and_never_trades():
     ev, st = check_mental_stops([opt("NBIS", 230, 2.0, 0.2)], {"x": 1}, date(2026, 11, 24))
     assert ev == [] and st == {"x": 1}
+
+
+def test_pnl_digest_slots_once_per_day_and_lists_every_position():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    from app.risk.mental_stops import pnl_digest
+    et = ZoneInfo("America/New_York")
+    pos = [opt("NBIS", 230, 2.08, 0.955, qty=31), opt("NBIS", 230, 3.42, 2.125, qty=3, exp="2026-12-04")]
+    assert pnl_digest(pos, set(), datetime(2026, 11, 3, 9, 0, tzinfo=et))[0] is None     # before first slot
+    msg, sent = pnl_digest(pos, set(), datetime(2026, 11, 3, 9, 40, tzinfo=et))
+    assert msg.count("NBIS CALL 230") == 2 and "Total" in msg
+    assert pnl_digest(pos, sent, datetime(2026, 11, 3, 11, 0, tzinfo=et))[0] is None    # already sent
+    assert pnl_digest(pos, sent, datetime(2026, 11, 3, 15, 50, tzinfo=et))[0] is not None  # second slot
+    assert pnl_digest(pos, set(), datetime(2026, 11, 7, 10, 0, tzinfo=et))[0] is None    # Saturday
