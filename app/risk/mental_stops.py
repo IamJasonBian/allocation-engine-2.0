@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import logging
 import os
-from datetime import date
+from datetime import date, datetime, time as dtime
+from zoneinfo import ZoneInfo
 
 from app.enums import RiskEventType
 from app.risk.events import RiskEvent
@@ -98,3 +99,44 @@ def check_mental_stops(options_positions: list[dict], alerted: dict[str, int],
             prev = reached
         state[u["key"]] = prev
     return events, state
+
+
+DIGEST_TIMES = (dtime(9, 35), dtime(15, 45))     # ET, market days
+_ET = ZoneInfo("America/New_York")
+
+
+def pnl_digest(options_positions: list[dict], sent: set[str],
+               now: datetime | None = None) -> tuple[str | None, set[str]]:
+    """Build the all-positions P&L message when a digest slot is due.
+
+    Args:
+        options_positions: Dicts from ``broker.options_positions()``.
+        sent: Slots already sent, as ``"YYYY-MM-DD@HH:MM"`` strings.
+        now: Override for the current time (tests).
+
+    Returns:
+        ``(message or None, updated sent set)``. None outside market days,
+        before a slot, after the mental-stop cutoff, or when already sent.
+    """
+    now = (now or datetime.now(_ET)).astimezone(_ET)
+    if now.weekday() >= 5 or now.date() > _until():
+        return None, sent
+    due = [t for t in DIGEST_TIMES if now.time() >= t]
+    if not due:
+        return None, sent
+    slot = f"{now.date().isoformat()}@{due[-1].strftime('%H:%M')}"
+    if slot in sent:
+        return None, sent
+    units = sorted(group_positions(options_positions), key=lambda u: u["key"])
+    if not units:
+        return None, sent | {slot}
+    lines, total = [], 0.0
+    for u in units:
+        loss = (u["cost"] - u["mark"]) / u["cost"]
+        usd = (u["mark"] - u["cost"]) * 100 * u["qty"]
+        total += usd
+        lines.append(f"{u['key']} x{u['qty']:g}: cost ${u['cost']:.2f} -> mark "
+                     f"${u['mark']:.2f} ({-loss:+.0%}, ${usd:+,.0f})")
+    msg = ("OPTION P&L - mental stops (alert only)\n" + "\n".join(lines)
+           + f"\nTotal ${total:+,.0f}")
+    return msg, sent | {slot}
