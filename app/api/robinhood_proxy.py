@@ -4,6 +4,8 @@
 - POST     /api/robinhood/mcp            — JSON-RPC passthrough to Robinhood MCP
 """
 
+import hmac
+
 from flask import Blueprint, jsonify, request, current_app
 
 from app.auth_service_client import (
@@ -28,7 +30,7 @@ def _require_token():
     if not required:
         return jsonify({"error": "DASHBOARD_REQUEST_TOKEN not configured"}), 503
     sent = (request.headers.get("Authorization") or "").removeprefix("Bearer ").strip()
-    if sent != required:
+    if not hmac.compare_digest(sent.encode(), required.encode()):
         return jsonify({"error": "unauthorized"}), 401
     return None
 
