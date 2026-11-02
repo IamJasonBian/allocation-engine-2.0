@@ -111,9 +111,9 @@ services:
       - key: SPREAD_TP_PCT_OF_MAX
         value: "50"
       - key: SPREAD_GUARD_TIME_ET
-        value: "12:30"
+        value: "09:45"
       - key: SPREAD_HARD_TIME_ET
-        value: "15:00"
+        value: "12:30"
       - key: SPREAD_ORDER_ID
         sync: false
       - key: SPREAD_LONG_ID

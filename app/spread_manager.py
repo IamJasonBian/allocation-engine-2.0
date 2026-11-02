@@ -59,8 +59,8 @@ class SpreadSpec:
 @dataclass(frozen=True)
 class Config:
     tp_pct_of_max: float = 50.0
-    guard_time: dtime = dtime(12, 30)
-    hard_time: dtime = dtime(15, 0)
+    guard_time: dtime = dtime(9, 45)
+    hard_time: dtime = dtime(12, 30)
     dry_run: bool = True
 
 
@@ -90,8 +90,13 @@ def validate(spec: SpreadSpec, order: dict) -> None:
         raise SandboxViolation(f"legs do not match allowed spread: {seen}")
 
 
-def step(gw, spec: SpreadSpec, cfg: Config, now: datetime) -> str:
-    """One management pass. Returns a short status string; ``done:*`` ends the job."""
+def step(gw, spec: SpreadSpec, cfg: Config, now: datetime, memo: dict | None = None) -> str:
+    """One management pass. Returns a short status string; ``done:*`` ends the job.
+
+    ``memo`` remembers the id of the closing order this process placed, so a
+    blind or wrong open-order listing can never cause a duplicate placement.
+    """
+    memo = {} if memo is None else memo
     now = now.astimezone(ET)
     if now.date() > spec.expiration:
         return "done:expired"
@@ -110,6 +115,17 @@ def step(gw, spec: SpreadSpec, cfg: Config, now: datetime) -> str:
         return "done:closed"
     fill_debit = float(order["processed_premium"]) / (100.0 * qty)
     closes = gw.open_close_orders(spec)
+    mid = memo.get("close_id")
+    if mid:
+        info = gw.order(mid)
+        st = str(info.get("state"))
+        if st in OPEN_STATES:
+            if not any(c["id"] == mid for c in closes):
+                closes = closes + [{"id": mid, "price": info.get("price")}]
+        elif st == "filled":
+            return "done:closed"
+        else:
+            memo.pop("close_id", None)
 
     on_expiry = now.date() == spec.expiration
     if on_expiry and now.time() >= cfg.hard_time:
@@ -129,6 +145,7 @@ def step(gw, spec: SpreadSpec, cfg: Config, now: datetime) -> str:
                      c["id"], px, target, why)
             return f"dry:reprice:{why}"
         gw.cancel_close(spec, c["id"])
+        memo.pop("close_id", None)
         closes = []
         break
     if closes:
@@ -137,6 +154,7 @@ def step(gw, spec: SpreadSpec, cfg: Config, now: datetime) -> str:
         log.info("[dry-run] would place closing credit %.2f x%d (%s)", target, qty, why)
         return f"dry:place:{why}@{target:.2f}"
     oid = gw.place_close(spec, min(qty, gw.open_qty(spec)), target)
+    memo["close_id"] = oid
     return f"placed:{why}@{target:.2f}:{oid}"
 
 
@@ -145,6 +163,7 @@ class RHGateway:
 
     def __init__(self, trader):
         self.trader = trader
+        self.placed_ids: set[str] = set()
 
     def _rh(self):
         import robin_stocks.robinhood as rh
@@ -197,10 +216,11 @@ class RHGateway:
             timeInForce="gtc", jsonify=True)
         if not res or not res.get("id"):
             raise RuntimeError(f"closing order rejected: {res}")
+        self.placed_ids.add(res["id"])
         return res["id"]
 
     def cancel_close(self, spec, order_id):
-        if order_id not in {o["id"] for o in self.open_close_orders(spec)}:
+        if order_id not in ({o["id"] for o in self.open_close_orders(spec)} | self.placed_ids):
             raise SandboxViolation("refusing to cancel an order that is not our closing order")
         self._rh().orders.cancel_option_order(order_id)
 
@@ -219,8 +239,8 @@ def config_from_env(env=os.environ) -> Config:
     h = lambda k, d: dtime(*map(int, env.get(k, d).split(":")))
     return Config(
         tp_pct_of_max=float(env.get("SPREAD_TP_PCT_OF_MAX", "50")),
-        guard_time=h("SPREAD_GUARD_TIME_ET", "12:30"),
-        hard_time=h("SPREAD_HARD_TIME_ET", "15:00"),
+        guard_time=h("SPREAD_GUARD_TIME_ET", "09:45"),
+        hard_time=h("SPREAD_HARD_TIME_ET", "12:30"),
         dry_run=env.get("SPREAD_MANAGER_DRY_RUN", "true").lower() != "false")
 
 
@@ -237,11 +257,11 @@ def run() -> None:
     gw = RHGateway(RobinhoodTrader())
     log.info("managing one spread order (dry_run=%s, tp=%.0f%% of max)",
              cfg.dry_run, cfg.tp_pct_of_max)
-    last = None
+    last, memo = None, {}
     while True:
         now = datetime.now(ET)
         try:
-            status = step(gw, spec, cfg, now) if (_market_hours(now) or last is None) else last
+            status = step(gw, spec, cfg, now, memo) if (_market_hours(now) or last is None) else last
         except SandboxViolation:
             log.exception("sandbox violation; stopping management")
             while True:

@@ -23,9 +23,11 @@ def order(state="filled", qty=1, premium=1280.0, legs=None):
 class FakeGW:
     def __init__(self, order_, closes=None, open_qty=1, bid=20.0):
         self._order, self.closes, self._qty, self.bid = order_, closes or [], open_qty, bid
+        self.extra = {}
         self.placed, self.cancelled = [], []
 
-    def order(self, _): return self._order
+    def order(self, oid):
+        return self.extra.get(oid, self._order)
     def open_close_orders(self, _): return list(self.closes)
     def open_qty(self, _): return self._qty
     def spread_quote(self, _): return self.bid, self.bid + 0.4
@@ -67,13 +69,13 @@ def test_dedupes_existing_close():
 
 def test_guard_reprices_to_bid_on_expiry_day():
     gw = FakeGW(order(), closes=[{"id": "c1", "price": "26.40"}], bid=31.0)
-    out = step(gw, SPEC, LIVE, at(4, 12, 45))
+    out = step(gw, SPEC, LIVE, at(4, 10, 0))
     assert gw.cancelled == ["c1"] and gw.placed == [(1, 31.0)] and out.startswith("placed:guard")
 
 
 def test_hard_time_sells_for_any_bid():
     gw = FakeGW(order(), closes=[{"id": "c1", "price": "9.00"}])
-    step(gw, SPEC, LIVE, at(4, 15, 5))
+    step(gw, SPEC, LIVE, at(4, 12, 35))
     assert gw.placed == [(1, 0.05)]
 
 
@@ -107,3 +109,22 @@ def test_sandbox_rejects_other_order_id():
     other = order(); other["id"] = "someone-else"
     with pytest.raises(SandboxViolation):
         validate(SPEC, other)
+
+
+def test_no_duplicate_when_open_order_listing_is_blind():
+    """Even if open_close_orders() never returns our order, the remembered id stops repeats."""
+    gw = FakeGW(order())
+    memo = {}
+    step(gw, SPEC, LIVE, at(3, 10), memo)
+    assert memo["close_id"] == "close-1" and len(gw.placed) == 1
+    gw.extra["close-1"] = {"id": "close-1", "state": "confirmed", "price": "26.40"}
+    for _ in range(3):
+        assert step(gw, SPEC, LIVE, at(3, 10, 1), memo).startswith("hold:tp")
+    assert len(gw.placed) == 1
+
+
+def test_remembered_close_filled_ends():
+    gw = FakeGW(order())
+    memo = {"close_id": "close-1"}
+    gw.extra["close-1"] = {"id": "close-1", "state": "filled"}
+    assert step(gw, SPEC, LIVE, at(3, 10), memo) == "done:closed"
