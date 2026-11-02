@@ -94,7 +94,8 @@ def check_mental_stops(options_positions: list[dict], alerted: dict[str, int],
                 message=(f"Mental stop {TIERS[reached]:.0%}: {u['key']} x{u['qty']:g} "
                          f"cost ${u['cost']:.2f} -> mark ${u['mark']:.2f} "
                          f"({-loss:+.0%}, ${usd:+,.0f}). Alert only — nothing sold."),
-                metadata={"tier": TIERS[reached], "pnl_usd": round(usd, 2)}))
+                metadata={"tier": TIERS[reached], "pnl_usd": round(usd, 2),
+                          "cost": u["cost"], "mark": u["mark"], "quantity": u["qty"]}))
             prev = reached
         state[u["key"]] = prev
     return events, state
