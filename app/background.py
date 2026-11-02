@@ -197,6 +197,7 @@ def run_engine_loop(app):
     from app.slack import notify as slack_notify
     from app.risk.observer import RiskSubject
     from app.risk.option_loss import check_option_drawdowns
+    from app.risk.mental_stops import check_mental_stops
     from app.risk.slack_observer import SlackAlertObserver
     from app.trading_db import post_orders, post_positions
     from app.utils_shared import (
@@ -222,6 +223,7 @@ def run_engine_loop(app):
     risk_subject = RiskSubject()
     risk_subject.attach(SlackAlertObserver())
     drawdown_alerted: set[str] = set()
+    mental_state: dict[str, int] = {}
 
     log.info(
         "[engine] worker loop started (interval=%ds, dry_run=%s, broker=%s, "
@@ -280,6 +282,13 @@ def run_engine_loop(app):
                     drawdown_alerted, risk_subject)
             except Exception:
                 log.exception("Option drawdown check failed")
+
+            try:
+                ms_events, mental_state = check_mental_stops(options_positions, mental_state)
+                for e in ms_events:
+                    risk_subject.notify(e)
+            except Exception:
+                log.exception("Option mental-stop check failed")
 
             try:
                 maybe_option_take_profit_sweep(config, opt_tp_sweep_state)
