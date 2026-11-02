@@ -128,3 +128,18 @@ def test_remembered_close_filled_ends():
     memo = {"close_id": "close-1"}
     gw.extra["close-1"] = {"id": "close-1", "state": "filled"}
     assert step(gw, SPEC, LIVE, at(3, 10), memo) == "done:closed"
+
+
+def test_holds_through_report_then_places_tp():
+    cfg = Config(dry_run=False, tp_not_before=datetime(2026, 11, 4, 9, 30, tzinfo=ET))
+    gw = FakeGW(order())
+    assert step(gw, SPEC, cfg, at(3, 9, 40)) == "hold:pre_report"
+    assert step(gw, SPEC, cfg, at(3, 16, 30)) == "hold:pre_report"
+    assert gw.placed == []
+    assert step(gw, SPEC, cfg, at(4, 9, 31)).startswith("placed:tp@26.40")
+
+
+def test_config_from_env_parses_tp_not_before():
+    from app.spread_manager import config_from_env
+    c = config_from_env({"SPREAD_TP_NOT_BEFORE_ET": "2026-11-04T09:30"})
+    assert c.tp_not_before == datetime(2026, 11, 4, 9, 30, tzinfo=ET)

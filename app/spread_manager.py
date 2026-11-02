@@ -13,7 +13,8 @@ Scope is enforced in code, not by convention:
     through the auth-service box (RobinhoodTrader, no local login);
   * SPREAD_MANAGER_DRY_RUN defaults to true: it logs what it would do.
 
-Lifecycle: wait for the fill -> rest a GTC take-profit credit at
+Lifecycle: wait for the fill -> (hold through the earnings print until
+SPREAD_TP_NOT_BEFORE_ET) -> rest a GTC take-profit credit at
 SPREAD_TP_PCT_OF_MAX% of max profit -> on expiry day, from the guard time,
 replace it with a closing order priced at the spread bid (re-priced each
 pass), and from the hard time sell for any bid, so the position is never left
@@ -62,6 +63,8 @@ class Config:
     guard_time: dtime = dtime(9, 45)
     hard_time: dtime = dtime(12, 30)
     dry_run: bool = True
+    # Hold through the earnings print: no take-profit is rested before this time.
+    tp_not_before: datetime | None = None
 
 
 def tick_round(price: float) -> float:
@@ -134,6 +137,8 @@ def step(gw, spec: SpreadSpec, cfg: Config, now: datetime, memo: dict | None = N
         bid, _ask = gw.spread_quote(spec)
         target, why = max(0.05, tick_round(bid)), "guard"
     else:
+        if cfg.tp_not_before and now < cfg.tp_not_before:
+            return "hold:pre_report"
         target, why = take_profit_credit(fill_debit, spec.width, cfg.tp_pct_of_max), "tp"
 
     for c in closes:
@@ -241,7 +246,9 @@ def config_from_env(env=os.environ) -> Config:
         tp_pct_of_max=float(env.get("SPREAD_TP_PCT_OF_MAX", "50")),
         guard_time=h("SPREAD_GUARD_TIME_ET", "09:45"),
         hard_time=h("SPREAD_HARD_TIME_ET", "12:30"),
-        dry_run=env.get("SPREAD_MANAGER_DRY_RUN", "true").lower() != "false")
+        dry_run=env.get("SPREAD_MANAGER_DRY_RUN", "true").lower() != "false",
+        tp_not_before=(datetime.fromisoformat(env["SPREAD_TP_NOT_BEFORE_ET"]).replace(tzinfo=ET)
+                       if env.get("SPREAD_TP_NOT_BEFORE_ET") else None))
 
 
 def _market_hours(now: datetime) -> bool:
