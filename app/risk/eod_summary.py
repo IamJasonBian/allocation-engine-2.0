@@ -1,7 +1,14 @@
-"""End-of-trading-day Telegram: pending option orders only.
+"""Daily pending option order Telegram summaries (start + end of trading day).
 
-Once per US market day after ``EOD_SUMMARY_ET`` (default 16:05 ET). Always sends
-(even when the pending list is empty).
+Slots (America/New_York, weekdays):
+  - SOD: ``SOD_PENDING_ET`` default 09:35
+  - EOD: ``EOD_PENDING_ET`` default 16:05
+
+Each slot fires once per day when the worker polls at or after that time.
+Intraday 🐧 drawdown alerts are separate and are **not** gated on these times.
+
+On the first successful tick after process start, sends one ``Startup`` pending
+snapshot (deploy / restart check).
 """
 
 from __future__ import annotations
@@ -16,10 +23,18 @@ _ET = ZoneInfo("America/New_York")
 _OPEN = {s.value for s in OPEN_STATES}
 
 
-def _eod_time() -> dtime:
-    raw = os.getenv("EOD_SUMMARY_ET", "16:05")
-    hour, minute = (int(x) for x in raw.split(":", 1))
-    return dtime(hour, minute)
+def _parse_hm(raw: str, default: dtime) -> dtime:
+    try:
+        hour, minute = (int(x) for x in raw.split(":", 1))
+        return dtime(hour, minute)
+    except (ValueError, TypeError):
+        return default
+
+
+def _day_slots() -> tuple[tuple[dtime, str], ...]:
+    sod = _parse_hm(os.getenv("SOD_PENDING_ET", "09:35"), dtime(9, 35))
+    eod = _parse_hm(os.getenv("EOD_PENDING_ET", "16:05"), dtime(16, 5))
+    return (sod, "SOD"), (eod, "EOD")
 
 
 def _pending_option_orders(orders: list[dict]) -> list[dict]:
@@ -58,9 +73,9 @@ def _fmt_pending(o: dict) -> str:
     return f"• {sym} {strat} x{qty:g}{price_s} ({state})"
 
 
-def build_eod_pending_message(*, option_orders: list[dict], as_of: date) -> str:
+def build_pending_message(*, option_orders: list[dict], label: str, as_of: date) -> str:
     pending = _pending_option_orders(option_orders)
-    lines = [f"📋 EOD pending options ({as_of.isoformat()})"]
+    lines = [f"📋 {label} pending options ({as_of.isoformat()})"]
     if pending:
         lines.extend(_fmt_pending(o) for o in pending)
     else:
@@ -68,17 +83,50 @@ def build_eod_pending_message(*, option_orders: list[dict], as_of: date) -> str:
     return "\n".join(lines)
 
 
+def pending_summaries_due(
+    option_orders: list[dict],
+    sent: set[str],
+    *,
+    now: datetime | None = None,
+    include_startup: bool = False,
+) -> tuple[list[str], set[str]]:
+    """Return messages to send this tick and the updated dedupe set."""
+    now = (now or datetime.now(_ET)).astimezone(_ET)
+    messages: list[str] = []
+    new_sent = set(sent)
+
+    if include_startup:
+        key = f"{now.date().isoformat()}@startup-pending"
+        if key not in new_sent:
+            messages.append(build_pending_message(
+                option_orders=option_orders, label="Startup", as_of=now.date(),
+            ))
+            new_sent.add(key)
+
+    if now.weekday() < 5:
+        for slot_time, label in _day_slots():
+            if now.time() < slot_time:
+                continue
+            key = f"{now.date().isoformat()}@{label.lower()}-pending"
+            if key in new_sent:
+                continue
+            messages.append(build_pending_message(
+                option_orders=option_orders, label=label, as_of=now.date(),
+            ))
+            new_sent.add(key)
+
+    return messages, new_sent
+
+
+# Back-compat for tests
+def build_eod_pending_message(*, option_orders: list[dict], as_of: date) -> str:
+    return build_pending_message(option_orders=option_orders, label="EOD", as_of=as_of)
+
+
 def maybe_eod_pending_summary(
     option_orders: list[dict],
     sent: set[str],
     now: datetime | None = None,
 ) -> tuple[str | None, set[str]]:
-    """Return ``(message, updated_sent)`` when today's EOD window is due."""
-    now = (now or datetime.now(_ET)).astimezone(_ET)
-    if now.weekday() >= 5 or now.time() < _eod_time():
-        return None, sent
-    slot = f"{now.date().isoformat()}@eod-pending"
-    if slot in sent:
-        return None, sent
-    msg = build_eod_pending_message(option_orders=option_orders, as_of=now.date())
-    return msg, sent | {slot}
+    msgs, new_sent = pending_summaries_due(option_orders, sent, now=now, include_startup=False)
+    return (msgs[0] if msgs else None), new_sent
