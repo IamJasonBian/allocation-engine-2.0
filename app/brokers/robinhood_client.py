@@ -472,8 +472,12 @@ class RobinhoodTrader(BrokerClient):
                     chain_symbol, expiration, str(strike),
                     option_type, info=None
                 )
-                if market_data and isinstance(market_data, list) and market_data[0]:
-                    md = market_data[0]
+                md = market_data[0] if isinstance(market_data, list) and market_data else None
+                # get_option_market_data wraps get_option_market_data_by_id's
+                # result list in another list: [[{...}]].
+                if isinstance(md, list):
+                    md = md[0] if md else None
+                if md:
                     mark_price = float(md.get("mark_price", purchase_price))
                     for g in ("delta", "gamma", "theta", "vega"):
                         val = md.get(g)
