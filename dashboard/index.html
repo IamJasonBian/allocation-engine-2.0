@@ -168,7 +168,7 @@
 
   <div class="cols">
     <div class="wrap">
-      <div class="eyebrow">Recent equity orders</div>
+      <div class="eyebrow">Recent equity orders · MU 4% / NBIS 6%</div>
       <div class="scroll"><table id="recent-eq"></table></div>
     </div>
     <div class="wrap">
@@ -178,7 +178,7 @@
   </div>
 
   <div class="wrap">
-    <div class="eyebrow">Bot activity</div>
+      <div class="eyebrow">Bot activity · MU / NBIS desk</div>
     <div class="feed" id="activity"></div>
   </div>
 </div>
@@ -189,6 +189,8 @@
   // Override with ?db=<base> to point at a different functions host.
   const DB = new URLSearchParams(location.search).get("db")
           || "https://5thstreetcapital.org/.netlify/functions";
+  const DESK = { MU: 4, NBIS: 6 };
+  const isDesk = s => Object.prototype.hasOwnProperty.call(DESK, String(s || "").toUpperCase());
   const $ = id => document.getElementById(id);
   const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
   const usd = n => (n < 0 ? "−$" : "$") + Math.abs(n).toLocaleString(undefined,
@@ -308,7 +310,8 @@
     const head = kind === "eq"
       ? `<tr><th>symbol</th><th>side</th><th>qty</th><th>price</th><th>state</th><th>when</th></tr>`
       : `<tr><th>symbol</th><th>strategy</th><th>qty</th><th>premium</th><th>state</th><th>when</th></tr>`;
-    $(id).innerHTML = head + rows.slice(0, 12).map(o => {
+    const shown = kind === "eq" ? rows.filter(o => isDesk(o.symbol)) : rows;
+    $(id).innerHTML = head + shown.slice(0, 12).map(o => {
       const when = (o.updated_at ?? o.created_at ?? "").slice(0, 10);
       return kind === "eq"
         ? `<tr><td>${esc(o.symbol)}</td><td>${esc(o.side ?? "")}</td>
@@ -323,7 +326,7 @@
   const stamp = iso => iso ? `${iso.slice(0, 10)} ${iso.slice(11, 16)}` : "—";
 
   function renderActivity(events) {
-    $("activity").innerHTML = events.slice(0, 20).map(e => `
+    $("activity").innerHTML = events.filter(e => isDesk(e.symbol)).slice(0, 20).map(e => `
       <div class="ev">
         <span class="d">${esc(stamp(e.created_at))}</span>
         <span class="t">${esc(e.event_type ?? "")}</span>
