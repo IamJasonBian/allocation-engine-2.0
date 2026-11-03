@@ -1,4 +1,4 @@
-"""POST /api/signals/sell: open intake, always alerts, only token-holders execute."""
+"""POST /api/signals/{buy,sell}: open intake, always alerts, only token-holders execute."""
 
 import pytest
 from flask import Flask
@@ -12,8 +12,11 @@ SIG = {"symbol": "mu", "quantity": 2, "source": "ext-bot", "reason": "rsi>80"}
 
 
 class FakeBroker:
-    def __init__(self, held=5.0, result=None):
-        self.held, self.result, self.submitted = held, result, []
+    def __init__(self, held=5.0, result=None, bp=1000.0):
+        self.held, self.result, self.submitted, self.bp = held, result, [], bp
+
+    def account(self):
+        return {"buying_power": self.bp}
 
     def positions(self):
         return [{"symbol": "MU", "qty": self.held}]
@@ -100,8 +103,54 @@ def test_broker_rejection_is_alerted(env):
 
 @pytest.mark.parametrize("bad", [{}, {"symbol": "MU"}, {"symbol": "MU", "quantity": -1},
                                  {"symbol": "M;U", "quantity": 1},
-                                 {"symbol": "MU", "quantity": "x"}])
+                                 {"symbol": "MU", "quantity": "x"},
+                                 {"symbol": "MU", "quantity": "inf"},
+                                 {"symbol": "MU", "quantity": 1, "limit_price": 0}])
 def test_bad_input_is_400(env, bad):
     client, alerts, _ = env
     assert client().post("/api/signals/sell", json=bad).status_code == 400
     assert alerts == []
+
+
+def test_unknown_side_is_404(env):
+    client, alerts, _ = env
+    assert client().post("/api/signals/short", json=SIG).status_code == 404
+    assert alerts == []
+
+
+def test_unauthorized_buy_alerts_and_never_trades(env):
+    client, alerts, broker = env
+    r = client().post("/api/signals/buy", json={**SIG, "limit_price": 100})
+    body = r.get_json()
+    assert r.status_code == 202 and body["strategy"] == "alert_only"
+    assert broker.submitted == []
+    assert alerts[-1].startswith("[buy-signal] BUY 2.0 MU @ 100.0") and "UNAUTHORIZED" in alerts[-1]
+
+
+def test_authorized_buy_within_buying_power_submits(env):
+    client, alerts, broker = env
+    r = client().post("/api/signals/buy", json={**SIG, "limit_price": 100}, headers=AUTH)
+    body = r.get_json()
+    assert body["status"] == "submitted"
+    assert broker.submitted[0]["side"] == "BUY" and broker.submitted[0]["order_type"] == "limit"
+    assert "submitted ord-1" in alerts[-1]
+
+
+def test_buy_over_buying_power_is_refused(env):
+    client, alerts, broker = env
+    r = client().post("/api/signals/buy", json={**SIG, "limit_price": 600}, headers=AUTH)
+    assert r.get_json()["executed"] is False and broker.submitted == []
+    assert "buying power 1000.00" in alerts[-1]
+
+
+def test_market_buy_is_refused(env):
+    client, alerts, broker = env
+    r = client().post("/api/signals/buy", json=SIG, headers=AUTH)
+    assert r.get_json()["executed"] is False and broker.submitted == []
+    assert "need a limit_price" in alerts[-1]
+
+
+def test_buy_dry_run_simulates(env):
+    client, _, broker = env
+    r = client(dry_run=True).post("/api/signals/buy", json={**SIG, "limit_price": 100}, headers=AUTH)
+    assert r.get_json()["status"] == "simulated" and broker.submitted == []
