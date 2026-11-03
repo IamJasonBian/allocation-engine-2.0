@@ -148,32 +148,6 @@ class IBKRTrader(BrokerClient):
             })
         return out
 
-    def portfolio_detail(self) -> list[dict]:
-        """Portfolio rows with contract detail preserved (options included).
-
-        positions() flattens to the cross-broker shape and drops option
-        fields; the wheel-lanes view needs sec_type/right/strike/expiry to
-        tell a short put from a covered call, so this keeps them.
-        """
-        ib = self._connect()
-        out = []
-        for item in ib.portfolio():
-            contract = item.contract
-            sec_type = getattr(contract, "secType", None)
-            out.append({
-                "symbol": contract.symbol,
-                "sec_type": sec_type,
-                "right": getattr(contract, "right", None) if sec_type == "OPT" else None,
-                "strike": float(contract.strike) if sec_type == "OPT" else None,
-                "expiry": getattr(contract, "lastTradeDateOrContractMonth", None)
-                          if sec_type == "OPT" else None,
-                "qty": float(item.position),
-                "avg_cost": float(item.averageCost),
-                "market_value": float(item.marketValue),
-                "unrealized_pl": float(item.unrealizedPNL),
-            })
-        return out
-
     def session_trades(self) -> list[dict]:
         """Every order this API session has seen (open and terminal), for the
         order funnel. Scope is the session: IBKR replays only this clientId's
