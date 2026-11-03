@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 
 import robin_stocks.robinhood as rh
 
-from app.brokers.base import BrokerClient
+from app.brokers.base import BrokerClient, BrokerReadError
 from app.enums import OrderType
 from app.pnl import compute_pnl
 from app.storage import get_trade_fills
@@ -410,16 +410,26 @@ class RobinhoodTrader(BrokerClient):
         Entry premium is Robinhood's lot ``average_price`` on
         ``GET options/positions/`` (cents → ``purchase_price`` dollars).
         Mark/greeks come from RH option market data — never derived in UI.
+
+        Returns:
+            Position dicts. Each carries ``option_id`` and ``mark_ok`` (False when
+            the mark fell back to purchase price or is <= 0). A position whose
+            instrument lookup fails is logged and left out of this pass.
+
+        Raises:
+            BrokerReadError: The positions call raised or returned None. A real
+                empty book is still ``[]``.
         """
         self._ensure_auth()
         try:
             raw = rh.options.get_open_option_positions()
-        except Exception:
-            log.exception("Failed to fetch options positions")
-            return []
+        except Exception as e:
+            raise BrokerReadError(f"get_open_option_positions failed: {e}") from e
+        if raw is None:
+            raise BrokerReadError("get_open_option_positions returned None")
 
         result = []
-        for pos in (raw or []):
+        for pos in raw:
             if not isinstance(pos, dict):
                 continue
             qty = float(pos.get("quantity", 0))
@@ -440,9 +450,15 @@ class RobinhoodTrader(BrokerClient):
                 try:
                     option_data = rh.options.get_option_instrument_data_by_id(
                         pos.get("option_id", "")
-                    ) or {}
-                except Exception:
-                    pass
+                    )
+                    lookup_err = None if option_data else "empty response"
+                except Exception as e:
+                    lookup_err = f"{type(e).__name__}: {e}"
+                if lookup_err:
+                    log.warning("[rh] option instrument lookup failed for option_id=%s "
+                                "(%s); skipping position this pass",
+                                pos.get("option_id"), lookup_err)
+                    continue
 
             strike = float(option_data.get("strike_price", 0))
             expiration = option_data.get("expiration_date", "")
@@ -525,6 +541,8 @@ class RobinhoodTrader(BrokerClient):
             unrealized_pl = current_value - cost_basis
 
             result.append({
+                "option_id": pos.get("option_id", ""),
+                "mark_ok": mark_err is None and mark_price > 0,
                 "chain_symbol": chain_symbol,
                 "option_type": option_type,        # call/put (contract kind)
                 "position_type": position_type,    # long/short (direction)

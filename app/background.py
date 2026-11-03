@@ -178,7 +178,6 @@ def run_engine_loop(app):
         put_order_snapshot as put_option_order_snapshot,
     )
     from app.slack import notify as slack_notify
-    from app.risk.observer import RiskSubject
     from app.risk.mental_stops import check_mental_stops
     from app.risk.slack_observer import SlackAlertObserver
     from app.trading_db import post_orders, post_positions
@@ -202,8 +201,15 @@ def run_engine_loop(app):
 
     # Option P&L alerts (mental-stop tiers -25/-40/-60/-80%) go to Telegram
     # (app/slack.py): once per tier, re-armed after a 10-point recovery.
-    risk_subject = RiskSubject()
-    risk_subject.attach(SlackAlertObserver())
+    alert_observer = SlackAlertObserver()
+
+    def _deliver_alert(event) -> bool:
+        try:
+            return bool(alert_observer.on_risk_event(event))
+        except Exception:
+            log.exception("Mental-stop alert send failed for %s", event.symbol)
+            return False
+
     mental_state: dict[str, int] = {}
     pending_summary_sent: set[str] = set()
     pending_startup_ping = True
@@ -246,12 +252,18 @@ def run_engine_loop(app):
                 log.exception("[stop-sweeper] sweep failed: %s", sweep_err)
 
             options_positions = []
+            options_read_ok = True
             options_open_orders: list[OrderEvent] = []
             if hasattr(broker, "options_positions"):
                 try:
                     options_positions = broker.options_positions()
                 except Exception:
-                    log.exception("Failed to fetch options positions")
+                    # An empty list here would read as "no positions": the
+                    # whole-book Trading DB replace would delete them.
+                    options_read_ok = False
+                    log.exception("Failed to fetch options positions; skipping mental "
+                                  "stops, pending summaries and Trading DB position "
+                                  "sync this pass")
             if hasattr(broker, "options_orders"):
                 try:
                     for oo in broker.options_orders(limit=200, open_only=True):
@@ -259,26 +271,26 @@ def run_engine_loop(app):
                 except Exception:
                     log.exception("Failed to fetch options orders")
 
-            try:
-                ms_events, mental_state = check_mental_stops(options_positions, mental_state)
-                for e in ms_events:
-                    risk_subject.notify(e)
-            except Exception:
-                log.exception("Option mental-stop check failed")
+            if options_read_ok:
+                try:
+                    _, mental_state = check_mental_stops(
+                        options_positions, mental_state, send=_deliver_alert)
+                except Exception:
+                    log.exception("Option mental-stop check failed")
 
-            try:
-                from app.risk.eod_summary import pending_summaries_due
+                try:
+                    from app.risk.eod_summary import pending_summaries_due
 
-                pending_msgs, pending_summary_sent = pending_summaries_due(
-                    [dict(o) for o in options_open_orders],
-                    pending_summary_sent,
-                    include_startup=pending_startup_ping,
-                )
-                pending_startup_ping = False
-                for text in pending_msgs:
-                    slack_notify(text, bypass_debounce=True)
-            except Exception:
-                log.exception("Pending option summary failed")
+                    pending_msgs, pending_summary_sent = pending_summaries_due(
+                        [dict(o) for o in options_open_orders],
+                        pending_summary_sent,
+                        include_startup=pending_startup_ping,
+                    )
+                    pending_startup_ping = False
+                    for text in pending_msgs:
+                        slack_notify(text, bypass_debounce=True)
+                except Exception:
+                    log.exception("Pending option summary failed")
 
             try:
                 maybe_option_take_profit_sweep(config, opt_tp_sweep_state)
@@ -345,7 +357,10 @@ def run_engine_loop(app):
                 # Never publish a book that looks like a failed read —
                 # post_positions is a whole-book replace, so that would prune
                 # every row the dashboard renders.
-                if book_looks_unreadable(positions, options_positions, account):
+                if not options_read_ok:
+                    log.warning("[trading-db] skipping position sync — options "
+                                "positions read failed this pass")
+                elif book_looks_unreadable(positions, options_positions, account):
                     log.warning(
                         "[trading-db] skipping position sync — broker "
                         "returned no positions and a zeroed account "

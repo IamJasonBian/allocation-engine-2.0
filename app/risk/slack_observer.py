@@ -46,11 +46,18 @@ class SlackAlertObserver(RiskObserver):
     def update(self, symbol: str, price: float) -> None:
         pass
 
-    def on_risk_event(self, event: RiskEvent) -> None:
+    def on_risk_event(self, event: RiskEvent) -> bool:
+        """Send ``event`` to Telegram.
+
+        Args:
+            event: The risk event to post.
+
+        Returns:
+            True only when the message was delivered (see ``app.slack.notify``).
+        """
         option_text = _option_text(event)
         if option_text:
-            _notify(option_text, bypass_debounce=True)
-            return
+            return _notify(option_text, bypass_debounce=True)
         prefix = _SEVERITY_PREFIX.get(event.severity, "")
         text = (
             f"{prefix} Risk DQ — {event.event_type.value.replace('_', ' ').title()}\n"
@@ -60,4 +67,4 @@ class SlackAlertObserver(RiskObserver):
             f"Snapshot: {event.snapshot_key or 'n/a'}\n"
             f"{event.message}"
         )
-        _notify(text, bypass_debounce=(event.severity == "critical"))
+        return _notify(text, bypass_debounce=(event.severity == "critical"))

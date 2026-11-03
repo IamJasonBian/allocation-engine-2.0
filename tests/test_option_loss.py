@@ -47,9 +47,12 @@ def test_telegram_observer_formats_mental_stop(monkeypatch):
     from app.risk import slack_observer
     from app.risk.mental_stops import check_mental_stops
     sent = []
-    monkeypatch.setattr(slack_observer, "_notify", lambda text, **kw: sent.append(text))
-    ev, _ = check_mental_stops([_opt(2.08, 0.95)], {}, date(2026, 11, 3))
-    slack_observer.SlackAlertObserver().on_risk_event(ev[0])
+    monkeypatch.setattr(slack_observer, "_notify",
+                        lambda text, **kw: sent.append(text) or True)
+    observer = slack_observer.SlackAlertObserver()
+    ev, st = check_mental_stops([{**_opt(2.08, 0.95), "option_id": "spy-id", "mark_ok": True}],
+                                {}, date(2026, 11, 3), send=observer.on_risk_event)
+    assert len(ev) == 1 and st == {"spy-id": 1}
     assert sent[0] == (
         "🐧 SPY CALL 500.0 2026-10-17 x2\n"
         "Buy $2.08 → Now $0.95 (-54%, $-226)"

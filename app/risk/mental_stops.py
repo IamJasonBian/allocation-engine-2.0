@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 import os
 from datetime import date
+from typing import Callable
 
 from app.enums import RiskEventType
 from app.risk.events import RiskEvent
@@ -40,6 +41,10 @@ def group_positions(options_positions: list[dict]) -> list[dict]:
     Args:
         options_positions: Dicts from ``broker.options_positions()``.
 
+    Units are keyed by ``option_id`` (a spread by ``"<long_id>/<short_id>"``);
+    ``label`` is the readable name for alert text. A unit with any leg whose
+    mark is not ``mark_ok`` is left out: a fallback mark is not a real P&L.
+
     Returns:
         Dicts with key, label, qty, cost and mark (per share, USD).
     """
@@ -56,30 +61,42 @@ def group_positions(options_positions: list[dict]) -> list[dict]:
             cost = _num(lp.get("purchase_price")) - _num(match.get("purchase_price"))
             mark = _num(lp.get("mark_price")) - _num(match.get("mark_price"))
             used.add(id(match))
-            key = f"{sym} {str(kind).upper()} {lp.get('strike')}/{match.get('strike')} {exp} SPREAD"
+            key = f"{lp.get('option_id')}/{match.get('option_id')}"
+            label = f"{sym} {str(kind).upper()} {lp.get('strike')}/{match.get('strike')} {exp} SPREAD"
         else:
             cost, mark = _num(lp.get("purchase_price")), _num(lp.get("mark_price"))
-            key = f"{sym} {str(kind).upper()} {lp.get('strike')} {exp}"
-        if cost > 0 and lp.get("mark_price") is not None:
-            units.append({"key": key, "qty": qty, "cost": cost, "mark": mark})
+            key = str(lp.get("option_id"))
+            label = f"{sym} {str(kind).upper()} {lp.get('strike')} {exp}"
+        if not all(p.get("mark_ok") is True for p in (lp, match) if p is not None):
+            log.info("[mental-stops] %s skipped this pass: mark unavailable", label)
+            continue
+        if cost > 0:
+            units.append({"key": key, "label": label, "qty": qty, "cost": cost, "mark": mark})
     return units
 
 
 def check_mental_stops(options_positions: list[dict], alerted: dict[str, int],
-                       today: date | None = None) -> tuple[list[RiskEvent], dict[str, int]]:
-    """Return newly crossed P&L-tier events and the updated per-position state.
+                       today: date | None = None, *,
+                       send: Callable[[RiskEvent], bool]) -> tuple[list[RiskEvent], dict[str, int]]:
+    """Send newly crossed P&L-tier alerts and return the updated per-position state.
+
+    A tier is recorded as alerted only when ``send`` returns True, so a failed
+    or suppressed send alerts again next pass. Keys not seen this pass (closed,
+    or left out because their data was missing) keep their previous state.
 
     Args:
         options_positions: Dicts from ``broker.options_positions()``.
         alerted: Deepest tier index alerted per position key (-1 = none).
         today: Override for the current date (tests).
+        send: Delivers one event; returns True when it was delivered.
 
     Returns:
-        ``(events, new_alerted)``; empty and unchanged after the cutoff date.
+        ``(events, new_alerted)`` where ``events`` are the crossings attempted
+        this pass; empty and unchanged after the cutoff date.
     """
     if (today or date.today()) > _until():
         return [], alerted
-    events, state = [], {}
+    events, state = [], dict(alerted)
     for u in group_positions(options_positions):
         loss = (u["cost"] - u["mark"]) / u["cost"]
         prev = alerted.get(u["key"], -1)
@@ -88,14 +105,19 @@ def check_mental_stops(options_positions: list[dict], alerted: dict[str, int],
             prev -= 1                                   # recovered: re-arm
         if reached > prev:
             usd = (u["mark"] - u["cost"]) * 100 * u["qty"]
-            events.append(RiskEvent(
-                event_type=RiskEventType.OPTION_MENTAL_STOP, symbol=u["key"],
+            event = RiskEvent(
+                event_type=RiskEventType.OPTION_MENTAL_STOP, symbol=u["label"],
                 drift_pct=max(loss, 0.15 if reached >= 1 else 0.0),
-                message=(f"Mental stop {TIERS[reached]:.0%}: {u['key']} x{u['qty']:g} "
+                message=(f"Mental stop {TIERS[reached]:.0%}: {u['label']} x{u['qty']:g} "
                          f"cost ${u['cost']:.2f} -> mark ${u['mark']:.2f} "
                          f"({-loss:+.0%}, ${usd:+,.0f}). Alert only — nothing sold."),
-                metadata={"tier": TIERS[reached], "pnl_usd": round(usd, 2),
-                          "cost": u["cost"], "mark": u["mark"], "quantity": u["qty"]}))
-            prev = reached
+                metadata={"tier": TIERS[reached], "pnl_usd": round(usd, 2), "key": u["key"],
+                          "cost": u["cost"], "mark": u["mark"], "quantity": u["qty"]})
+            events.append(event)
+            if send(event):
+                prev = reached
+            else:
+                log.warning("[mental-stops] alert for %s not delivered; will retry next pass",
+                            u["label"])
         state[u["key"]] = prev
     return events, state
