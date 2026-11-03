@@ -1,4 +1,7 @@
-"""POST /api/signals/{buy,sell}: open intake, always alerts, only token-holders execute."""
+"""POST /api/signals/{buy,sell}: notify-only handler chain keyed by caller GUID."""
+
+import uuid
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from flask import Flask
@@ -8,149 +11,119 @@ from app.api import register_blueprints
 
 TOKEN = "t0ken"
 AUTH = {"Authorization": f"Bearer {TOKEN}"}
-SIG = {"symbol": "mu", "quantity": 2, "source": "ext-bot", "reason": "rsi>80"}
 
 
-class FakeBroker:
-    def __init__(self, held=5.0, result=None, bp=1000.0):
-        self.held, self.result, self.submitted, self.bp = held, result, [], bp
-
-    def account(self):
-        return {"buying_power": self.bp}
-
-    def positions(self):
-        return [{"symbol": "MU", "qty": self.held}]
-
-    def submit_order(self, order):
-        self.submitted.append(order)
-        return self.result
+def sig(**over):
+    body = {"signal_id": str(uuid.uuid4()), "symbol": "mu", "quantity": 2,
+            "source": "ext-bot", "reason": "rsi>80"}
+    body.update(over)
+    return body
 
 
 @pytest.fixture
 def env(monkeypatch):
-    alerts, broker = [], FakeBroker(result={"id": "ord-1"})
+    alerts = []
     monkeypatch.setattr(signals, "notify", lambda m, **k: alerts.append(m))
-    monkeypatch.setattr("app.api.signals.get_broker", lambda name: broker)
+    signals.MEMORY.clear()
 
-    def client(mode="execute", dry_run=False, token=TOKEN):
+    def client(**cfg):
         app = Flask(__name__)
         register_blueprints(app)
-        app.config.update(DEFAULT_BROKER="robinhood", DRY_RUN=dry_run,
-                          SELL_SIGNAL_MODE=mode, DASHBOARD_REQUEST_TOKEN=token)
+        app.config.update(DASHBOARD_REQUEST_TOKEN=TOKEN, **cfg)
         return app.test_client()
-    return client, alerts, broker
+    yield client, alerts
+    signals.MEMORY.clear()
 
 
-def test_unauthorized_signal_alerts_and_never_trades(env):
-    client, alerts, broker = env
-    r = client().post("/api/signals/sell", json=SIG)
-    body = r.get_json()
+def test_alert_carries_guid_and_result_echoes_it(env):
+    client, alerts = env
+    body = sig()
+    r = client().post("/api/signals/sell", json=body)
+    out = r.get_json()
     assert r.status_code == 202
-    assert body["authorized"] is False and body["strategy"] == "alert_only"
-    assert broker.submitted == []
-    assert len(alerts) == 1 and "UNAUTHORIZED" in alerts[0] and "ext-bot" in alerts[0]
+    assert out["signal_id"] == body["signal_id"] and out["status"] == "alerted"
+    assert out["handlers"] == ["dedupe", "freshness", "cooldown", "alert"]
+    assert len(alerts) == 1 and f"id={body['signal_id']}" in alerts[0]
+    assert alerts[0].startswith("[sell-signal] SELL 2 MU @ market from ext-bot [UNAUTHORIZED]")
 
 
-def test_wrong_token_is_unauthorized(env):
-    client, _, broker = env
-    r = client().post("/api/signals/sell", json=SIG, headers={"Authorization": "Bearer nope"})
-    assert r.get_json()["authorized"] is False and broker.submitted == []
+def test_buy_with_limit_and_hours_and_token(env):
+    client, alerts = env
+    r = client().post("/api/signals/buy", headers=AUTH,
+                      json=sig(limit_price=950, market_hours="extended_hours"))
+    assert r.get_json()["authorized"] is True
+    assert "BUY 2 MU @ 950.0 (extended_hours)" in alerts[0] and "[authorized]" in alerts[0]
 
 
-def test_unset_token_means_nobody_is_authorized(env):
-    client, _, broker = env
-    r = client(token="").post("/api/signals/sell", json=SIG, headers={"Authorization": "Bearer "})
-    assert r.get_json()["authorized"] is False and broker.submitted == []
+@pytest.mark.parametrize("bad_id", [None, "", "not-a-guid", "123"])
+def test_signal_id_required_guid(env, bad_id):
+    client, alerts = env
+    body = sig()
+    body["signal_id"] = bad_id
+    assert client().post("/api/signals/sell", json=body).status_code == 400
+    assert alerts == []
 
 
-def test_authorized_alert_mode_does_not_trade(env):
-    client, alerts, broker = env
-    r = client(mode="alert").post("/api/signals/sell", json=SIG, headers=AUTH)
-    assert r.get_json()["strategy"] == "alert_only" and broker.submitted == []
-    assert alerts
+def test_duplicate_guid_returns_original_without_new_alert(env):
+    client, alerts = env
+    body = sig()
+    first = client().post("/api/signals/sell", json=body).get_json()
+    again = client().post("/api/signals/sell", json=body).get_json()
+    assert again["duplicate"] is True and again["signal_id"] == first["signal_id"]
+    assert again["status"] == first["status"] and len(alerts) == 1
 
 
-def test_authorized_execute_submits_sell(env):
-    client, alerts, broker = env
-    r = client().post("/api/signals/sell", json={**SIG, "limit_price": 1000}, headers=AUTH)
-    body = r.get_json()
-    assert body["status"] == "submitted" and body["orderId"] == "ord-1"
-    assert broker.submitted[0]["side"] == "SELL"
-    assert broker.submitted[0]["order_type"] == "limit"
-    assert broker.submitted[0]["symbol"] == "MU"
-    assert "submitted ord-1" in alerts[-1]
+def test_cooldown_suppresses_same_side_symbol_then_reports_count(env, monkeypatch):
+    client, alerts = env
+    c = client(SIGNAL_COOLDOWN_SECONDS=300)
+    assert c.post("/api/signals/sell", json=sig()).get_json()["status"] == "alerted"
+    for n in (1, 2):
+        out = c.post("/api/signals/sell", json=sig()).get_json()
+        assert out["status"] == "suppressed" and out["repeats_in_window"] == n
+    assert len(alerts) == 1
+    # opposite side and other symbols are independent
+    assert c.post("/api/signals/buy", json=sig()).get_json()["status"] == "alerted"
+    assert c.post("/api/signals/sell", json=sig(symbol="NBIS")).get_json()["status"] == "alerted"
+    # after the window, the next alert reports what was suppressed
+    real = signals.time.time
+    monkeypatch.setattr(signals.time, "time", lambda: real() + 301)
+    assert c.post("/api/signals/sell", json=sig()).get_json()["status"] == "alerted"
+    assert "(+2 repeats suppressed)" in alerts[-1]
 
 
-def test_execute_respects_dry_run(env):
-    client, _, broker = env
-    r = client(dry_run=True).post("/api/signals/sell", json=SIG, headers=AUTH)
-    assert r.get_json()["status"] == "simulated" and broker.submitted == []
+def test_expired_signal_is_alerted_as_expired_and_does_not_cool(env):
+    client, alerts = env
+    past = (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat()
+    out = client().post("/api/signals/sell", json=sig(expires_at=past)).get_json()
+    assert out["status"] == "expired" and "EXPIRED" in alerts[-1]
+    assert client().post("/api/signals/sell", json=sig()).get_json()["status"] == "alerted"
 
 
-def test_execute_refuses_to_oversell(env):
-    client, alerts, broker = env
-    r = client().post("/api/signals/sell", json={**SIG, "quantity": 99}, headers=AUTH)
-    assert r.get_json()["executed"] is False and broker.submitted == []
-    assert "held 5.0" in alerts[-1]
+def test_default_expiry_is_ttl_after_receipt(env):
+    client, _ = env
+    out = client(SIGNAL_TTL_SECONDS=300).post("/api/signals/sell", json=sig()).get_json()
+    exp = datetime.fromisoformat(out["expires_at"])
+    left = (exp - datetime.now(timezone.utc)).total_seconds()
+    assert 290 < left <= 300
 
 
-def test_broker_rejection_is_alerted(env):
-    client, alerts, broker = env
-    broker.result = None
-    r = client().post("/api/signals/sell", json=SIG, headers=AUTH)
-    assert r.get_json()["status"] == "rejected" and "REJECTED" in alerts[-1]
-
-
-@pytest.mark.parametrize("bad", [{}, {"symbol": "MU"}, {"symbol": "MU", "quantity": -1},
-                                 {"symbol": "M;U", "quantity": 1},
-                                 {"symbol": "MU", "quantity": "x"},
-                                 {"symbol": "MU", "quantity": "inf"},
-                                 {"symbol": "MU", "quantity": 1, "limit_price": 0}])
-def test_bad_input_is_400(env, bad):
-    client, alerts, _ = env
-    assert client().post("/api/signals/sell", json=bad).status_code == 400
+def test_unknown_listener_fails_loudly(env):
+    client, alerts = env
+    r = client(SIGNAL_HANDLERS="alert,execute").post("/api/signals/sell", json=sig())
+    assert r.status_code == 500 and "unknown SIGNAL_HANDLERS" in r.get_json()["error"]
     assert alerts == []
 
 
 def test_unknown_side_is_404(env):
-    client, alerts, _ = env
-    assert client().post("/api/signals/short", json=SIG).status_code == 404
+    client, alerts = env
+    assert client().post("/api/signals/short", json=sig()).status_code == 404
     assert alerts == []
 
 
-def test_unauthorized_buy_alerts_and_never_trades(env):
-    client, alerts, broker = env
-    r = client().post("/api/signals/buy", json={**SIG, "limit_price": 100})
-    body = r.get_json()
-    assert r.status_code == 202 and body["strategy"] == "alert_only"
-    assert broker.submitted == []
-    assert alerts[-1].startswith("[buy-signal] BUY 2.0 MU @ 100.0") and "UNAUTHORIZED" in alerts[-1]
-
-
-def test_authorized_buy_within_buying_power_submits(env):
-    client, alerts, broker = env
-    r = client().post("/api/signals/buy", json={**SIG, "limit_price": 100}, headers=AUTH)
-    body = r.get_json()
-    assert body["status"] == "submitted"
-    assert broker.submitted[0]["side"] == "BUY" and broker.submitted[0]["order_type"] == "limit"
-    assert "submitted ord-1" in alerts[-1]
-
-
-def test_buy_over_buying_power_is_refused(env):
-    client, alerts, broker = env
-    r = client().post("/api/signals/buy", json={**SIG, "limit_price": 600}, headers=AUTH)
-    assert r.get_json()["executed"] is False and broker.submitted == []
-    assert "buying power 1000.00" in alerts[-1]
-
-
-def test_market_buy_is_refused(env):
-    client, alerts, broker = env
-    r = client().post("/api/signals/buy", json=SIG, headers=AUTH)
-    assert r.get_json()["executed"] is False and broker.submitted == []
-    assert "need a limit_price" in alerts[-1]
-
-
-def test_buy_dry_run_simulates(env):
-    client, _, broker = env
-    r = client(dry_run=True).post("/api/signals/buy", json={**SIG, "limit_price": 100}, headers=AUTH)
-    assert r.get_json()["status"] == "simulated" and broker.submitted == []
+@pytest.mark.parametrize("over", [{"symbol": "M;U"}, {"quantity": -1}, {"quantity": "x"},
+                                  {"quantity": "inf"}, {"limit_price": 0},
+                                  {"market_hours": "weekend"}, {"expires_at": "soon"}])
+def test_bad_input_is_400(env, over):
+    client, alerts = env
+    assert client().post("/api/signals/sell", json=sig(**over)).status_code == 400
+    assert alerts == []

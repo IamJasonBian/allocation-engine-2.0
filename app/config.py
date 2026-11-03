@@ -54,10 +54,12 @@ class Config:
     # same scheme as the render-logs netlify function. Fail closed: unset means
     # those routes refuse to run.
     DASHBOARD_REQUEST_TOKEN = os.getenv("DASHBOARD_REQUEST_TOKEN", "")
-    # External signals (POST /api/signals/{buy,sell}): "alert" never trades;
-    # "execute" lets token-holders sell up to the held qty and buy at a limit
-    # within buying power. Unauthorized signals are alert-only either way.
-    SELL_SIGNAL_MODE = os.getenv("SELL_SIGNAL_MODE", "alert").strip().lower()
+    # External signals (POST /api/signals/{buy,sell}), notify-only. Listeners
+    # run in order after the built-in dedupe/freshness/cooldown guards.
+    SIGNAL_HANDLERS = os.getenv("SIGNAL_HANDLERS", "alert")
+    SIGNAL_TTL_SECONDS = int(os.getenv("SIGNAL_TTL_SECONDS", "300"))
+    SIGNAL_COOLDOWN_SECONDS = int(os.getenv("SIGNAL_COOLDOWN_SECONDS", "300"))
+    SIGNAL_DEDUPE_SECONDS = int(os.getenv("SIGNAL_DEDUPE_SECONDS", "86400"))
 
     # -- Trailing-stop sweeper (runs in the background engine loop) --
     # Universe beyond current positions; comma-separated symbols.
