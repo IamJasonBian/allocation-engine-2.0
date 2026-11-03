@@ -1,7 +1,7 @@
-"""Telegram notifications via bot API.
+"""Outbound alert notifications (currently delivered via the Telegram bot API).
 
-Module name and `notify(message)` signature preserved for import-stability with
-existing call sites in app.brokers.robinhood_client and app.background.
+Call sites use `notify(message)`; the transport lives here so it can change
+without touching them.
 """
 
 import hashlib
