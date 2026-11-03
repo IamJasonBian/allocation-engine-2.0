@@ -54,3 +54,12 @@ def test_profit_and_flat_do_not_alert():
 def test_off_after_cutoff_and_never_trades():
     ev, st = check_mental_stops([opt("NBIS", 230, 2.0, 0.2)], {"x": 1}, date(2026, 11, 24))
     assert ev == [] and st == {"x": 1}
+
+
+def test_first_tier_is_minus_25_and_one_alert_per_level():
+    _, st = check_mental_stops([opt("NBIS", 230, 3.42, 2.40)], {}, D)          # -30%
+    assert st["NBIS CALL 230 2026-11-20"] == 0
+    ev, _ = check_mental_stops([opt("NBIS", 230, 3.42, 2.40)], st, D)
+    assert ev == []                                                          # no repeat
+    ev, _ = check_mental_stops([opt("NBIS", 230, 3.42, 2.40)], {}, D)
+    assert len(ev) == 1 and ev[0].metadata["tier"] == 0.25
