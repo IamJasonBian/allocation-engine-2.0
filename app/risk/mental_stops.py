@@ -14,6 +14,7 @@ from datetime import date
 
 from app.enums import RiskEventType
 from app.risk.events import RiskEvent
+from app.risk.theta_burn import net_theta_burn
 
 log = logging.getLogger(__name__)
 
@@ -52,6 +53,7 @@ def group_positions(options_positions: list[dict]) -> list[dict]:
         match = next((s for s in shorts if id(s) not in used
                       and (s.get("chain_symbol"), s.get("option_type"), s.get("expiration"))
                       == (sym, kind, exp) and _num(s.get("quantity")) == qty), None)
+        theta_usd = net_theta_burn(lp, match)
         if match is not None:
             cost = _num(lp.get("purchase_price")) - _num(match.get("purchase_price"))
             mark = _num(lp.get("mark_price")) - _num(match.get("mark_price"))
@@ -61,7 +63,8 @@ def group_positions(options_positions: list[dict]) -> list[dict]:
             cost, mark = _num(lp.get("purchase_price")), _num(lp.get("mark_price"))
             key = f"{sym} {str(kind).upper()} {lp.get('strike')} {exp}"
         if cost > 0 and lp.get("mark_price") is not None:
-            units.append({"key": key, "qty": qty, "cost": cost, "mark": mark})
+            units.append({"key": key, "qty": qty, "cost": cost, "mark": mark,
+                          "theta_usd": theta_usd})
     return units
 
 
@@ -95,7 +98,8 @@ def check_mental_stops(options_positions: list[dict], alerted: dict[str, int],
                          f"cost ${u['cost']:.2f} -> mark ${u['mark']:.2f} "
                          f"({-loss:+.0%}, ${usd:+,.0f}). Alert only — nothing sold."),
                 metadata={"tier": TIERS[reached], "pnl_usd": round(usd, 2),
-                          "cost": u["cost"], "mark": u["mark"], "quantity": u["qty"]}))
+                          "cost": u["cost"], "mark": u["mark"], "quantity": u["qty"],
+                          "theta_usd": u["theta_usd"]}))
             prev = reached
         state[u["key"]] = prev
     return events, state

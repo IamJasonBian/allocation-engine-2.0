@@ -221,6 +221,7 @@ def run_engine_loop(app):
     from app.risk.option_coverage import (
         coverage_line, position_change_alerts, unmonitored_alerts,
     )
+    from app.risk.theta_burn import book_theta_text, theta_burn_alerts
     from app.risk.slack_observer import SlackAlertObserver
     from app.trading_db import post_orders, post_positions
     from app.utils_shared import (
@@ -253,6 +254,7 @@ def run_engine_loop(app):
     pending_startup_ping = True
     seen_option_positions: dict[str, float] | None = None
     unmonitored_sent: set[str] = set()
+    theta_sent: set[str] = set()
 
     log.info(
         "[engine] worker loop started (interval=%ds, dry_run=%s, broker=%s, "
@@ -323,6 +325,17 @@ def run_engine_loop(app):
             except Exception:
                 log.exception("Option coverage alerts failed")
 
+            if config["OPTION_THETA_BURN_ENABLED"]:
+                try:
+                    theta_msgs, theta_sent = theta_burn_alerts(
+                        options_positions, theta_sent,
+                        burn_pct=config["OPTION_THETA_BURN_PCT"],
+                        dte_warn=config["OPTION_THETA_DTE_WARN"])
+                    for text in theta_msgs:
+                        slack_notify(text, bypass_debounce=True)
+                except Exception:
+                    log.exception("Option theta-burn alerts failed")
+
             try:
                 from app.risk.eod_summary import pending_summaries_due
 
@@ -330,9 +343,11 @@ def run_engine_loop(app):
                     [dict(o) for o in options_open_orders],
                     pending_summary_sent,
                     include_startup=pending_startup_ping,
-                    coverage=coverage_line(
-                        options_positions,
-                        [dict(o) for o in options_open_orders] if option_orders_ok else None),
+                    coverage=" · ".join(filter(None, (
+                        coverage_line(
+                            options_positions,
+                            [dict(o) for o in options_open_orders] if option_orders_ok else None),
+                        book_theta_text(options_positions)))),
                 )
                 pending_startup_ping = False
                 for text in pending_msgs:

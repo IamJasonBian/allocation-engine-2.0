@@ -10,6 +10,7 @@ import logging
 
 from app.risk.events import RiskEvent
 from app.risk.observer import RiskObserver
+from app.risk.theta_burn import theta_text
 from app.slack import notify as _notify
 
 log = logging.getLogger(__name__)
@@ -30,9 +31,11 @@ def _option_text(event: RiskEvent) -> str | None:
         return None
     buy, now, qty = float(buy), float(now), float(m.get("quantity") or 0)
     usd = (now - buy) * 100 * qty
+    theta = theta_text(m.get("theta_usd"))
     return (
         f"🐧 {event.symbol} x{qty:g}\n"
         f"Buy ${buy:.2f} → Now ${now:.2f} ({(now - buy) / buy:+.0%}, ${usd:+,.0f})"
+        + (f" · {theta}" if theta else "")
     )
 
 
