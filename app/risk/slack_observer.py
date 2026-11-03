@@ -30,10 +30,10 @@ def _option_text(event: RiskEvent) -> str | None:
         return None
     buy, now, qty = float(buy), float(now), float(m.get("quantity") or 0)
     usd = (now - buy) * 100 * qty
-    kind = f"mental stop -{m['tier']:.0%}" if "tier" in m else "drawdown"
-    return (f"🐧 {event.symbol} x{qty:g}\n"
-            f"Buy ${buy:.2f} → Now ${now:.2f} ({(now - buy) / buy:+.0%}, ${usd:+,.0f})\n"
-            f"{kind} — alert only")
+    return (
+        f"🐧 {event.symbol} x{qty:g}\n"
+        f"Buy ${buy:.2f} → Now ${now:.2f} ({(now - buy) / buy:+.0%}, ${usd:+,.0f})"
+    )
 
 
 class SlackAlertObserver(RiskObserver):
