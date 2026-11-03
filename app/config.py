@@ -54,9 +54,9 @@ class Config:
     # same scheme as the render-logs netlify function. Fail closed: unset means
     # those routes refuse to run.
     DASHBOARD_REQUEST_TOKEN = os.getenv("DASHBOARD_REQUEST_TOKEN", "")
-    # External sell signals (POST /api/signals/sell): "alert" never trades;
-    # "execute" lets token-holders sell up to the held qty. Unauthorized
-    # signals are alert-only either way.
+    # External signals (POST /api/signals/{buy,sell}): "alert" never trades;
+    # "execute" lets token-holders sell up to the held qty and buy at a limit
+    # within buying power. Unauthorized signals are alert-only either way.
     SELL_SIGNAL_MODE = os.getenv("SELL_SIGNAL_MODE", "alert").strip().lower()
 
     # -- Trailing-stop sweeper (runs in the background engine loop) --
