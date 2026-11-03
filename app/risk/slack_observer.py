@@ -21,6 +21,21 @@ _SEVERITY_PREFIX = {
 }
 
 
+def _option_text(event: RiskEvent) -> str | None:
+    """Short 🐧 alert with buy vs current price, for option drawdown/mental-stop events."""
+    m = event.metadata or {}
+    buy = m.get("purchase_price", m.get("cost"))
+    now = m.get("mark_price", m.get("mark"))
+    if buy is None or now is None or not float(buy):
+        return None
+    buy, now, qty = float(buy), float(now), float(m.get("quantity") or 0)
+    usd = (now - buy) * 100 * qty
+    return (
+        f"🐧 {event.symbol} x{qty:g}\n"
+        f"Buy ${buy:.2f} → Now ${now:.2f} ({(now - buy) / buy:+.0%}, ${usd:+,.0f})"
+    )
+
+
 class SlackAlertObserver(RiskObserver):
     """Posts risk events to Telegram (class name preserved for compat)."""
 
@@ -32,6 +47,10 @@ class SlackAlertObserver(RiskObserver):
         pass
 
     def on_risk_event(self, event: RiskEvent) -> None:
+        option_text = _option_text(event)
+        if option_text:
+            _notify(option_text, bypass_debounce=True)
+            return
         prefix = _SEVERITY_PREFIX.get(event.severity, "")
         text = (
             f"{prefix} Risk DQ — {event.event_type.value.replace('_', ' ').title()}\n"

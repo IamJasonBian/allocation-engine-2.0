@@ -197,6 +197,7 @@ def run_engine_loop(app):
     from app.slack import notify as slack_notify
     from app.risk.observer import RiskSubject
     from app.risk.option_loss import check_option_drawdowns
+    from app.risk.mental_stops import check_mental_stops
     from app.risk.slack_observer import SlackAlertObserver
     from app.trading_db import post_orders, post_positions
     from app.utils_shared import (
@@ -222,6 +223,9 @@ def run_engine_loop(app):
     risk_subject = RiskSubject()
     risk_subject.attach(SlackAlertObserver())
     drawdown_alerted: set[str] = set()
+    mental_state: dict[str, int] = {}
+    pending_summary_sent: set[str] = set()
+    pending_startup_ping = True
 
     log.info(
         "[engine] worker loop started (interval=%ds, dry_run=%s, broker=%s, "
@@ -269,7 +273,7 @@ def run_engine_loop(app):
                     log.exception("Failed to fetch options positions")
             if hasattr(broker, "options_orders"):
                 try:
-                    for oo in broker.options_orders(limit=200):
+                    for oo in broker.options_orders(limit=200, open_only=True):
                         options_open_orders.append(_option_order_to_event(oo))
                 except Exception:
                     log.exception("Failed to fetch options orders")
@@ -280,6 +284,27 @@ def run_engine_loop(app):
                     drawdown_alerted, risk_subject)
             except Exception:
                 log.exception("Option drawdown check failed")
+
+            try:
+                ms_events, mental_state = check_mental_stops(options_positions, mental_state)
+                for e in ms_events:
+                    risk_subject.notify(e)
+            except Exception:
+                log.exception("Option mental-stop check failed")
+
+            try:
+                from app.risk.eod_summary import pending_summaries_due
+
+                pending_msgs, pending_summary_sent = pending_summaries_due(
+                    [dict(o) for o in options_open_orders],
+                    pending_summary_sent,
+                    include_startup=pending_startup_ping,
+                )
+                pending_startup_ping = False
+                for text in pending_msgs:
+                    slack_notify(text, bypass_debounce=True)
+            except Exception:
+                log.exception("Pending option summary failed")
 
             try:
                 maybe_option_take_profit_sweep(config, opt_tp_sweep_state)

@@ -52,3 +52,4 @@ class RiskEventType(StrEnum):
     POSITION_LIMIT = "position_limit"       # position exceeds concentration limit
     ORDER_REJECTED = "order_rejected"       # broker rejected an order
     OPTION_DRAWDOWN = "option_drawdown"     # option mark far below purchase price
+    OPTION_MENTAL_STOP = "option_mental_stop"  # alert-only P&L tier breach
