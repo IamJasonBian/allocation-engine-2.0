@@ -46,33 +46,42 @@ def _post_bot_activity(events, label):
     log.info("[trading-db] %s: %s", label, (res or {}).get("data", "failed"))
 
 
-def maybe_option_take_profit_sweep(config, state):
+def maybe_option_take_profit_sweep(config, broker, options_positions,
+                                   open_option_orders, state):
     """Run the daily option take-profit sweep if enabled and not yet done today.
+
+    Uses the positions and open orders the loop already read; placements go
+    through ``broker.place_option_take_profit``.
 
     Args:
         config: Flask app config (keys from app.config.Config).
-        state: This sweep's SweepState.
+        broker: The engine's BrokerClient; needs ``place_option_take_profit``.
+        options_positions: Dicts from ``broker.options_positions()``.
+        open_option_orders: Open option orders (OrderEvent dicts).
+        state: This sweep's SweepState (only its store is used).
+
+    Returns:
+        The sweep result dict, or None when gated off.
     """
-    if not config["OPTION_TP_ENABLED"]:
-        return
-    if not config["AUTH_SERVICE_URL"] or not config["RH_AUTH_SERVICE_REQUEST_TOKEN"]:
-        return
-    state.ensure(config)
+    if not config["OPTION_TP_ENABLED"] or not hasattr(broker, "place_option_take_profit"):
+        return None
+    if state.store is None:
+        state.store = sw.StopStore(config["STOP_DB_PATH"])
     if state.store.option_tp_swept_today():
-        return
+        return None
     if _before_hour_et(config["OPTION_TP_SWEEP_HOUR_ET"]):
-        return
+        return None
     dry = config["OPTION_TP_SWEEP_DRY_RUN"]
     tp = config["OPTION_TP_PERCENT"]
     log.info("[opt-tp] starting daily take-profit sweep "
              "(tp=%.0f%%, dry_run=%s)", tp, dry)
-    out = sw.sweep_options_take_profit(state.client, state.store,
-                                       tp_percent=tp, dry_run=dry)
+    out = sw.sweep_options_take_profit(broker, state.store, options_positions,
+                                       open_option_orders, tp_percent=tp, dry_run=dry)
     placed = out.get("placed") or []
-    log.info("[opt-tp] sweep done: placed=%d skipped=%d",
-             len(placed), len(out.get("skipped") or []))
+    log.info("[opt-tp] sweep done: placed=%d skipped=%d failed=%d",
+             len(placed), len(out.get("skipped") or []), len(out.get("failed") or []))
     if dry:
-        return
+        return out
     events = []
     for p in placed:
         result = p.get("result") or {}
@@ -86,6 +95,7 @@ def maybe_option_take_profit_sweep(config, state):
                 "quantity": float((p.get("order") or {}).get("quantity") or 0),
             })
     _post_bot_activity(events, "option TP bot activity")
+    return out
 
 
 def maybe_option_stop_loss_sweep(config, broker, options_positions,
