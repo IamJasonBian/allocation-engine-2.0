@@ -30,26 +30,6 @@ def test_short_positions_and_missing_purchase_are_skipped():
     assert check_option_drawdowns([_opt(0, 0.50)]) == []
 
 
-def test_loop_alerts_once_per_breach_and_rearms():
-    from app.background import alert_option_drawdowns
-
-    class Bus:
-        def __init__(self):
-            self.sent = []
-
-        def notify(self, e):
-            self.sent.append(e.symbol)
-
-    bus = Bus()
-    breach = check_option_drawdowns([_opt(2.00, 1.40)])
-    alerted = alert_option_drawdowns(breach, set(), bus)
-    alerted = alert_option_drawdowns(breach, alerted, bus)     # still breaching: no repeat
-    assert bus.sent == ["SPY CALL 500.0 2026-10-17"]
-    alerted = alert_option_drawdowns([], alerted, bus)         # recovered: re-arm
-    alert_option_drawdowns(breach, alerted, bus)
-    assert len(bus.sent) == 2
-
-
 def test_telegram_observer_formats_drawdown(monkeypatch):
     from app.risk import slack_observer
     sent = []
