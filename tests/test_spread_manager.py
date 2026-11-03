@@ -5,8 +5,9 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from app.spread_manager import (Config, SandboxViolation, SpreadSpec, step,
-                                take_profit_credit, tick_round, validate)
+from app.spread_manager import (BrokerReadError, Config, RHGateway, SandboxViolation,
+                                ShapeError, SpreadSpec, step, take_profit_credit,
+                                tick_round, validate)
 
 ET = ZoneInfo("America/New_York")
 SPEC = SpreadSpec("ord-1", "L-id", "S-id", "AMD", date(2026, 11, 4), 470.0, 510.0)
@@ -80,7 +81,7 @@ def test_hard_time_sells_for_any_bid():
 
 
 def test_done_when_position_closed_after_having_been_open():
-    memo = {"saw_open_position": True}
+    memo = {"seen_open": True}
     assert step(FakeGW(order(), open_qty=0), SPEC, LIVE, at(3, 10), memo) == "done:closed"
 
 
@@ -88,8 +89,96 @@ def test_zero_qty_before_position_visible_waits():
     assert step(FakeGW(order(), open_qty=0), SPEC, LIVE, at(3, 10)) == "wait:position"
 
 
-def test_failed_position_read_waits():
-    assert step(FakeGW(order(), open_qty=None), SPEC, LIVE, at(3, 10)) == "wait:position_read"
+def test_seen_open_then_zero_is_closed():
+    gw, memo = FakeGW(order()), {}
+    assert step(gw, SPEC, LIVE, at(3, 10), memo).startswith("placed:tp")
+    assert memo["seen_open"] is True
+    gw._qty = 0
+    assert step(gw, SPEC, LIVE, at(3, 10, 1), memo) == "done:closed"
+
+
+def test_zero_qty_with_filled_remembered_close_is_closed():
+    gw = FakeGW(order(), open_qty=0)
+    gw.extra["close-1"] = {"id": "close-1", "state": "filled"}
+    assert step(gw, SPEC, LIVE, at(3, 10), {"close_id": "close-1"}) == "done:closed"
+
+
+def test_failed_position_read_raises_not_done():
+    gw = FakeGW(order())
+    def boom(_): raise BrokerReadError("down")
+    gw.open_qty = boom
+    with pytest.raises(BrokerReadError):
+        step(gw, SPEC, LIVE, at(3, 10), {"seen_open": True})
+
+
+class FakeRH:
+    """Stands in for robin_stocks.robinhood inside RHGateway."""
+
+    def __init__(self, order_info=None, positions=None, md=None):
+        info, pos, md_ = order_info, positions, md
+        self.orders = type("O", (), {"get_option_order_info": staticmethod(lambda _i: info)})
+        self.options = type("P", (), {
+            "get_open_option_positions": staticmethod(lambda: pos),
+            "get_option_market_data_by_id": staticmethod(lambda _i: md_)})
+
+
+def rhgw(**kw):
+    gw = RHGateway(trader=None)
+    fake = FakeRH(**kw)
+    gw._rh = lambda: fake
+    return gw
+
+
+@pytest.mark.parametrize("info", [None, [], "x", {"state": "filled"}])
+def test_gateway_order_bad_read_is_broker_error_not_sandbox(info):
+    with pytest.raises(BrokerReadError):
+        rhgw(order_info=info).order("ord-1")
+
+
+def test_validate_without_legs_is_shape_error_not_sandbox():
+    o = order(); o.pop("legs")
+    with pytest.raises(ShapeError):
+        validate(SPEC, o)
+
+
+def test_gateway_open_qty_none_is_broker_error():
+    with pytest.raises(BrokerReadError):
+        rhgw(positions=None).open_qty(SPEC)
+    assert rhgw(positions=[]).open_qty(SPEC) == 0
+
+
+def test_run_retries_after_broker_read_error(monkeypatch):
+    import app.spread_manager as sm
+    calls = []
+
+    def fake_step(*_a):
+        calls.append(1)
+        if len(calls) == 1:
+            raise BrokerReadError("down")
+        return "done:closed"
+
+    class Stop(Exception):
+        pass
+
+    def fake_sleep(s):
+        if s == 3600:
+            raise Stop
+    monkeypatch.setattr(sm, "step", fake_step)
+    monkeypatch.setattr(sm, "spec_from_env", lambda: SPEC)
+    monkeypatch.setattr(sm, "config_from_env", lambda: LIVE)
+    monkeypatch.setattr(sm, "_market_hours", lambda _n: True)
+    monkeypatch.setattr(sm.time, "sleep", fake_sleep)
+    monkeypatch.setattr("app.brokers.robinhood_client.RobinhoodTrader", lambda: None)
+    with pytest.raises(Stop):
+        sm.run()
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize("md", [[{"bid_price": None, "ask_price": "1.0"}],
+                                [{"ask_price": "1.0"}], [{"bid_price": "x", "ask_price": "1"}]])
+def test_gateway_bad_quote_is_shape_error(md):
+    with pytest.raises(ShapeError):
+        rhgw(md=md).spread_quote(SPEC)
 
 
 def test_expired_after_expiration_date():
