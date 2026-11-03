@@ -272,7 +272,7 @@ def run_engine_loop(app):
                     log.exception("Failed to fetch options positions")
             if hasattr(broker, "options_orders"):
                 try:
-                    for oo in broker.options_orders(limit=200):
+                    for oo in broker.options_orders(limit=200, open_only=True):
                         options_open_orders.append(_option_order_to_event(oo))
                 except Exception:
                     log.exception("Failed to fetch options orders")
@@ -294,9 +294,11 @@ def run_engine_loop(app):
             try:
                 from app.risk.eod_summary import maybe_eod_summary
 
+                # EOD always lists pending equity + option orders from this tick's
+                # broker read (open-only option fetch above).
                 eod_msg, eod_summary_sent = maybe_eod_summary(
                     options_positions,
-                    [dict(o) for o in open_orders],
+                    list(open_orders),
                     [dict(o) for o in options_open_orders],
                     eod_summary_sent,
                 )

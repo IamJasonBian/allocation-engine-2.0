@@ -23,8 +23,54 @@ def _eod_time() -> dtime:
     return dtime(hour, minute)
 
 
+_OPEN = {s.value for s in OPEN_STATES}
+
+
 def _is_open(state: str) -> bool:
-    return (state or "").lower() in {s.value for s in OPEN_STATES}
+    return (state or "").lower() in _OPEN
+
+
+def normalize_equity_order(o: dict) -> dict:
+    """RH open stock orders use ``status`` and ``qty``; EOD format expects ``state`` / ``quantity``."""
+    out = dict(o)
+    out.setdefault("state", out.get("status", ""))
+    out.setdefault("quantity", out.get("qty", 0))
+    return out
+
+
+def normalize_option_order(o: dict) -> dict:
+    """Ensure option order dicts from OrderEvent or RH have ``state`` and leg strike keys."""
+    out = dict(o)
+    if out.get("state") in (None, ""):
+        out["state"] = out.get("status", "")
+    legs = []
+    for leg in out.get("legs") or []:
+        lg = dict(leg)
+        lg.setdefault("strike", lg.get("strike_price"))
+        lg.setdefault("expiration", lg.get("expiration_date"))
+        lg.setdefault("chain_symbol", out.get("symbol") or lg.get("chain_symbol"))
+        legs.append(lg)
+    if legs:
+        out["legs"] = legs
+    return out
+
+
+def open_equity_orders(orders: list[dict]) -> list[dict]:
+    """Pending stock orders only (always evaluated for EOD)."""
+    return [
+        normalize_equity_order(o)
+        for o in orders
+        if _is_open(str((o.get("state") or o.get("status") or "")))
+    ]
+
+
+def open_option_orders(orders: list[dict]) -> list[dict]:
+    """Pending option orders only (spreads, single-leg opens, etc.)."""
+    return [
+        normalize_option_order(o)
+        for o in orders
+        if _is_open(str(o.get("state") or o.get("status") or ""))
+    ]
 
 
 def _fmt_option_order(o: dict) -> str:
@@ -78,28 +124,27 @@ def _fmt_option_position(p: dict) -> str:
 def build_eod_message(
     *,
     option_positions: list[dict],
-    open_equity_orders: list[dict],
-    open_option_orders: list[dict],
+    equity_orders: list[dict],
+    option_orders: list[dict],
     as_of: date,
 ) -> str:
-    """Format the EOD body (no schedule gate)."""
-    o_opts = [o for o in open_option_orders if _is_open(str(o.get("state", "")))]
-    o_eq = [o for o in open_equity_orders if _is_open(str(o.get("state") or o.get("status") or ""))]
+    """Format the EOD body. Always includes all three sections (counts may be zero)."""
+    o_opts = open_option_orders(option_orders)
+    o_eq = open_equity_orders(equity_orders)
 
-    lines = [f"📋 EOD {as_of.isoformat()} (ET) — open orders & options"]
+    lines = [f"📋 EOD {as_of.isoformat()} (ET) — pending orders & open options"]
 
     lines.append(f"\nPending option orders ({len(o_opts)})")
     if o_opts:
-        lines.extend(_fmt_option_order(o) for o in o_opts)
+        for o in sorted(o_opts, key=lambda x: (x.get("symbol") or "", x.get("created_at") or "")):
+            lines.append(_fmt_option_order(o))
     else:
         lines.append("• (none)")
 
     lines.append(f"\nPending equity orders ({len(o_eq)})")
     if o_eq:
-        for o in sorted(o_eq, key=lambda x: x.get("symbol", ""))[:15]:
+        for o in sorted(o_eq, key=lambda x: x.get("symbol", "")):
             lines.append(_fmt_equity_order(o))
-        if len(o_eq) > 15:
-            lines.append(f"• … +{len(o_eq) - 15} more")
     else:
         lines.append("• (none)")
 
@@ -115,12 +160,16 @@ def build_eod_message(
 
 def maybe_eod_summary(
     option_positions: list[dict],
-    open_equity_orders: list[dict],
-    open_option_orders: list[dict],
+    equity_orders: list[dict],
+    option_orders: list[dict],
     sent: set[str],
     now: datetime | None = None,
 ) -> tuple[str | None, set[str]]:
-    """Return ``(telegram_text, updated_sent)`` when today's EOD slot is due."""
+    """Return ``(telegram_text, updated_sent)`` when today's EOD slot is due.
+
+    Always sends all three sections when the slot fires, even if every count is
+    zero (broker returned empty lists).
+    """
     now = (now or datetime.now(_ET)).astimezone(_ET)
     if now.weekday() >= 5:
         return None, sent
@@ -132,8 +181,8 @@ def maybe_eod_summary(
         return None, sent
     msg = build_eod_message(
         option_positions=option_positions,
-        open_equity_orders=open_equity_orders,
-        open_option_orders=open_option_orders,
+        equity_orders=equity_orders,
+        option_orders=option_orders,
         as_of=now.date(),
     )
     return msg, sent | {slot}
