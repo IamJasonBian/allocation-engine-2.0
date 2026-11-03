@@ -465,6 +465,7 @@ class RobinhoodTrader(BrokerClient):
             # endpoint requires call/put — we pass option_type which now holds
             # the instrument's contract kind, not direction.
             mark_price = purchase_price
+            mark_err = "no market data returned"
             greeks = {"delta": None, "gamma": None, "theta": None, "vega": None, "iv": None}
             underlying_price = None
             try:
@@ -479,6 +480,8 @@ class RobinhoodTrader(BrokerClient):
                     md = md[0] if md else None
                 if md:
                     mark_price = float(md.get("mark_price", purchase_price))
+                    mark_err = (None if md.get("mark_price") is not None
+                                else "market data has no mark_price")
                     for g in ("delta", "gamma", "theta", "vega"):
                         val = md.get(g)
                         if val is not None:
@@ -500,8 +503,13 @@ class RobinhoodTrader(BrokerClient):
                             underlying_price = round(float(up), 4)
                         except (ValueError, TypeError):
                             pass
-            except Exception:
-                pass
+            except Exception as e:
+                mark_err = f"{type(e).__name__}: {e}"
+            if mark_err:
+                log.warning("[rh] option mark unavailable for %s %s %s %s (%s); "
+                            "falling back to purchase price $%.2f, so P&L reads 0%%",
+                            chain_symbol, option_type, strike, expiration,
+                            mark_err, purchase_price)
 
             # Fall back to latest stock price for underlying
             if underlying_price is None and chain_symbol:
