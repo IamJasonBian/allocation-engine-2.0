@@ -201,7 +201,8 @@ def run_engine_loop(app):
     from app.risk.slack_observer import SlackAlertObserver
     from app.trading_db import post_orders, post_positions
     from app.utils_shared import (
-        SweepState, maybe_option_take_profit_sweep, maybe_stop_sweep,
+        SweepState, maybe_option_stop_loss_sweep, maybe_option_take_profit_sweep,
+        maybe_stop_sweep,
     )
 
     config = app.config
@@ -217,6 +218,7 @@ def run_engine_loop(app):
     # Sweeps: each has its own toggle, auth-service client, and store.
     stop_sweep_state = SweepState()
     opt_tp_sweep_state = SweepState()
+    opt_sl_state: dict = {}
 
     # Option drawdown alerts go to Telegram (app/slack.py). A contract alerts
     # once per breach and re-arms after it recovers or closes.
@@ -310,6 +312,13 @@ def run_engine_loop(app):
                 maybe_option_take_profit_sweep(config, opt_tp_sweep_state)
             except Exception as tp_err:
                 log.exception("[opt-tp] sweep failed: %s", tp_err)
+
+            try:
+                maybe_option_stop_loss_sweep(
+                    config, broker, options_positions,
+                    [dict(o) for o in options_open_orders], opt_sl_state)
+            except Exception as sl_err:
+                log.exception("[opt-sl] sweep failed: %s", sl_err)
 
             equity_events: list[OrderEvent] = [
                 _equity_order_to_event(o, is_open=True) for o in open_orders

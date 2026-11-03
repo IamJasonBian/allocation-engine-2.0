@@ -234,41 +234,39 @@ class RobinhoodTrader(BrokerClient):
             log.error("Robinhood order error for %s %s %s: %s", side, qty, symbol, e)
             return None
 
-    def place_option_spread(self, spread: dict) -> dict | None:
-        """Submit a two-leg vertical debit spread as a single limit order.
+    def place_option_stop_loss(self, order: dict) -> dict | None:
+        """Rest a GTC sell-to-close stop-limit on a long option.
 
         Args:
-            spread: Validated spread dict with symbol, expiration (YYYY-MM-DD),
-                option_type, long_strike, short_strike, quantity, limit_price.
+            order: Planned stop from ``plan_option_stop_losses``: contract
+                (chain_symbol, option_type, strike, expiration), quantity,
+                stop_price, limit_price.
 
         Returns:
             ``{"id", "state"}`` for the submitted order, or None if rejected.
         """
         self._ensure_auth()
-        legs = [
-            {"expirationDate": spread["expiration"], "strike": spread["long_strike"],
-             "optionType": spread["option_type"], "effect": "open", "action": "buy",
-             "ratio_quantity": 1},
-            {"expirationDate": spread["expiration"], "strike": spread["short_strike"],
-             "optionType": spread["option_type"], "effect": "open", "action": "sell",
-             "ratio_quantity": 1},
-        ]
+        c = order["contract"]
         try:
-            # Keyword args: robin_stocks' debit-spread wrappers swap
-            # timeInForce/account_number positionally, so call this directly.
-            result = rh.orders.order_option_spread(
-                direction="debit", price=float(spread["limit_price"]),
-                symbol=spread["symbol"], quantity=int(spread["quantity"]),
-                spread=legs, account_number=self.account_number or None,
-                timeInForce="gfd", jsonify=True,
+            result = rh.orders.order_sell_option_stop_limit(
+                positionEffect="close", creditOrDebit="credit",
+                limitPrice=float(order["limit_price"]),
+                stopPrice=float(order["stop_price"]),
+                symbol=c["chain_symbol"], quantity=int(order["quantity"]),
+                expirationDate=c["expiration"], strike=float(c["strike"]),
+                optionType=c["option_type"],
+                account_number=self.account_number or None,
+                timeInForce="gtc", jsonify=True,
             )
         except Exception as e:
-            log.error("Robinhood option spread error for %s: %s", spread["symbol"], e)
+            log.error("Robinhood option stop-loss error for %s: %s", c["chain_symbol"], e)
             return None
         if result and result.get("id"):
-            log.info("RH option spread submitted: %s -> %s", spread["symbol"], result["id"])
+            log.info("RH option stop-loss submitted: %s %s %s %s stop $%.2f -> %s",
+                     c["chain_symbol"], c["option_type"], c["strike"], c["expiration"],
+                     float(order["stop_price"]), result["id"])
             return {"id": result["id"], "state": result.get("state")}
-        log.error("RH option spread rejected: %s", result)
+        log.error("RH option stop-loss rejected: %s", result)
         return None
 
     def cancel_order(self, order_id: str):

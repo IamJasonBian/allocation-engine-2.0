@@ -7,11 +7,13 @@ defaults.
 """
 
 import logging
+import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from app import stop_sweeper as sw
 from app.risk.equity_stop_mapping import EQUITY_STOP_MAPPING
+from app.risk.option_stop_loss import plan_option_stop_losses
 
 log = logging.getLogger(__name__)
 
@@ -84,6 +86,62 @@ def maybe_option_take_profit_sweep(config, state):
                 "quantity": float((p.get("order") or {}).get("quantity") or 0),
             })
     _post_bot_activity(events, "option TP bot activity")
+
+
+def maybe_option_stop_loss_sweep(config, broker, options_positions,
+                                 open_option_orders, state):
+    """Rest protective stop-limits on long options on the configured interval.
+
+    Uses the positions and open orders the loop already read, so it adds no
+    Robinhood reads; only live placements hit the broker.
+
+    Args:
+        config: Flask app config (keys from app.config.Config).
+        broker: The engine's BrokerClient; needs ``place_option_stop_loss``.
+        options_positions: Dicts from ``broker.options_positions()``.
+        open_option_orders: Open option orders (OrderEvent dicts).
+        state: Dict carrying ``last_run`` (epoch seconds) between passes.
+
+    Returns:
+        ``{"planned", "placed", "skipped"}``, or None when gated off.
+    """
+    if not config["OPTION_SL_ENABLED"] or not hasattr(broker, "place_option_stop_loss"):
+        return None
+    now = time.time()
+    if now - state.get("last_run", 0.0) < config["OPTION_SL_SWEEP_INTERVAL_SECONDS"]:
+        return None
+    state["last_run"] = now
+
+    orders, skipped = plan_option_stop_losses(
+        options_positions, open_option_orders,
+        config["OPTION_SL_PERCENT"], config["OPTION_SL_LIMIT_OFFSET_PERCENT"])
+    dry = config["OPTION_SL_SWEEP_DRY_RUN"]
+    placed, events = [], []
+    for o in orders:
+        c = o["contract"]
+        desc = (f"{c['chain_symbol']} {c['option_type']} {c['strike']:g} {c['expiration']} "
+                f"x{o['quantity']} entry ${o['entry']:.2f} stop ${o['stop_price']:.2f} "
+                f"limit ${o['limit_price']:.2f} (-{o['stop_pct']:g}%)")
+        if dry:
+            log.info("[opt-sl] DRY RUN would place %s", desc)
+            continue
+        result = broker.place_option_stop_loss(o)
+        if not result:
+            skipped.append({"contract": c, "reason": "broker_rejected"})
+            continue
+        log.info("[opt-sl] placed %s -> %s", desc, result["id"])
+        placed.append({**o, "result": result})
+        events.append({
+            "order_id": result["id"],
+            "type": "OPTION_STOP_LOSS",
+            "status": result.get("state", "submitted"),
+            "symbol": c["chain_symbol"],
+            "quantity": float(o["quantity"]),
+        })
+    log.info("[opt-sl] planned=%d placed=%d skipped=%d dry_run=%s",
+             len(orders), len(placed), len(skipped), dry)
+    _post_bot_activity(events, "option SL bot activity")
+    return {"planned": orders, "placed": placed, "skipped": skipped}
 
 
 def maybe_stop_sweep(config, state, current_positions):

@@ -3,7 +3,7 @@ from app.risk.equity_stop_mapping import (
     equity_stop_percent,
     equity_stop_qty_fraction,
 )
-from app.risk.option_stop_mapping import OPTION_STOP_MAPPING
+from app.risk.option_stop_mapping import OPTION_STOP_MAPPING, option_stop_percent
 
 
 def test_equity_stop_overrides_and_default():
@@ -19,5 +19,7 @@ def test_equity_stop_overrides_and_default():
     assert equity_stop_qty_fraction("AAPL") == 1.0
 
 
-def test_option_stop_mapping_is_todo_placeholder():
-    assert OPTION_STOP_MAPPING == {}
+def test_option_stop_mapping_defaults_when_unlisted(monkeypatch):
+    assert option_stop_percent("mu", 50) == 50.0
+    monkeypatch.setitem(OPTION_STOP_MAPPING, "MU", 35.0)
+    assert option_stop_percent("mu", 50) == 35.0
