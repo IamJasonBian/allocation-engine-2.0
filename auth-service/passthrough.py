@@ -1,16 +1,8 @@
 """Thin Robinhood relay: /rh/<path> -> https://api.robinhood.com/<path>.
 
-The box holds the session; callers own the request shape. Reads are forwarded
-untouched, and Robinhood's own status + body come back verbatim, so a bad shape
-is rejected by Robinhood rather than re-validated here.
-
-Writes are the only sensitive surface. A write is forwarded only when its path
-matches a rule below; every other non-GET is refused. Rules check only what
-Robinhood would accept but we don't want — notional caps, naked short opens,
-missing idempotency key. Shape is Robinhood's job: it rejects and we relay.
-The one exception: fields the cap reads must parse, or the cap is bypassable.
-
-Writes are dry-run unless the caller sends ``X-Dry-Run: false``.
+GETs pass through; Robinhood's status + body are relayed as-is, so Robinhood
+rejects bad shapes. Writes must match WRITE_RULES, which check only what
+Robinhood would accept but we don't want. Writes dry-run unless X-Dry-Run: false.
 """
 
 import re
@@ -93,17 +85,11 @@ def check_option_order(body: dict) -> str | None:
     return _check_ref_id(body)
 
 
-def _always_ok(_body: dict) -> str | None:
-    return None
-
-
 # (method, path regex) -> validator. Anything not listed is refused for writes.
-WRITE_RULES: list[tuple[str, re.Pattern, callable]] = [
+WRITE_RULES = [
     ("POST", re.compile(r"^/orders/$"), check_equity_order),
     ("POST", re.compile(r"^/options/orders/$"), check_option_order),
-    # Cancels only reduce exposure.
-    ("POST", re.compile(r"^/orders/[0-9a-f-]+/cancel/$"), _always_ok),
-    ("POST", re.compile(r"^/options/orders/[0-9a-f-]+/cancel/$"), _always_ok),
+    ("POST", re.compile(r"^/(options/)?orders/[0-9a-f-]+/cancel/$"), None),  # cancels
 ]
 
 
@@ -112,7 +98,7 @@ def check_write(method: str, path: str, body: dict) -> str | None:
     bare = path.partition("?")[0]
     for rule_method, pattern, validator in WRITE_RULES:
         if method == rule_method and pattern.match(bare):
-            return validator(body if isinstance(body, dict) else {})
+            return validator(body if isinstance(body, dict) else {}) if validator else None
     return "%s %s is not an allowed write; only order placement and cancels are relayed" % (
         method, bare)
 
