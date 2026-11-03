@@ -6,17 +6,21 @@ Pure planning only: placement lives on the broker
 
 For each long contract the stop triggers at ``entry * (1 - stop_pct/100)`` and
 rests a limit ``limit_offset_pct`` below the trigger, so a fast drop still has
-room to fill. Prices snap down to penny-program ticks ($0.01 under $3, $0.05 at
-or above).
+room to fill. Prices snap down to ticks valid for every underlying ($0.05
+under $3, $0.10 at or above), penny-program or not.
 
 Skipped on purpose:
   * shorts, fractional lots, and lots without an RH purchase price;
-  * a long leg that pairs with a short on the same chain/type/expiry: stopping
-    the long out would leave the short leg naked;
-  * a contract that already has an open sell stop;
-  * contracts whose quantity is fully held by other open sell-to-close orders
-    (e.g. a resting take-profit). Robinhood rejects sells beyond the
-    unencumbered quantity, and it has no OCO for options.
+  * a long on any chain that also holds a short (any type or expiry, so
+    verticals, calendars and diagonals all count): stopping the long out would
+    leave the short leg naked;
+  * a stop percent outside (0, 100);
+  * a long whose current mark is missing or at/below the stop, since that
+    stop would trigger immediately;
+  * contracts whose quantity is fully held by open sell-to-close orders
+    (stops or e.g. a resting take-profit). Only the free remainder gets a
+    stop: Robinhood rejects sells beyond the unencumbered quantity, and it has
+    no OCO for options.
 """
 
 from __future__ import annotations
@@ -29,6 +33,14 @@ OPEN_STATES = {"queued", "confirmed", "partially_filled", "pending", "unconfirme
 
 
 def _num(v) -> float:
+    """Coerce a broker field to float, treating blanks and junk as zero.
+
+    Args:
+        v: Raw value (str, number, or None).
+
+    Returns:
+        The value as a float, or 0.0 when it can't be parsed.
+    """
     try:
         return float(v or 0)
     except (TypeError, ValueError):
@@ -36,17 +48,20 @@ def _num(v) -> float:
 
 
 def snap_down(price: float) -> float:
-    """Round a premium down to the penny-program tick for its level.
+    """Round a premium down to a tick valid for any underlying.
+
+    Uses the non-penny-program increments ($0.05 under $3, $0.10 at or
+    above), which every option class accepts.
 
     Args:
         price: Premium per share in USD.
 
     Returns:
-        The price on a valid tick, never below $0.01.
+        The price on a valid tick, never below $0.05.
     """
-    tick = 0.01 if price < 3 else 0.05
+    tick = 0.05 if price < 3 else 0.10
     snapped = math.floor(round(price / tick, 6)) * tick
-    return max(round(snapped, 2), 0.01)
+    return max(round(snapped, 2), 0.05)
 
 
 def stop_prices(entry: float, stop_pct: float, limit_offset_pct: float) -> tuple[float, float]:
@@ -66,12 +81,31 @@ def stop_prices(entry: float, stop_pct: float, limit_offset_pct: float) -> tuple
 
 
 def _contract_key(chain_symbol, option_type, strike, expiration) -> tuple:
+    """Normalized key identifying one option contract.
+
+    Args:
+        chain_symbol: Underlying chain symbol, any case.
+        option_type: ``"call"`` or ``"put"``, any case.
+        strike: Strike price.
+        expiration: Expiration date string (YYYY-MM-DD).
+
+    Returns:
+        ``(chain_symbol, option_type, strike, expiration)`` normalized for lookup.
+    """
     return (str(chain_symbol or "").upper(), str(option_type or "").lower(),
             round(_num(strike), 4), str(expiration or ""))
 
 
 def _sell_close_orders(open_orders: list[dict]) -> dict[tuple, dict]:
-    """Per contract: quantity held by open sell-to-close orders, and any stop."""
+    """Sum open single-leg sell-to-close quantity per contract.
+
+    Args:
+        open_orders: Open option orders (OrderEvent or raw broker dicts).
+
+    Returns:
+        Map of contract key to ``{"qty": unfilled quantity held, "has_stop":
+        whether any of those orders is a stop}``.
+    """
     held: dict[tuple, dict] = {}
     for o in open_orders or []:
         if str(o.get("state", "")).lower() not in OPEN_STATES:
@@ -111,10 +145,9 @@ def plan_option_stop_losses(positions: list[dict], open_orders: list[dict],
         ``(orders, skipped)``. Each order has contract, quantity, entry,
         stop_pct, stop_price and limit_price; each skip has contract and reason.
     """
-    shorts = {(str(p.get("chain_symbol", "")).upper(), str(p.get("option_type", "")).lower(),
-               str(p.get("expiration", "")))
-              for p in positions or []
-              if str(p.get("position_type", "")).lower() == "short"}
+    short_chains = {str(p.get("chain_symbol", "")).upper()
+                    for p in positions or []
+                    if str(p.get("position_type", "")).lower() == "short"}
     held = _sell_close_orders(open_orders)
     orders, skipped = [], []
 
@@ -131,25 +164,33 @@ def plan_option_stop_losses(positions: list[dict], open_orders: list[dict],
                 or contract["strike"] <= 0 or not contract["expiration"]):
             skipped.append({"contract": contract, "reason": "incomplete_contract"})
             continue
-        if (contract["chain_symbol"], contract["option_type"], contract["expiration"]) in shorts:
+        if contract["chain_symbol"] in short_chains:
             skipped.append({"contract": contract, "reason": "paired_with_short_leg"})
             continue
         entry = _num(p.get("purchase_price"))
         if entry <= 0:
             skipped.append({"contract": contract, "reason": "no_purchase_price"})
             continue
-        key = _contract_key(**contract)
-        slot = held.get(key, {"qty": 0.0, "has_stop": False})
-        if slot["has_stop"]:
-            skipped.append({"contract": contract, "reason": "stop_already_open"})
-            continue
+        slot = held.get(_contract_key(**contract), {"qty": 0.0, "has_stop": False})
         free = int(_num(p.get("quantity")) - slot["qty"])
         if free < 1:
-            reason = "held_by_open_sell" if slot["qty"] > 0 else "fractional_qty"
+            if slot["has_stop"]:
+                reason = "stop_already_open"
+            elif slot["qty"] > 0:
+                reason = "held_by_open_sell"
+            else:
+                reason = "fractional_qty"
             skipped.append({"contract": contract, "reason": reason})
             continue
         pct = option_stop_percent(contract["chain_symbol"], default_stop_pct)
+        if not 0 < pct < 100:
+            skipped.append({"contract": contract, "reason": "invalid_stop_pct"})
+            continue
         stop, limit = stop_prices(entry, pct, limit_offset_pct)
+        mark = p.get("mark_price")
+        if mark is None or _num(mark) <= stop:
+            skipped.append({"contract": contract, "reason": "mark_at_or_below_stop"})
+            continue
         orders.append({"contract": contract, "quantity": free, "entry": entry,
                        "stop_pct": pct, "stop_price": stop, "limit_price": limit})
     return orders, skipped

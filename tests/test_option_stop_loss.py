@@ -1,13 +1,14 @@
 """Option stop-loss planning, broker payload, and engine-loop gating."""
 
 from app.risk.option_stop_loss import plan_option_stop_losses, snap_down, stop_prices
+from app.risk.option_stop_mapping import OPTION_STOP_MAPPING
 from app.utils_shared import maybe_option_stop_loss_sweep
 
 
 def _pos(**over):
     p = {"chain_symbol": "MU", "option_type": "call", "position_type": "long",
          "strike": 1050.0, "expiration": "2026-11-20", "quantity": 2.0,
-         "purchase_price": 20.65}
+         "purchase_price": 20.65, "mark_price": 18.0}
     p.update(over)
     return p
 
@@ -19,14 +20,16 @@ def _sell(qty=2, trigger="immediate", **leg):
     return {"state": "queued", "quantity": qty, "trigger": trigger, "legs": [base]}
 
 
-def test_snap_down_uses_penny_program_ticks():
-    assert snap_down(2.999) == 2.99
+def test_snap_down_uses_ticks_valid_for_all_underlyings():
+    assert snap_down(2.999) == 2.95
+    assert snap_down(3.00) == 3.00
     assert snap_down(10.33) == 10.30
-    assert snap_down(0.001) == 0.01
+    assert snap_down(10.39) == 10.30
+    assert snap_down(0.001) == 0.05
 
 
 def test_stop_prices_trigger_and_limit():
-    assert stop_prices(20.65, 50, 10) == (10.30, 9.25)
+    assert stop_prices(20.65, 50, 10) == (10.30, 9.20)
     assert stop_prices(1.00, 50, 10) == (0.50, 0.45)
 
 
@@ -36,14 +39,39 @@ def test_plans_stop_for_unprotected_long():
     assert orders == [{"contract": {"chain_symbol": "MU", "option_type": "call",
                                     "strike": 1050.0, "expiration": "2026-11-20"},
                        "quantity": 2, "entry": 20.65, "stop_pct": 50.0,
-                       "stop_price": 10.30, "limit_price": 9.25}]
+                       "stop_price": 10.30, "limit_price": 9.20}]
 
 
-def test_skips_existing_stop_and_quantity_held_by_take_profit():
-    _, skipped = plan_option_stop_losses([_pos()], [_sell(1, trigger="stop")], 50, 10)
+def test_skips_fully_covered_stop_and_quantity_held_by_take_profit():
+    _, skipped = plan_option_stop_losses([_pos()], [_sell(2, trigger="stop")], 50, 10)
     assert skipped[0]["reason"] == "stop_already_open"
     _, skipped = plan_option_stop_losses([_pos()], [_sell(2)], 50, 10)
     assert skipped[0]["reason"] == "held_by_open_sell"
+
+
+def test_partial_existing_stop_covers_only_remaining_qty():
+    orders, _ = plan_option_stop_losses([_pos(quantity=3.0)], [_sell(1, trigger="stop")], 50, 10)
+    assert orders[0]["quantity"] == 2
+    orders, skipped = plan_option_stop_losses(
+        [_pos(quantity=3.0)], [_sell(1, trigger="stop"), _sell(2)], 50, 10)
+    assert orders == [] and skipped[0]["reason"] == "stop_already_open"
+
+
+def test_skips_when_mark_missing_or_at_or_below_stop():
+    for mark in (None, 10.30, 9.0):
+        orders, skipped = plan_option_stop_losses([_pos(mark_price=mark)], [], 50, 10)
+        assert orders == [] and skipped[0]["reason"] == "mark_at_or_below_stop"
+    orders, _ = plan_option_stop_losses([_pos(mark_price=10.35)], [], 50, 10)
+    assert orders[0]["stop_price"] == 10.30
+
+
+def test_skips_invalid_stop_percent(monkeypatch):
+    for pct in (0, -5, 100, 150):
+        orders, skipped = plan_option_stop_losses([_pos()], [], pct, 10)
+        assert orders == [] and skipped[0]["reason"] == "invalid_stop_pct"
+    monkeypatch.setitem(OPTION_STOP_MAPPING, "MU", 100)
+    orders, skipped = plan_option_stop_losses([_pos()], [], 50, 10)
+    assert orders == [] and skipped[0]["reason"] == "invalid_stop_pct"
 
 
 def test_stops_only_unencumbered_quantity():
@@ -64,6 +92,48 @@ def test_skips_shorts_vertical_long_legs_and_missing_entry():
     assert orders == [] and skipped[0]["reason"] == "paired_with_short_leg"
     _, skipped = plan_option_stop_losses([_pos(purchase_price=0)], [], 50, 10)
     assert skipped[0]["reason"] == "no_purchase_price"
+
+
+def test_skips_long_paired_with_any_short_on_same_chain():
+    calendar = [_pos(), _pos(position_type="short", expiration="2026-12-18")]
+    diagonal = [_pos(), _pos(position_type="short", option_type="put",
+                             strike=900.0, expiration="2027-01-15")]
+    untyped = [_pos(), _pos(position_type="short", option_type="")]
+    for book in (calendar, diagonal, untyped):
+        orders, skipped = plan_option_stop_losses(book, [], 50, 10)
+        assert orders == [] and skipped[0]["reason"] == "paired_with_short_leg"
+    other_chain = [_pos(), _pos(position_type="short", chain_symbol="NVDA")]
+    orders, _ = plan_option_stop_losses(other_chain, [], 50, 10)
+    assert len(orders) == 1
+
+
+def test_open_order_read_failure_reports_not_ok():
+    from app.background import read_open_option_orders
+
+    class Boom:
+        def options_orders(self, **kw):
+            assert kw["raise_errors"] is True
+            raise RuntimeError("rh down")
+
+    assert read_open_option_orders(Boom()) == ([], False)
+    assert read_open_option_orders(object()) == ([], True)
+
+
+def test_robinhood_options_orders_raises_when_asked_and_keeps_unconfirmed(monkeypatch):
+    import pytest
+    from app.brokers.robinhood_client import RobinhoodTrader
+
+    t = RobinhoodTrader.__new__(RobinhoodTrader)
+    monkeypatch.setattr(t, "_ensure_auth", lambda: None, raising=False)
+
+    def boom():
+        raise RuntimeError("rh down")
+
+    monkeypatch.setattr("app.brokers.robinhood_client.rh.orders.get_all_option_orders", boom)
+    assert t.options_orders(open_only=True) == []
+    with pytest.raises(RuntimeError):
+        t.options_orders(open_only=True, raise_errors=True)
+    assert "unconfirmed" in RobinhoodTrader._OPEN_OPTION_STATES
 
 
 class FakeBroker:
@@ -125,7 +195,7 @@ def test_robinhood_payload(monkeypatch):
     orders, _ = plan_option_stop_losses([_pos()], [], 50, 10)
     assert t.place_option_stop_loss(orders[0]) == {"id": "abc", "state": "queued"}
     assert seen == {"positionEffect": "close", "creditOrDebit": "credit",
-                    "limitPrice": 9.25, "stopPrice": 10.30, "symbol": "MU",
+                    "limitPrice": 9.20, "stopPrice": 10.30, "symbol": "MU",
                     "quantity": 2, "expirationDate": "2026-11-20", "strike": 1050.0,
                     "optionType": "call", "account_number": "ACCT",
                     "timeInForce": "gtc", "jsonify": True}
