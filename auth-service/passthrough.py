@@ -5,9 +5,10 @@ untouched, and Robinhood's own status + body come back verbatim, so a bad shape
 is rejected by Robinhood rather than re-validated here.
 
 Writes are the only sensitive surface. A write is forwarded only when its path
-matches a rule below; every other non-GET is refused. Rules check just what
-protects the account (notional caps, no naked short opens, idempotency key) —
-not the full Robinhood schema.
+matches a rule below; every other non-GET is refused. Rules check only what
+Robinhood would accept but we don't want — notional caps, naked short opens,
+missing idempotency key. Shape is Robinhood's job: it rejects and we relay.
+The one exception: fields the cap reads must parse, or the cap is bypassable.
 
 Writes are dry-run unless the caller sends ``X-Dry-Run: false``.
 """
@@ -55,43 +56,39 @@ def _check_ref_id(body: dict) -> str | None:
     return None
 
 
-def check_equity_order(body: dict) -> str | None:
-    """POST /orders/ — priced, positive, under the equity notional cap."""
-    if body.get("side") not in ("buy", "sell"):
-        return "side must be 'buy' or 'sell'"
+def _check_notional(body: dict, multiplier: Decimal, cap: float, name: str) -> str | None:
+    """Fail closed: if quantity/price don't parse, the cap can't be checked."""
     qty, price = _dec(body.get("quantity")), _dec(body.get("price"))
-    if qty is None or qty <= 0:
-        return "quantity must be > 0"
-    if price is None or price <= 0:
-        return "price must be > 0 (also used for the notional cap)"
-    notional = qty * price
-    if notional > Decimal(str(config.RH_EQUITY_MAX_NOTIONAL)):
-        return "notional $%s exceeds [passthrough] equity_max_notional $%s" % (
-            notional, config.RH_EQUITY_MAX_NOTIONAL)
-    return _check_ref_id(body)
+    if qty is None or price is None:
+        return "quantity and price must be numbers (needed for the %s cap)" % name
+    notional = abs(qty * price * multiplier)
+    if notional > Decimal(str(cap)):
+        return "notional $%s exceeds [passthrough] %s $%s" % (notional, name, cap)
+    return None
+
+
+def check_equity_order(body: dict) -> str | None:
+    """POST /orders/ — notional cap + idempotency key; Robinhood validates the rest."""
+    return (_check_notional(body, Decimal(1), config.RH_EQUITY_MAX_NOTIONAL,
+                            "equity_max_notional")
+            or _check_ref_id(body))
+
+
+def _leg_is(leg, side: str, effect: str) -> bool:
+    return (isinstance(leg, dict)
+            and str(leg.get("side", "")).lower() == side
+            and str(leg.get("position_effect", "")).lower() == effect)
 
 
 def check_option_order(body: dict) -> str | None:
-    """POST /options/orders/ — whole contracts, capped premium, no naked short opens."""
-    legs = body.get("legs")
-    if not isinstance(legs, list) or not 1 <= len(legs) <= 4:
-        return "legs must be a list of 1-4 legs"
-    for leg in legs:
-        if not isinstance(leg, dict) or leg.get("side") not in ("buy", "sell") \
-                or leg.get("position_effect") not in ("open", "close"):
-            return "each leg needs side buy|sell and position_effect open|close"
-    qty, price = _dec(body.get("quantity")), _dec(body.get("price"))
-    if qty is None or qty <= 0 or qty != qty.to_integral_value():
-        return "quantity must be a positive whole number of contracts"
-    if price is None or price <= 0:
-        return "price must be > 0"
-    notional = qty * price * _OPTIONS_MULTIPLIER
-    if notional > Decimal(str(config.RH_OPTIONS_MAX_NOTIONAL)):
-        return "notional $%s exceeds [passthrough] options_max_notional $%s" % (
-            notional, config.RH_OPTIONS_MAX_NOTIONAL)
-    short_opens = [l for l in legs if l["side"] == "sell" and l["position_effect"] == "open"]
-    long_opens = [l for l in legs if l["side"] == "buy" and l["position_effect"] == "open"]
-    if short_opens and not long_opens:
+    """POST /options/orders/ — notional cap, no naked short opens, idempotency key."""
+    reason = _check_notional(body, _OPTIONS_MULTIPLIER, config.RH_OPTIONS_MAX_NOTIONAL,
+                             "options_max_notional")
+    if reason:
+        return reason
+    legs = body.get("legs") if isinstance(body.get("legs"), list) else []
+    if any(_leg_is(l, "sell", "open") for l in legs) \
+            and not any(_leg_is(l, "buy", "open") for l in legs):
         return "sell-to-open without a bought leg in the same order (naked short) is blocked"
     return _check_ref_id(body)
 

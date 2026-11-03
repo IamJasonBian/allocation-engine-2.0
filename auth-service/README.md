@@ -136,8 +136,9 @@ and body come back unchanged, so a bad shape is rejected by Robinhood.
 - **GET** passes through for any path.
 - **Writes** are refused (403 `GUARDRAIL_BLOCKED`) unless they match a rule in
   `passthrough.WRITE_RULES`: `POST /orders/`, `POST /options/orders/`, and order
-  cancels. Order rules check only the risky parts — `[passthrough]` notional caps,
-  whole option contracts, no sell-to-open without a bought leg, UUID `ref_id`.
+  cancels. Order rules check only what Robinhood would accept but we don't want:
+  `[passthrough]` notional caps, no sell-to-open without a bought leg, UUID `ref_id`.
+  Shape is left to Robinhood, except `quantity`/`price` must parse (the cap reads them).
 - Writes are **dry-run** unless the caller sends `X-Dry-Run: false`.
 
 ```bash

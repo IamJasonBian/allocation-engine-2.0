@@ -66,9 +66,22 @@ class WriteRuleTests(unittest.TestCase):
         self.assertIn("options_max_notional", passthrough.check_write(
             "POST", "/options/orders/", _option_order(quantity="29", price="1.30")))
 
-    def test_fractional_contracts_blocked(self):
-        self.assertIn("whole number", passthrough.check_write(
+    def test_shape_left_to_robinhood(self):
+        # Fractional contracts, odd leg fields: Robinhood rejects these, not us.
+        self.assertIsNone(passthrough.check_write(
             "POST", "/options/orders/", _option_order(quantity="1.5")))
+        self.assertIsNone(passthrough.check_write(
+            "POST", "/options/orders/", _option_order(legs="not-a-list")))
+
+    def test_unparseable_cap_fields_fail_closed(self):
+        for bad in ({"quantity": ["29"]}, {"price": "abc"}, {"quantity": None}):
+            self.assertIn("needed for", passthrough.check_write(
+                "POST", "/options/orders/", _option_order(**bad)), bad)
+
+    def test_naked_short_check_ignores_case(self):
+        legs = [{"option": "x", "side": "SELL", "position_effect": "Open"}]
+        self.assertIn("naked", passthrough.check_write(
+            "POST", "/options/orders/", _option_order(legs=legs)))
 
     def test_equity_cap_and_ref_id(self):
         self.assertIsNone(passthrough.check_write("POST", "/orders/", _equity_order()))
