@@ -82,7 +82,7 @@ class Config:
         os.path.join(os.path.dirname(__file__), "..", "data", "stops.sqlite3"),
     )
 
-    # -- Options take-profit sweep (daily, via auth-service /orders/options/limit) --
+    # -- Options take-profit sweep (daily, sell-to-close limits via broker) --
     OPTION_TP_ENABLED = os.getenv("OPTION_TP_ENABLED", "true").lower() == "true"
     OPTION_TP_SWEEP_DRY_RUN = os.getenv("OPTION_TP_SWEEP_DRY_RUN", "true").lower() == "true"
     OPTION_TP_SWEEP_HOUR_ET = int(os.getenv("OPTION_TP_SWEEP_HOUR_ET", "0"))
@@ -98,6 +98,13 @@ class Config:
     OPTION_SL_PERCENT = float(os.getenv("OPTION_SL_PERCENT", "50"))
     # Limit rests this percent below the trigger so a fast drop can still fill.
     OPTION_SL_LIMIT_OFFSET_PERCENT = float(os.getenv("OPTION_SL_LIMIT_OFFSET_PERCENT", "10"))
+
+    # -- Option theta-burn alerts (alert-only, engine loop) --
+    OPTION_THETA_BURN_ENABLED = os.getenv("OPTION_THETA_BURN_ENABLED", "true").lower() == "true"
+    # Alert a losing long once a day when daily theta >= this % of its value...
+    OPTION_THETA_BURN_PCT = float(os.getenv("OPTION_THETA_BURN_PCT", "5"))
+    # ...or when it has this many days or fewer to expiry.
+    OPTION_THETA_DTE_WARN = int(os.getenv("OPTION_THETA_DTE_WARN", "7"))
 
     # -- Trading DB write path (5thstreetcapital Netlify functions) --
     TRADING_DB_URL = os.getenv(

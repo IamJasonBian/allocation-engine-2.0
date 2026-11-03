@@ -218,6 +218,10 @@ def run_engine_loop(app):
     from app.risk.observer import RiskSubject
     from app.risk.option_loss import check_option_drawdowns
     from app.risk.mental_stops import check_mental_stops
+    from app.risk.option_coverage import (
+        coverage_line, position_change_alerts, unmonitored_alerts,
+    )
+    from app.risk.theta_burn import book_theta_text, theta_burn_alerts
     from app.risk.alert_observer import AlertObserver
     from app.trading_db import post_orders, post_positions
     from app.utils_shared import (
@@ -248,6 +252,9 @@ def run_engine_loop(app):
     mental_state: dict[str, int] = {}
     pending_summary_sent: set[str] = set()
     pending_startup_ping = True
+    seen_option_positions: dict[str, float] | None = None
+    unmonitored_sent: set[str] = set()
+    theta_sent: set[str] = set()
 
     log.info(
         "[engine] worker loop started (interval=%ds, dry_run=%s, broker=%s, "
@@ -309,12 +316,38 @@ def run_engine_loop(app):
                 log.exception("Option mental-stop check failed")
 
             try:
+                cov_msgs, seen_option_positions = position_change_alerts(
+                    options_positions, seen_option_positions)
+                um_msgs, unmonitored_sent = unmonitored_alerts(
+                    options_positions, unmonitored_sent)
+                for text in cov_msgs + um_msgs:
+                    notify(text, bypass_debounce=True)
+            except Exception:
+                log.exception("Option coverage alerts failed")
+
+            if config["OPTION_THETA_BURN_ENABLED"]:
+                try:
+                    theta_msgs, theta_sent = theta_burn_alerts(
+                        options_positions, theta_sent,
+                        burn_pct=config["OPTION_THETA_BURN_PCT"],
+                        dte_warn=config["OPTION_THETA_DTE_WARN"])
+                    for text in theta_msgs:
+                        notify(text, bypass_debounce=True)
+                except Exception:
+                    log.exception("Option theta-burn alerts failed")
+
+            try:
                 from app.risk.eod_summary import pending_summaries_due
 
                 pending_msgs, pending_summary_sent = pending_summaries_due(
                     [dict(o) for o in options_open_orders],
                     pending_summary_sent,
                     include_startup=pending_startup_ping,
+                    coverage=" · ".join(filter(None, (
+                        coverage_line(
+                            options_positions,
+                            [dict(o) for o in options_open_orders] if option_orders_ok else None),
+                        book_theta_text(options_positions)))),
                 )
                 pending_startup_ping = False
                 for text in pending_msgs:
@@ -322,14 +355,15 @@ def run_engine_loop(app):
             except Exception:
                 log.exception("Pending option summary failed")
 
-            try:
-                maybe_option_take_profit_sweep(config, opt_tp_sweep_state)
-            except Exception as tp_err:
-                log.exception("[opt-tp] sweep failed: %s", tp_err)
-
             # A failed order read looks like "no open orders", which would make
-            # every long look unprotected and stack duplicate stops.
+            # every long look unprotected and stack duplicate exits.
             if option_orders_ok:
+                try:
+                    maybe_option_take_profit_sweep(
+                        config, broker, options_positions,
+                        [dict(o) for o in options_open_orders], opt_tp_sweep_state)
+                except Exception as tp_err:
+                    log.exception("[opt-tp] sweep failed: %s", tp_err)
                 try:
                     maybe_option_stop_loss_sweep(
                         config, broker, options_positions,
@@ -337,7 +371,7 @@ def run_engine_loop(app):
                 except Exception as sl_err:
                     log.exception("[opt-sl] sweep failed: %s", sl_err)
             else:
-                log.warning("[opt-sl] skipping sweep: open option orders unreadable")
+                log.warning("[opt-tp/opt-sl] skipping sweeps: open option orders unreadable")
 
             equity_events: list[OrderEvent] = [
                 _equity_order_to_event(o, is_open=True) for o in open_orders
