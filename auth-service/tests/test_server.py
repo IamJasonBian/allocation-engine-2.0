@@ -104,9 +104,9 @@ class ServerTestCase(unittest.TestCase):
                           "timed_out": False}).start()
         self.addCleanup(mock.patch.stopall)
 
-    def request(self, method, path, body=None, token=TOKEN, raw_header=None):
+    def request(self, method, path, body=None, token=TOKEN, raw_header=None, headers=None):
         conn = http.client.HTTPConnection("127.0.0.1", self.port, timeout=10)
-        headers = {"Content-Type": "application/json"}
+        headers = {"Content-Type": "application/json", **(headers or {})}
         if raw_header is not None:
             headers["Authorization"] = raw_header
         elif token is not None:
@@ -312,6 +312,47 @@ class ServerTestCase(unittest.TestCase):
         self.assertEqual(body["error_code"], "GUARDRAIL_BLOCKED")
         self.run_command.assert_not_called()
 
+
+    # ---- /rh/* passthrough ----
+
+    def _option_spread(self):
+        return {"quantity": "1", "price": "6.00", "ref_id": "5f1d6a52-6d1b-4a39-9a43-0f0e9a8b1c11",
+                "legs": [{"option": "a", "side": "buy", "position_effect": "open"},
+                         {"option": "b", "side": "sell", "position_effect": "open"}]}
+
+    def test_passthrough_requires_token(self):
+        status, _ = self.request("GET", "/rh/positions/", token=None)
+        self.assertEqual(status, 401)
+
+    def test_passthrough_get_relays_rh_status_and_body(self):
+        with mock.patch.object(server.passthrough, "forward",
+                               return_value=(404, {"detail": "Not found."})) as fwd:
+            status, body = self.request("GET", "/rh/options/orders/?state=open")
+        self.assertEqual((status, body), (404, {"detail": "Not found."}))
+        self.assertEqual(fwd.call_args.args[1:3], ("GET", "/options/orders/?state=open"))
+
+    def test_passthrough_write_defaults_to_dry_run(self):
+        with mock.patch.object(server.passthrough, "forward") as fwd:
+            status, body = self.request("POST", "/rh/options/orders/", self._option_spread())
+        self.assertEqual(status, 200)
+        self.assertTrue(body["dry_run"])
+        fwd.assert_not_called()
+
+    def test_passthrough_live_write_relays_rh_rejection(self):
+        with mock.patch.object(server.passthrough, "forward",
+                               return_value=(400, {"price": ["Invalid tick."]})) as fwd:
+            status, body = self.request("POST", "/rh/options/orders/", self._option_spread(),
+                                        headers={"X-Dry-Run": "false"})
+        self.assertEqual((status, body), (400, {"price": ["Invalid tick."]}))
+        fwd.assert_called_once()
+
+    def test_passthrough_blocks_unlisted_write(self):
+        with mock.patch.object(server.passthrough, "forward") as fwd:
+            status, body = self.request("POST", "/rh/ach/transfers/", {"amount": "100"},
+                                        headers={"X-Dry-Run": "false"})
+        self.assertEqual(status, 403)
+        self.assertEqual(body["error_code"], "GUARDRAIL_BLOCKED")
+        fwd.assert_not_called()
 
 if __name__ == "__main__":
     unittest.main()
