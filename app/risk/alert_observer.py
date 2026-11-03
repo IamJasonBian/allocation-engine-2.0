@@ -1,8 +1,4 @@
-"""Risk alerting observer — posts DQ events via the Telegram notifier.
-
-Class name `SlackAlertObserver` preserved so existing imports in main.py and
-app.background continue to resolve.
-"""
+"""Risk alerting observer — posts DQ events via app.notifier."""
 
 from __future__ import annotations
 
@@ -11,7 +7,7 @@ import logging
 from app.risk.events import RiskEvent
 from app.risk.observer import RiskObserver
 from app.risk.theta_burn import theta_text
-from app.slack import notify as _notify
+from app.notifier import notify as _notify
 
 log = logging.getLogger(__name__)
 
@@ -39,11 +35,10 @@ def _option_text(event: RiskEvent) -> str | None:
     )
 
 
-class SlackAlertObserver(RiskObserver):
-    """Posts risk events to Telegram (class name preserved for compat)."""
+class AlertObserver(RiskObserver):
+    """Posts risk events through the notifier."""
 
-    def __init__(self, webhook_url: str | None = None, timeout: int = 10) -> None:
-        # webhook_url retained for backward-compat with existing call sites; ignored.
+    def __init__(self, timeout: int = 10) -> None:
         self.timeout = timeout
 
     def update(self, symbol: str, price: float) -> None:

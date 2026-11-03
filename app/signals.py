@@ -12,7 +12,7 @@ transport. Every signal is alerted on, and unauthorized ones never trade.
 from dataclasses import dataclass
 from typing import Protocol
 
-from app.slack import notify
+from app.notifier import notify
 
 SIDES = ("BUY", "SELL")
 

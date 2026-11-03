@@ -214,7 +214,7 @@ def run_engine_loop(app):
         put_position_snapshot as put_option_position_snapshot,
         put_order_snapshot as put_option_order_snapshot,
     )
-    from app.slack import notify as slack_notify
+    from app.notifier import notify
     from app.risk.observer import RiskSubject
     from app.risk.option_loss import check_option_drawdowns
     from app.risk.mental_stops import check_mental_stops
@@ -222,7 +222,7 @@ def run_engine_loop(app):
         coverage_line, position_change_alerts, unmonitored_alerts,
     )
     from app.risk.theta_burn import book_theta_text, theta_burn_alerts
-    from app.risk.slack_observer import SlackAlertObserver
+    from app.risk.alert_observer import AlertObserver
     from app.trading_db import post_orders, post_positions
     from app.utils_shared import (
         SweepState, maybe_option_stop_loss_sweep, maybe_option_take_profit_sweep,
@@ -244,10 +244,10 @@ def run_engine_loop(app):
     opt_tp_sweep_state = SweepState()
     opt_sl_state: dict = {}
 
-    # Option drawdown alerts go to Telegram (app/slack.py). A contract alerts
+    # Option drawdown alerts go out via app/notifier.py. A contract alerts
     # once per breach and re-arms after it recovers or closes.
     risk_subject = RiskSubject()
-    risk_subject.attach(SlackAlertObserver())
+    risk_subject.attach(AlertObserver())
     drawdown_alerted: set[str] = set()
     mental_state: dict[str, int] = {}
     pending_summary_sent: set[str] = set()
@@ -351,7 +351,7 @@ def run_engine_loop(app):
                 )
                 pending_startup_ping = False
                 for text in pending_msgs:
-                    slack_notify(text, bypass_debounce=True)
+                    notify(text, bypass_debounce=True)
             except Exception:
                 log.exception("Pending option summary failed")
 
@@ -477,7 +477,7 @@ def run_engine_loop(app):
                 log.info("[scheduler] Device challenge mode — "
                          "sleeping %.0f seconds until %d:00 AM ET",
                          wait_secs, retry_hour)
-                slack_notify(
+                notify(
                     f":clock11: FlipActivate: allocation-engine-2.0 — "
                     f"Device challenge pending. Will retry at "
                     f"{retry_hour}:00 AM ET "

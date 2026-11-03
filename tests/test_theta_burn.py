@@ -4,7 +4,7 @@ from datetime import date
 
 import pytest
 
-from app.risk import slack_observer
+from app.risk import alert_observer
 from app.risk.mental_stops import check_mental_stops
 from app.risk.theta_burn import (
     book_theta_text, burn_pct_of_value, daily_theta_burn, days_to_zero, net_theta_burn,
@@ -116,16 +116,16 @@ def test_once_per_contract_per_day():
 
 def test_tier_alert_carries_theta(monkeypatch):
     sent = []
-    monkeypatch.setattr(slack_observer, "_notify", lambda text, **kw: sent.append(text))
+    monkeypatch.setattr(alert_observer, "_notify", lambda text, **kw: sent.append(text))
     ev, _ = check_mental_stops([opt(mark=1.1)], {}, D)
     assert ev[0].metadata["theta_usd"] == pytest.approx(20.0)
-    slack_observer.SlackAlertObserver().on_risk_event(ev[0])
+    alert_observer.AlertObserver().on_risk_event(ev[0])
     assert sent[0].endswith(" · θ −$20.00/day")
 
 
 def test_tier_alert_without_theta_is_unchanged(monkeypatch):
     sent = []
-    monkeypatch.setattr(slack_observer, "_notify", lambda text, **kw: sent.append(text))
+    monkeypatch.setattr(alert_observer, "_notify", lambda text, **kw: sent.append(text))
     ev, _ = check_mental_stops([opt(mark=1.1, theta=None)], {}, D)
-    slack_observer.SlackAlertObserver().on_risk_event(ev[0])
+    alert_observer.AlertObserver().on_risk_event(ev[0])
     assert "θ" not in sent[0]
