@@ -321,7 +321,7 @@ def run_engine_loop(app):
                 um_msgs, unmonitored_sent = unmonitored_alerts(
                     options_positions, unmonitored_sent)
                 for text in cov_msgs + um_msgs:
-                    slack_notify(text, bypass_debounce=True)
+                    notify(text, bypass_debounce=True)
             except Exception:
                 log.exception("Option coverage alerts failed")
 
@@ -332,7 +332,7 @@ def run_engine_loop(app):
                         burn_pct=config["OPTION_THETA_BURN_PCT"],
                         dte_warn=config["OPTION_THETA_DTE_WARN"])
                     for text in theta_msgs:
-                        slack_notify(text, bypass_debounce=True)
+                        notify(text, bypass_debounce=True)
                 except Exception:
                     log.exception("Option theta-burn alerts failed")
 
