@@ -1,4 +1,4 @@
-"""Option drawdown check — alert when a long option's mark falls far below purchase."""
+"""Option drawdown — pure breach detection (ruleset ``drawdown`` adds dedupe)."""
 
 from __future__ import annotations
 
@@ -20,18 +20,10 @@ def option_key(pos: dict) -> str:
     )
 
 
-def check_option_drawdowns(options_positions: list[dict]) -> list[RiskEvent]:
-    """Return an OPTION_DRAWDOWN event per long option whose mark is >25% below purchase.
-
-    Args:
-        options_positions: Option position dicts from ``broker.options_positions()``.
-
-    Returns:
-        One RiskEvent per breaching position (empty when none breach).
-    """
+def decide_drawdown_events(options_positions: list[dict]) -> list[RiskEvent]:
+    """Return an OPTION_DRAWDOWN event per long option whose mark is >25% below purchase."""
     events: list[RiskEvent] = []
     for pos in options_positions:
-        # Short premium loses when the mark rises — not what this alert covers.
         if pos.get("position_type") == "short":
             continue
         purchase = float(pos.get("purchase_price") or 0)
@@ -57,6 +49,13 @@ def check_option_drawdowns(options_positions: list[dict]) -> list[RiskEvent]:
                 "quantity": pos.get("quantity"),
             },
         )
-        log.warning("OPTION DRAWDOWN: %s", event.message)
         events.append(event)
+    return events
+
+
+def check_option_drawdowns(options_positions: list[dict]) -> list[RiskEvent]:
+    """Backward-compatible alias for ``decide_drawdown_events`` (no dedupe)."""
+    events = decide_drawdown_events(options_positions)
+    for event in events:
+        log.warning("OPTION DRAWDOWN: %s", event.message)
     return events

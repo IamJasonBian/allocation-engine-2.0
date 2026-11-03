@@ -157,23 +157,6 @@ def book_looks_unreadable(positions, options_positions, account) -> bool:
     return all(not float((account or {}).get(f) or 0) for f in fields)
 
 
-def alert_option_drawdowns(events, alerted: set[str], risk_subject) -> set[str]:
-    """Notify each newly-breaching option once; return the set still breaching.
-
-    Args:
-        events: OPTION_DRAWDOWN RiskEvents from check_option_drawdowns().
-        alerted: Contract keys already alerted on a previous tick.
-        risk_subject: Bus whose observers (Telegram) receive new breaches.
-
-    Returns:
-        Contract keys breaching now — pass back in on the next tick.
-    """
-    for e in events:
-        if e.symbol not in alerted:
-            risk_subject.notify(e)
-    return {e.symbol for e in events}
-
-
 def run_engine_loop(app):
     """Run the worker loop forever: read the book, run the sweeps, sync.
 
@@ -196,8 +179,7 @@ def run_engine_loop(app):
     )
     from app.slack import notify as slack_notify
     from app.risk.observer import RiskSubject
-    from app.risk.option_loss import check_option_drawdowns
-    from app.risk.mental_stops import check_mental_stops
+    from app.risk.option_alert_rulesets import build_registry, run_tick
     from app.risk.slack_observer import SlackAlertObserver
     from app.trading_db import post_orders, post_positions
     from app.utils_shared import (
@@ -218,12 +200,11 @@ def run_engine_loop(app):
     stop_sweep_state = SweepState()
     opt_tp_sweep_state = SweepState()
 
-    # Option drawdown alerts go to Telegram (app/slack.py). A contract alerts
-    # once per breach and re-arms after it recovers or closes.
+    # Option alert rulesets → Telegram (see docs/OPTION_ALERTS.md).
     risk_subject = RiskSubject()
     risk_subject.attach(SlackAlertObserver())
-    drawdown_alerted: set[str] = set()
-    mental_state: dict[str, int] = {}
+    option_alert_registry = build_registry()
+    option_alert_states: dict = {}
 
     log.info(
         "[engine] worker loop started (interval=%ds, dry_run=%s, broker=%s, "
@@ -277,18 +258,13 @@ def run_engine_loop(app):
                     log.exception("Failed to fetch options orders")
 
             try:
-                drawdown_alerted = alert_option_drawdowns(
-                    check_option_drawdowns(options_positions),
-                    drawdown_alerted, risk_subject)
+                alert_events, option_alert_states = run_tick(
+                    options_positions, option_alert_states, option_alert_registry,
+                )
+                for event in alert_events:
+                    risk_subject.notify(event)
             except Exception:
-                log.exception("Option drawdown check failed")
-
-            try:
-                ms_events, mental_state = check_mental_stops(options_positions, mental_state)
-                for e in ms_events:
-                    risk_subject.notify(e)
-            except Exception:
-                log.exception("Option mental-stop check failed")
+                log.exception("Option alert rulesets failed")
 
             try:
                 maybe_option_take_profit_sweep(config, opt_tp_sweep_state)

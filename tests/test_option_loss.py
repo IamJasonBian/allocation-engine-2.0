@@ -31,23 +31,16 @@ def test_short_positions_and_missing_purchase_are_skipped():
 
 
 def test_loop_alerts_once_per_breach_and_rearms():
-    from app.background import alert_option_drawdowns
+    from app.risk.option_alert_rulesets import build_registry, run_tick
 
-    class Bus:
-        def __init__(self):
-            self.sent = []
-
-        def notify(self, e):
-            self.sent.append(e.symbol)
-
-    bus = Bus()
-    breach = check_option_drawdowns([_opt(2.00, 1.40)])
-    alerted = alert_option_drawdowns(breach, set(), bus)
-    alerted = alert_option_drawdowns(breach, alerted, bus)     # still breaching: no repeat
-    assert bus.sent == ["SPY CALL 500.0 2026-10-17"]
-    alerted = alert_option_drawdowns([], alerted, bus)         # recovered: re-arm
-    alert_option_drawdowns(breach, alerted, bus)
-    assert len(bus.sent) == 2
+    reg = build_registry(frozenset({"drawdown"}))
+    pos = [_opt(2.00, 1.40)]
+    sent = []
+    states = {}
+    for payload in (pos, pos, [], pos):
+        events, states = run_tick(payload, states, reg)
+        sent.extend(e.symbol for e in events)
+    assert sent == ["SPY CALL 500.0 2026-10-17", "SPY CALL 500.0 2026-10-17"]
 
 
 def test_telegram_observer_formats_drawdown(monkeypatch):
@@ -68,4 +61,7 @@ def test_telegram_observer_formats_mental_stop(monkeypatch):
     monkeypatch.setattr(slack_observer, "_notify", lambda text, **kw: sent.append(text))
     ev, _ = check_mental_stops([_opt(2.08, 0.95)], {}, date(2026, 11, 3))
     slack_observer.SlackAlertObserver().on_risk_event(ev[0])
-    assert "Buy $2.08 → Now $0.95 (-54%" in sent[0] and "mental stop -40%" in sent[0]
+    assert sent[0] == (
+        "🐧 SPY CALL 500.0 2026-10-17 x2\n"
+        "Buy $2.08 → Now $0.95 (-54%, $-226)"
+    )
