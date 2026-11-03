@@ -51,6 +51,15 @@ EXEC_REQUIRE_AUTH = os.getenv(
     "EXEC_REQUIRE_AUTH", _get("exec", "require_auth", "true")
 ).lower() == "true"
 
+# --- [passthrough] /rh/* relay to api.robinhood.com (see passthrough.py) ---
+# Caps on order writes, in USD: equity qty * price; options qty * premium * 100.
+RH_EQUITY_MAX_NOTIONAL = float(
+    os.getenv("RH_EQUITY_MAX_NOTIONAL", _get("passthrough", "equity_max_notional", "5000"))
+)
+RH_OPTIONS_MAX_NOTIONAL = float(
+    os.getenv("RH_OPTIONS_MAX_NOTIONAL", _get("passthrough", "options_max_notional", "1000"))
+)
+
 # --- Robinhood MCP (official hosted agentic-trading server) ---
 # HTTP-transport MCP endpoint; OAuth Bearer required. Token is provisioned via
 # the agentic-account OAuth flow (separate from our password session).

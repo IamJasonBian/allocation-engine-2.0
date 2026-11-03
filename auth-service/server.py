@@ -14,6 +14,8 @@ Endpoints (all POSTs and order reads require Bearer EXEC_TOKEN):
   POST /orders/trailing_stop          — place one (dry_run defaults to true)
   POST /orders/trailing_stop/replace  — replace one (dry_run defaults to true)
   POST /exec                          — run an external command
+  ANY  /rh/<path>                     — relay to api.robinhood.com/<path>; reads pass,
+                                        writes only per passthrough.WRITE_RULES
 
 Threaded server; single process; tiny footprint (e2-micro friendly).
 """
@@ -27,6 +29,7 @@ import config
 import guardrails
 import mcp_client
 import mcp_oauth
+import passthrough
 import robinhood
 import session as session_mgr
 from gcp_secrets import get_secret
@@ -124,7 +127,9 @@ class Handler(BaseHTTPRequestHandler):
     # -- routing --
 
     def do_GET(self):
-        if self.path == "/health":
+        if self.path.startswith(passthrough.PREFIX + "/"):
+            self._handle_passthrough()
+        elif self.path == "/health":
             self._send(200, {"status": "ok", "service": "auth-service"})
         elif self.path == "/auth/status":
             self._send(200, session_mgr.status(config.DEFAULT_PROFILE))
@@ -141,7 +146,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         route = self.path.rstrip("/")
-        if route == "/login":
+        if self.path.startswith(passthrough.PREFIX + "/"):
+            self._handle_passthrough()
+        elif route == "/login":
             self._handle_login()
         elif route == "/orders/trailing_stop":
             self._handle_place()
@@ -157,6 +164,42 @@ class Handler(BaseHTTPRequestHandler):
             self._send(404, {"error": "not found"})
 
     # -- handlers --
+
+    def _handle_passthrough(self):
+        """Relay to Robinhood. Reads pass; writes must clear passthrough.check_write."""
+        if not self._authorized():
+            self._send(401, {"error": "unauthorized"})
+            return
+        path = passthrough.upstream_path(self.path)
+        if path is None:
+            self._send(400, {"error": "path must be /rh/<robinhood api path>"})
+            return
+        body = None
+        if self.command != "GET":
+            try:
+                body = self._read_json()
+            except json.JSONDecodeError:
+                self._send(400, {"error": "invalid JSON body"})
+                return
+            reason = passthrough.check_write(self.command, path, body)
+            if reason:
+                self._guardrail_block(reason)
+                return
+            if self.headers.get("X-Dry-Run", "true").lower() != "false":
+                self._send(200, {"dry_run": True, "method": self.command,
+                                 "url": passthrough.BASE + path, "payload": body})
+                return
+        sess, err = _ensure_session(config.DEFAULT_PROFILE)
+        if err:
+            self._send(409, err)
+            return
+        try:
+            status, data = passthrough.forward(sess, self.command, path, body)
+        except Exception as e:  # noqa: BLE001
+            log.exception("passthrough %s %s failed", self.command, path)
+            self._send(502, {"error_code": "UPSTREAM_FAILED", "detail": str(e)})
+            return
+        self._send(status, data if isinstance(data, dict) else {"data": data})
 
     def _handle_login(self):
         if not self._authorized():
