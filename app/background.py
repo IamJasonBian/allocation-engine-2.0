@@ -292,20 +292,16 @@ def run_engine_loop(app):
                 log.exception("Option mental-stop check failed")
 
             try:
-                from app.risk.eod_summary import maybe_eod_summary
+                from app.risk.eod_summary import maybe_eod_pending_summary
 
-                # EOD always lists pending equity + option orders from this tick's
-                # broker read (open-only option fetch above).
-                eod_msg, eod_summary_sent = maybe_eod_summary(
-                    options_positions,
-                    list(open_orders),
+                eod_msg, eod_summary_sent = maybe_eod_pending_summary(
                     [dict(o) for o in options_open_orders],
                     eod_summary_sent,
                 )
                 if eod_msg:
                     slack_notify(eod_msg, bypass_debounce=True)
             except Exception:
-                log.exception("EOD summary failed")
+                log.exception("EOD pending summary failed")
 
             try:
                 maybe_option_take_profit_sweep(config, opt_tp_sweep_state)
