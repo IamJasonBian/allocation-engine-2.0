@@ -224,6 +224,7 @@ def run_engine_loop(app):
     risk_subject.attach(SlackAlertObserver())
     drawdown_alerted: set[str] = set()
     mental_state: dict[str, int] = {}
+    eod_summary_sent: set[str] = set()
 
     log.info(
         "[engine] worker loop started (interval=%ds, dry_run=%s, broker=%s, "
@@ -289,6 +290,20 @@ def run_engine_loop(app):
                     risk_subject.notify(e)
             except Exception:
                 log.exception("Option mental-stop check failed")
+
+            try:
+                from app.risk.eod_summary import maybe_eod_summary
+
+                eod_msg, eod_summary_sent = maybe_eod_summary(
+                    options_positions,
+                    [dict(o) for o in open_orders],
+                    [dict(o) for o in options_open_orders],
+                    eod_summary_sent,
+                )
+                if eod_msg:
+                    slack_notify(eod_msg, bypass_debounce=True)
+            except Exception:
+                log.exception("EOD summary failed")
 
             try:
                 maybe_option_take_profit_sweep(config, opt_tp_sweep_state)
