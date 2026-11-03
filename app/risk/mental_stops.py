@@ -17,7 +17,7 @@ from app.risk.events import RiskEvent
 
 log = logging.getLogger(__name__)
 
-TIERS = (0.40, 0.60, 0.80)          # loss fractions of cost: -40%, -60%, -80%
+TIERS = (0.25, 0.40, 0.60, 0.80)    # loss fractions of cost; -25% replaces the old drawdown alert
 REARM_BAND = 0.10                   # must recover this far above a tier to re-arm
 DEFAULT_UNTIL = date(2026, 11, 23)
 
