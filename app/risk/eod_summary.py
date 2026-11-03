@@ -73,13 +73,16 @@ def _fmt_pending(o: dict) -> str:
     return f"• {sym} {strat} x{qty:g}{price_s} ({state})"
 
 
-def build_pending_message(*, option_orders: list[dict], label: str, as_of: date) -> str:
+def build_pending_message(*, option_orders: list[dict], label: str, as_of: date,
+                          coverage: str | None = None) -> str:
     pending = _pending_option_orders(option_orders)
     lines = [f"📋 {label} pending options ({as_of.isoformat()})"]
     if pending:
         lines.extend(_fmt_pending(o) for o in pending)
     else:
         lines.append("• (none)")
+    if coverage:
+        lines.append(coverage)
     return "\n".join(lines)
 
 
@@ -89,8 +92,21 @@ def pending_summaries_due(
     *,
     now: datetime | None = None,
     include_startup: bool = False,
+    coverage: str | None = None,
 ) -> tuple[list[str], set[str]]:
-    """Return messages to send this tick and the updated dedupe set."""
+    """Return messages to send this tick and the updated dedupe set.
+
+    Args:
+        option_orders: Open option orders (OrderEvent dicts).
+        sent: Slot keys already sent.
+        now: Override for the current time (tests).
+        include_startup: Also send the one-off Startup snapshot.
+        coverage: Optional line appended to every message (see
+            ``option_coverage.coverage_line``).
+
+    Returns:
+        ``(messages, new_sent)``.
+    """
     now = (now or datetime.now(_ET)).astimezone(_ET)
     messages: list[str] = []
     new_sent = set(sent)
@@ -100,6 +116,7 @@ def pending_summaries_due(
         if key not in new_sent:
             messages.append(build_pending_message(
                 option_orders=option_orders, label="Startup", as_of=now.date(),
+                coverage=coverage,
             ))
             new_sent.add(key)
 
@@ -112,6 +129,7 @@ def pending_summaries_due(
                 continue
             messages.append(build_pending_message(
                 option_orders=option_orders, label=label, as_of=now.date(),
+                coverage=coverage,
             ))
             new_sent.add(key)
 
