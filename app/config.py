@@ -99,6 +99,13 @@ class Config:
     # Limit rests this percent below the trigger so a fast drop can still fill.
     OPTION_SL_LIMIT_OFFSET_PERCENT = float(os.getenv("OPTION_SL_LIMIT_OFFSET_PERCENT", "10"))
 
+    # -- Option theta-burn alerts (alert-only, engine loop) --
+    OPTION_THETA_BURN_ENABLED = os.getenv("OPTION_THETA_BURN_ENABLED", "true").lower() == "true"
+    # Alert a losing long once a day when daily theta >= this % of its value...
+    OPTION_THETA_BURN_PCT = float(os.getenv("OPTION_THETA_BURN_PCT", "5"))
+    # ...or when it has this many days or fewer to expiry.
+    OPTION_THETA_DTE_WARN = int(os.getenv("OPTION_THETA_DTE_WARN", "7"))
+
     # -- Trading DB write path (5thstreetcapital Netlify functions) --
     TRADING_DB_URL = os.getenv(
         "TRADING_DB_URL", "https://5thstreetcapital.org/.netlify/functions"
