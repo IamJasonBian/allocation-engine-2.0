@@ -545,21 +545,26 @@ class RobinhoodTrader(BrokerClient):
             })
         return result
 
-    _OPEN_OPTION_STATES = {"queued", "confirmed", "partially_filled", "pending"}
+    _OPEN_OPTION_STATES = {"queued", "confirmed", "partially_filled", "pending", "unconfirmed"}
 
-    def options_orders(self, limit: int = 50, open_only: bool = False) -> list[dict]:
+    def options_orders(self, limit: int = 50, open_only: bool = False,
+                       raise_errors: bool = False) -> list[dict]:
         """Return recent options orders.
 
         Args:
             limit: Maximum number of orders to return.
             open_only: If True, only return orders in open states
-                       (queued, confirmed, partially_filled, pending).
+                       (queued, confirmed, partially_filled, pending, unconfirmed).
+            raise_errors: If True, re-raise a failed fetch instead of
+                       returning an empty list.
         """
         self._ensure_auth()
         try:
             raw = rh.orders.get_all_option_orders()
         except Exception:
             log.exception("Failed to fetch options orders")
+            if raise_errors:
+                raise
             return []
 
         result = []

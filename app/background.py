@@ -131,6 +131,26 @@ def _equity_order_history(broker, limit: int = EQUITY_HISTORY_LIMIT) -> list[dic
     return orders
 
 
+def read_open_option_orders(broker) -> tuple[list[OrderEvent], bool]:
+    """Read open option orders, reporting whether the read succeeded.
+
+    Args:
+        broker: The engine's BrokerClient.
+
+    Returns:
+        ``(events, ok)``; ``ok`` is False when the fetch raised, so callers
+        can tell a failed read from a genuinely empty order book.
+    """
+    if not hasattr(broker, "options_orders"):
+        return [], True
+    try:
+        raw = broker.options_orders(limit=200, open_only=True, raise_errors=True)
+        return [_option_order_to_event(oo) for oo in raw], True
+    except Exception:
+        log.exception("Failed to fetch options orders")
+        return [], False
+
+
 def book_looks_unreadable(positions, options_positions, account) -> bool:
     """True when the broker read looks failed rather than genuinely flat.
 
@@ -267,18 +287,12 @@ def run_engine_loop(app):
                 log.exception("[stop-sweeper] sweep failed: %s", sweep_err)
 
             options_positions = []
-            options_open_orders: list[OrderEvent] = []
             if hasattr(broker, "options_positions"):
                 try:
                     options_positions = broker.options_positions()
                 except Exception:
                     log.exception("Failed to fetch options positions")
-            if hasattr(broker, "options_orders"):
-                try:
-                    for oo in broker.options_orders(limit=200, open_only=True):
-                        options_open_orders.append(_option_order_to_event(oo))
-                except Exception:
-                    log.exception("Failed to fetch options orders")
+            options_open_orders, option_orders_ok = read_open_option_orders(broker)
 
             try:
                 drawdown_alerted = alert_option_drawdowns(
@@ -313,12 +327,17 @@ def run_engine_loop(app):
             except Exception as tp_err:
                 log.exception("[opt-tp] sweep failed: %s", tp_err)
 
-            try:
-                maybe_option_stop_loss_sweep(
-                    config, broker, options_positions,
-                    [dict(o) for o in options_open_orders], opt_sl_state)
-            except Exception as sl_err:
-                log.exception("[opt-sl] sweep failed: %s", sl_err)
+            # A failed order read looks like "no open orders", which would make
+            # every long look unprotected and stack duplicate stops.
+            if option_orders_ok:
+                try:
+                    maybe_option_stop_loss_sweep(
+                        config, broker, options_positions,
+                        [dict(o) for o in options_open_orders], opt_sl_state)
+                except Exception as sl_err:
+                    log.exception("[opt-sl] sweep failed: %s", sl_err)
+            else:
+                log.warning("[opt-sl] skipping sweep: open option orders unreadable")
 
             equity_events: list[OrderEvent] = [
                 _equity_order_to_event(o, is_open=True) for o in open_orders
