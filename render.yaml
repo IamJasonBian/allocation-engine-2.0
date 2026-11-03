@@ -33,7 +33,11 @@ services:
         sync: false
       - key: TRADING_DB_TOKEN
         sync: false
-      - key: SLACK_WEBHOOK_URL
+      - key: ALERTS_ENABLED
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
         sync: false
       - key: DRY_RUN
         value: "true"
@@ -79,7 +83,11 @@ services:
         sync: false
       - key: TRADING_DB_TOKEN
         sync: false
-      - key: SLACK_WEBHOOK_URL
+      - key: ALERTS_ENABLED
+        sync: false
+      - key: TELEGRAM_BOT_TOKEN
+        sync: false
+      - key: TELEGRAM_CHAT_ID
         sync: false
       - key: DRY_RUN
         value: "true"

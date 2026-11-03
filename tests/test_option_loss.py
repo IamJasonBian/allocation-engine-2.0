@@ -51,10 +51,10 @@ def test_loop_alerts_once_per_breach_and_rearms():
 
 
 def test_telegram_observer_formats_drawdown(monkeypatch):
-    from app.risk import slack_observer
+    from app.risk import alert_observer
     sent = []
-    monkeypatch.setattr(slack_observer, "_notify", lambda text, **kw: sent.append(text))
-    slack_observer.SlackAlertObserver().on_risk_event(
+    monkeypatch.setattr(alert_observer, "_notify", lambda text, **kw: sent.append(text))
+    alert_observer.AlertObserver().on_risk_event(
         check_option_drawdowns([_opt(2.00, 1.40)])[0])
     assert sent[0] == (
         "🐧 SPY CALL 500.0 2026-10-17 x2\n"
@@ -64,12 +64,12 @@ def test_telegram_observer_formats_drawdown(monkeypatch):
 
 def test_telegram_observer_formats_mental_stop(monkeypatch):
     from datetime import date
-    from app.risk import slack_observer
+    from app.risk import alert_observer
     from app.risk.mental_stops import check_mental_stops
     sent = []
-    monkeypatch.setattr(slack_observer, "_notify", lambda text, **kw: sent.append(text))
+    monkeypatch.setattr(alert_observer, "_notify", lambda text, **kw: sent.append(text))
     ev, _ = check_mental_stops([_opt(2.08, 0.95)], {}, date(2026, 11, 3))
-    slack_observer.SlackAlertObserver().on_risk_event(ev[0])
+    alert_observer.AlertObserver().on_risk_event(ev[0])
     assert sent[0] == (
         "🐧 SPY CALL 500.0 2026-10-17 x2\n"
         "Buy $2.08 → Now $0.95 (-54%, $-226)"

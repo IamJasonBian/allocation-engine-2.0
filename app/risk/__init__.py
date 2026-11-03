@@ -2,7 +2,7 @@
 
 from app.risk.events import RiskEvent
 from app.risk.observer import RiskObserver, Subject, RiskSubject
-from app.risk.slack_observer import SlackAlertObserver
+from app.risk.alert_observer import AlertObserver
 from app.risk.rebalancer_observer import RebalancerObserver
 
 __all__ = [
@@ -10,6 +10,6 @@ __all__ = [
     "RiskObserver",
     "Subject",
     "RiskSubject",
-    "SlackAlertObserver",
+    "AlertObserver",
     "RebalancerObserver",
 ]
