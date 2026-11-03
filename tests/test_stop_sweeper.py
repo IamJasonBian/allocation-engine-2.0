@@ -15,13 +15,10 @@ from app.risk import equity_stop_mapping
 from app.stop_sweeper import (
     GuardrailViolation,
     StopStore,
-    build_option_take_profit_order,
     build_payload,
     check,
-    option_take_profit_limit,
     renew,
     sweep,
-    sweep_options_take_profit,
     validate_mcp_call,
     validate_trailing_stop_payload,
 )
@@ -34,13 +31,11 @@ from app.stop_sweeper import (
 class FakeClient:
     """In-memory stand-in for the auth-service; validates like real clients."""
 
-    def __init__(self, book=None, option_positions=None, option_orders=None):
+    def __init__(self, book=None):
         self.book = book or []          # orders "on RH"
         self.rh_reads = 0               # how often we hit "RH"
         self.placed = []
         self.replaced = []
-        self._option_positions = option_positions if option_positions is not None else []
-        self._option_orders = option_orders if option_orders is not None else []
 
     def get_stops(self):
         self.rh_reads += 1
@@ -61,16 +56,6 @@ class FakeClient:
     def mcp_call(self, payload):
         validate_mcp_call(payload)
         return {"ok": True}
-
-    def get_option_positions(self):
-        return list(self._option_positions)
-
-    def get_option_orders(self):
-        return list(self._option_orders)
-
-    def place_option_limit(self, order, dry_run=True):
-        self.placed.append((order, dry_run))
-        return {"dry_run": dry_run, "id": "opt-tp-1", "state": "queued"}
 
 
 def rh_order(symbol, side="sell", pct="16", order_id=None, created=None):
@@ -474,73 +459,6 @@ def test_prune_removes_rows_gone_from_rh(store):
     out = sweep(c, store, ["AAPL"])
     assert out["pruned"] == ["IWN"]
     assert store.get("IWN") is None
-
-
-# --------------------------------------------------------------------------- #
-# options take-profit sweep
-# --------------------------------------------------------------------------- #
-
-def _long_option_pos(**overrides):
-    base = {
-        "chain_symbol": "MU",
-        "option_type": "call",
-        "strike": 95.0,
-        "expiration": "2026-03-20",
-        "position_type": "long",
-        "quantity": 2,
-        "purchase_price": 2.0,
-        "average_price": 200.0,
-        "entry_source": "position_average_price",
-        "source": "robinhood",
-    }
-    base.update(overrides)
-    return base
-
-
-def test_option_take_profit_limit_price():
-    assert option_take_profit_limit(2.0, 50) == 3.0
-
-
-def test_sweep_options_take_profit_places_sell_to_close_limit(store):
-    pos = [_long_option_pos()]
-    client = FakeClient(option_positions=pos)
-    out = sweep_options_take_profit(client, store, tp_percent=50, dry_run=True)
-    assert len(out["placed"]) == 1
-    order, dry = client.placed[0]
-    assert dry is True
-    assert order["action"] == "sell_to_close"
-    assert order["limit_price"] == "3.0"
-    assert order["contract"]["chain_symbol"] == "MU"
-    assert store.option_tp_swept_today()
-
-
-def test_sweep_options_take_profit_runs_once_per_day(store):
-    pos = [_long_option_pos()]
-    client = FakeClient(option_positions=pos)
-    sweep_options_take_profit(client, store, dry_run=True)
-    client.placed.clear()
-    out = sweep_options_take_profit(client, store, dry_run=True)
-    assert out.get("skipped") == "already_swept_today"
-    assert client.placed == []
-
-
-def test_sweep_options_take_profit_skips_duplicate_open_order(store):
-    pos = [_long_option_pos()]
-    open_orders = [{
-        "state": "queued",
-        "price": 3.0,
-        "legs": [{
-            "side": "sell",
-            "chain_symbol": "MU",
-            "option_type": "call",
-            "strike": 95.0,
-            "expiration": "2026-03-20",
-        }],
-    }]
-    client = FakeClient(option_positions=pos, option_orders=open_orders)
-    out = sweep_options_take_profit(client, store, tp_percent=50, dry_run=True)
-    assert out["placed"] == []
-    assert any(s.get("reason") == "tp_limit_already_open" for s in out["skipped"])
 
 
 # --------------------------------------------------------------------------- #

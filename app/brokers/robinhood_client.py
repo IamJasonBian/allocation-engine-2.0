@@ -269,6 +269,40 @@ class RobinhoodTrader(BrokerClient):
         log.error("RH option stop-loss rejected: %s", result)
         return None
 
+    def place_option_take_profit(self, order: dict) -> dict | None:
+        """Rest a GTC sell-to-close limit (credit) on a long option.
+
+        Args:
+            order: Planned take-profit from ``sweep_options_take_profit``:
+                contract (chain_symbol, option_type, strike, expiration),
+                quantity, limit_price.
+
+        Returns:
+            ``{"id", "state"}`` for the submitted order, or None if rejected.
+        """
+        self._ensure_auth()
+        c = order["contract"]
+        try:
+            result = rh.orders.order_sell_option_limit(
+                positionEffect="close", creditOrDebit="credit",
+                price=float(order["limit_price"]),
+                symbol=c["chain_symbol"], quantity=int(order["quantity"]),
+                expirationDate=c["expiration"], strike=float(c["strike"]),
+                optionType=c["option_type"],
+                account_number=self.account_number or None,
+                timeInForce="gtc", jsonify=True,
+            )
+        except Exception as e:
+            log.error("Robinhood option take-profit error for %s: %s", c["chain_symbol"], e)
+            return None
+        if result and result.get("id"):
+            log.info("RH option take-profit submitted: %s %s %s %s limit $%.2f -> %s",
+                     c["chain_symbol"], c["option_type"], c["strike"], c["expiration"],
+                     float(order["limit_price"]), result["id"])
+            return {"id": result["id"], "state": result.get("state")}
+        log.error("RH option take-profit rejected: %s", result)
+        return None
+
     def cancel_order(self, order_id: str):
         self._ensure_auth()
         rh.orders.cancel_stock_order(order_id)

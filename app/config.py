@@ -82,7 +82,7 @@ class Config:
         os.path.join(os.path.dirname(__file__), "..", "data", "stops.sqlite3"),
     )
 
-    # -- Options take-profit sweep (daily, via auth-service /orders/options/limit) --
+    # -- Options take-profit sweep (daily, sell-to-close limits via broker) --
     OPTION_TP_ENABLED = os.getenv("OPTION_TP_ENABLED", "true").lower() == "true"
     OPTION_TP_SWEEP_DRY_RUN = os.getenv("OPTION_TP_SWEEP_DRY_RUN", "true").lower() == "true"
     OPTION_TP_SWEEP_HOUR_ET = int(os.getenv("OPTION_TP_SWEEP_HOUR_ET", "0"))
