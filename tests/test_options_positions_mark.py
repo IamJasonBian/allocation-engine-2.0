@@ -21,3 +21,25 @@ def test_mark_price_read_from_nested_market_data(monkeypatch):
     assert len(pos) == 1
     assert round(pos[0]["purchase_price"], 4) == 2.0804
     assert pos[0]["mark_price"] == 0.955
+
+
+def test_mark_fallback_is_logged(monkeypatch, caplog):
+    import logging
+    rh = "app.brokers.robinhood_client.rh."
+    monkeypatch.setattr(rh + "options.get_open_option_positions", lambda: [{
+        "chain_symbol": "NBIS", "type": "long", "quantity": "1", "average_price": "200",
+        "option": "https://x/options/instruments/abc/", "option_id": "abc"}])
+    monkeypatch.setattr(rh + "options.get_option_instrument_data_by_id",
+                        lambda _id: {"strike_price": "230", "expiration_date": "2026-11-20", "type": "call"})
+
+    def boom(*a, **k):
+        raise RuntimeError("503 from marketdata")
+
+    monkeypatch.setattr(rh + "options.get_option_market_data", boom)
+    t = RobinhoodTrader.__new__(RobinhoodTrader)
+    t.account_number, t._authenticated = "TEST-ACCT", True
+    monkeypatch.setattr(t, "_ensure_auth", lambda: None)
+    with caplog.at_level(logging.WARNING):
+        pos = t.options_positions()
+    assert pos[0]["mark_price"] == 2.0
+    assert "option mark unavailable for NBIS" in caplog.text and "503 from marketdata" in caplog.text
