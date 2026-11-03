@@ -85,6 +85,16 @@ class Config:
     # Resting sell-to-close limit at RH lot purchase_price * (1 + pct/100).
     OPTION_TP_PERCENT = float(os.getenv("OPTION_TP_PERCENT", "75"))
 
+    # -- Options stop-loss sweep (engine loop, sell-to-close stop-limits via broker) --
+    OPTION_SL_ENABLED = os.getenv("OPTION_SL_ENABLED", "true").lower() == "true"
+    OPTION_SL_SWEEP_DRY_RUN = os.getenv("OPTION_SL_SWEEP_DRY_RUN", "true").lower() == "true"
+    OPTION_SL_SWEEP_INTERVAL_SECONDS = int(os.getenv("OPTION_SL_SWEEP_INTERVAL_SECONDS", "900"))
+    # Stop triggers at RH lot purchase_price * (1 - pct/100); per-symbol
+    # overrides live in app/risk/option_stop_mapping.py.
+    OPTION_SL_PERCENT = float(os.getenv("OPTION_SL_PERCENT", "50"))
+    # Limit rests this percent below the trigger so a fast drop can still fill.
+    OPTION_SL_LIMIT_OFFSET_PERCENT = float(os.getenv("OPTION_SL_LIMIT_OFFSET_PERCENT", "10"))
+
     # -- Trading DB write path (5thstreetcapital Netlify functions) --
     TRADING_DB_URL = os.getenv(
         "TRADING_DB_URL", "https://5thstreetcapital.org/.netlify/functions"
