@@ -59,12 +59,20 @@ def _send(text: str) -> bool:
         return False
 
 
-def notify(message: str, *, bypass_debounce: bool = False):
+def notify(message: str, *, bypass_debounce: bool = False) -> bool:
     """Post a message to the configured Telegram chat.
 
     Identical messages within ALERT_DEBOUNCE_SECONDS (default 300) are suppressed
     and counted; the next emit appends `[+N suppressed in last Ns]`.
     Pass `bypass_debounce=True` for critical alerts that must always go through.
+
+    Args:
+        message: Text to send.
+        bypass_debounce: Skip the duplicate-message debounce.
+
+    Returns:
+        True only when Telegram accepted the message; False when alerts are
+        disabled, the text is empty, it was debounced, or the send failed.
     """
     if not _ALERTS_ENABLED:
         global _last_disabled_log_ts
@@ -75,15 +83,14 @@ def notify(message: str, *, bypass_debounce: bool = False):
                 "(set ALERTS_ENABLED=true on Render to enable)"
             )
             _last_disabled_log_ts = now
-        return
+        return False
 
     text = _strip_slack_markup(message)
     if not text:
-        return
+        return False
 
     if bypass_debounce or _DEBOUNCE_WINDOW_SEC <= 0:
-        _send(text)
-        return
+        return _send(text)
 
     key = hashlib.sha256(text.encode("utf-8")).hexdigest()
     now = time.time()
@@ -91,9 +98,9 @@ def notify(message: str, *, bypass_debounce: bool = False):
         last_ts, suppressed = _last_sent.get(key, (0.0, 0))
         if now - last_ts < _DEBOUNCE_WINDOW_SEC:
             _last_sent[key] = (last_ts, suppressed + 1)
-            return
+            return False
         if suppressed > 0:
             text = f"{text}\n[+{suppressed} suppressed in last {_DEBOUNCE_WINDOW_SEC}s]"
         _last_sent[key] = (now, 0)
 
-    _send(text)
+    return _send(text)

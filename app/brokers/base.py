@@ -3,6 +3,10 @@
 from abc import ABC, abstractmethod
 
 
+class BrokerReadError(RuntimeError):
+    """A broker read failed or returned no data, so it must not be read as an empty book."""
+
+
 class BrokerClient(ABC):
     """Base class that all broker implementations must subclass."""
 
