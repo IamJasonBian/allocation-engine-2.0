@@ -41,6 +41,14 @@ class SandboxViolation(RuntimeError):
     """The managed order does not match the configured, allowed spread."""
 
 
+class BrokerReadError(RuntimeError):
+    """A Robinhood read failed in transport or returned None / an empty response."""
+
+
+class ShapeError(ValueError):
+    """A Robinhood response arrived but did not have the expected shape."""
+
+
 @dataclass(frozen=True)
 class SpreadSpec:
     order_id: str
@@ -80,10 +88,21 @@ def take_profit_credit(fill_debit: float, width: float, pct_of_max: float) -> fl
 
 
 def validate(spec: SpreadSpec, order: dict) -> None:
-    """Raise SandboxViolation unless ``order`` is exactly the allowed spread."""
+    """Check that ``order`` is exactly the allowed spread.
+
+    Args:
+        spec: The configured spread.
+        order: Order dict as returned by ``RHGateway.order``.
+
+    Raises:
+        ShapeError: ``order`` has no id or no legs list, so it cannot be judged.
+        SandboxViolation: The order id or legs differ from ``spec``.
+    """
+    legs = order.get("legs")
+    if not order.get("id") or not isinstance(legs, list):
+        raise ShapeError(f"order has no id or legs list: keys={sorted(order)}")
     if order.get("id") != spec.order_id:
         raise SandboxViolation("order id mismatch")
-    legs = order.get("legs") or []
     seen = {}
     for leg in legs:
         oid = str(leg.get("option", "")).rstrip("/").rsplit("/", 1)[-1] or leg.get("option_id")
@@ -93,11 +112,38 @@ def validate(spec: SpreadSpec, order: dict) -> None:
         raise SandboxViolation(f"legs do not match allowed spread: {seen}")
 
 
+def _flat_status(gw, memo: dict) -> str:
+    """Status for a successful position read that shows zero contracts.
+
+    Zero right after the fill can be Robinhood lag, so the job only ends once
+    the position was seen open or our remembered closing order is filled.
+
+    Args:
+        gw: Gateway used to look up the remembered closing order.
+        memo: Per-process memory (``seen_open``, ``close_id``).
+
+    Returns:
+        ``"done:closed"`` or ``"wait:position"``.
+    """
+    if memo.get("seen_open"):
+        return "done:closed"
+    mid = memo.get("close_id")
+    if mid and str(gw.order(mid).get("state")) == "filled":
+        return "done:closed"
+    return "wait:position"
+
+
 def step(gw, spec: SpreadSpec, cfg: Config, now: datetime, memo: dict | None = None) -> str:
     """One management pass. Returns a short status string; ``done:*`` ends the job.
 
     ``memo`` remembers the id of the closing order this process placed, so a
-    blind or wrong open-order listing can never cause a duplicate placement.
+    blind or wrong open-order listing can never cause a duplicate placement,
+    and whether the position was ever seen open (``seen_open``).
+
+    Raises:
+        BrokerReadError: A Robinhood read failed; the caller retries next pass.
+        ShapeError: A Robinhood response was malformed; the caller retries next pass.
+        SandboxViolation: The order is not the allowed spread.
     """
     memo = {} if memo is None else memo
     now = now.astimezone(ET)
@@ -114,15 +160,10 @@ def step(gw, spec: SpreadSpec, cfg: Config, now: datetime, memo: dict | None = N
     qty = int(float(order.get("processed_quantity") or 0))
     if qty < 1:
         return "done:not_filled"
-    open_qty = gw.open_qty(spec)
-    if open_qty is None:
-        return "wait:position_read"
-    if open_qty >= 1:
-        memo["saw_open_position"] = True
-    elif memo.get("saw_open_position"):
-        return "done:closed"
+    if gw.open_qty(spec) >= 1:
+        memo["seen_open"] = True
     else:
-        return "wait:position"
+        return _flat_status(gw, memo)
     fill_debit = float(order["processed_premium"]) / (100.0 * qty)
     closes = gw.open_close_orders(spec)
     mid = memo.get("close_id")
@@ -166,10 +207,8 @@ def step(gw, spec: SpreadSpec, cfg: Config, now: datetime, memo: dict | None = N
         log.info("[dry-run] would place closing credit %.2f x%d (%s)", target, qty, why)
         return f"dry:place:{why}@{target:.2f}"
     live_qty = gw.open_qty(spec)
-    if live_qty is None:
-        return "wait:position_read"
     if live_qty < 1:
-        return "wait:position" if not memo.get("saw_open_position") else "done:closed"
+        return _flat_status(gw, memo)
     oid = gw.place_close(spec, min(qty, live_qty), target)
     memo["close_id"] = oid
     return f"placed:{why}@{target:.2f}:{oid}"
@@ -188,7 +227,24 @@ class RHGateway:
         return rh
 
     def order(self, order_id):
-        return self._rh().orders.get_option_order_info(order_id)
+        """Fetch one option order.
+
+        Args:
+            order_id: Robinhood option order id.
+
+        Returns:
+            The order dict.
+
+        Raises:
+            BrokerReadError: The call failed, or returned None, a non-dict or a dict without id.
+        """
+        try:
+            res = self._rh().orders.get_option_order_info(order_id)
+        except Exception as e:                             # noqa: BLE001
+            raise BrokerReadError(f"order {order_id} read failed: {e}") from e
+        if not isinstance(res, dict) or not res.get("id"):
+            raise BrokerReadError(f"order {order_id} read returned {type(res).__name__} without id")
+        return res
 
     def open_close_orders(self, spec):
         ids = {spec.long_id, spec.short_id}
@@ -201,22 +257,49 @@ class RHGateway:
         return out
 
     def open_qty(self, spec):
-        """Long-leg quantity, or ``None`` when Robinhood did not return a position list."""
+        """Long-leg quantity held.
+
+        Args:
+            spec: The managed spread.
+
+        Returns:
+            Contracts held on the long leg; 0 only after a successful read.
+
+        Raises:
+            BrokerReadError: Robinhood returned None instead of a position list.
+        """
         positions = self._rh().options.get_open_option_positions()
         if positions is None:
-            return None
+            raise BrokerReadError("get_open_option_positions returned None")
         for p in positions:
             if str(p.get("option_id")) == spec.long_id:
                 return int(float(p.get("quantity") or 0))
         return 0
 
     def spread_quote(self, spec):
+        """Natural bid/ask of the spread.
+
+        Args:
+            spec: The managed spread.
+
+        Returns:
+            ``(bid, ask)`` for selling / buying the spread.
+
+        Raises:
+            BrokerReadError: Market data came back None or empty.
+            ShapeError: A leg's bid or ask is missing or not numeric.
+        """
         rh = self._rh()
 
         def md(i):
             d = rh.options.get_option_market_data_by_id(i)
-            d = d[0] if isinstance(d, list) else d
-            return float(d["bid_price"]), float(d["ask_price"])
+            d = d[0] if isinstance(d, list) and d else d
+            if not d:
+                raise BrokerReadError(f"no market data for {i}")
+            try:
+                return float(d["bid_price"]), float(d["ask_price"])
+            except (KeyError, TypeError, ValueError) as e:
+                raise ShapeError(f"bad bid/ask for {i}: {e}") from e
 
         (lb, la), (sb, sa) = md(spec.long_id), md(spec.short_id)
         return max(0.0, lb - sa), max(0.0, la - sb)
@@ -289,6 +372,9 @@ def run() -> None:
             log.exception("sandbox violation; stopping management")
             while True:
                 time.sleep(3600)
+        except (BrokerReadError, ShapeError) as e:
+            log.warning("broker read failed (%s: %s); retrying next pass", type(e).__name__, e)
+            status = last
         except Exception:                                  # noqa: BLE001
             log.exception("pass failed; will retry")
             status = last
