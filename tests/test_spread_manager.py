@@ -79,8 +79,17 @@ def test_hard_time_sells_for_any_bid():
     assert gw.placed == [(1, 0.05)]
 
 
-def test_done_when_position_closed():
-    assert step(FakeGW(order(), open_qty=0), SPEC, LIVE, at(3, 10)) == "done:closed"
+def test_done_when_position_closed_after_having_been_open():
+    memo = {"saw_open_position": True}
+    assert step(FakeGW(order(), open_qty=0), SPEC, LIVE, at(3, 10), memo) == "done:closed"
+
+
+def test_zero_qty_before_position_visible_waits():
+    assert step(FakeGW(order(), open_qty=0), SPEC, LIVE, at(3, 10)) == "wait:position"
+
+
+def test_failed_position_read_waits():
+    assert step(FakeGW(order(), open_qty=None), SPEC, LIVE, at(3, 10)) == "wait:position_read"
 
 
 def test_expired_after_expiration_date():

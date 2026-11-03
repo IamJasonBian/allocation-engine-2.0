@@ -114,8 +114,15 @@ def step(gw, spec: SpreadSpec, cfg: Config, now: datetime, memo: dict | None = N
     qty = int(float(order.get("processed_quantity") or 0))
     if qty < 1:
         return "done:not_filled"
-    if gw.open_qty(spec) < 1:
+    open_qty = gw.open_qty(spec)
+    if open_qty is None:
+        return "wait:position_read"
+    if open_qty >= 1:
+        memo["saw_open_position"] = True
+    elif memo.get("saw_open_position"):
         return "done:closed"
+    else:
+        return "wait:position"
     fill_debit = float(order["processed_premium"]) / (100.0 * qty)
     closes = gw.open_close_orders(spec)
     mid = memo.get("close_id")
@@ -158,7 +165,12 @@ def step(gw, spec: SpreadSpec, cfg: Config, now: datetime, memo: dict | None = N
     if cfg.dry_run:
         log.info("[dry-run] would place closing credit %.2f x%d (%s)", target, qty, why)
         return f"dry:place:{why}@{target:.2f}"
-    oid = gw.place_close(spec, min(qty, gw.open_qty(spec)), target)
+    live_qty = gw.open_qty(spec)
+    if live_qty is None:
+        return "wait:position_read"
+    if live_qty < 1:
+        return "wait:position" if not memo.get("saw_open_position") else "done:closed"
+    oid = gw.place_close(spec, min(qty, live_qty), target)
     memo["close_id"] = oid
     return f"placed:{why}@{target:.2f}:{oid}"
 
@@ -189,7 +201,11 @@ class RHGateway:
         return out
 
     def open_qty(self, spec):
-        for p in self._rh().options.get_open_option_positions() or []:
+        """Long-leg quantity, or ``None`` when Robinhood did not return a position list."""
+        positions = self._rh().options.get_open_option_positions()
+        if positions is None:
+            return None
+        for p in positions:
             if str(p.get("option_id")) == spec.long_id:
                 return int(float(p.get("quantity") or 0))
         return 0
