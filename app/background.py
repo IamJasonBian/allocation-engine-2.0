@@ -218,6 +218,9 @@ def run_engine_loop(app):
     from app.risk.observer import RiskSubject
     from app.risk.option_loss import check_option_drawdowns
     from app.risk.mental_stops import check_mental_stops
+    from app.risk.option_coverage import (
+        coverage_line, position_change_alerts, unmonitored_alerts,
+    )
     from app.risk.slack_observer import SlackAlertObserver
     from app.trading_db import post_orders, post_positions
     from app.utils_shared import (
@@ -248,6 +251,8 @@ def run_engine_loop(app):
     mental_state: dict[str, int] = {}
     pending_summary_sent: set[str] = set()
     pending_startup_ping = True
+    seen_option_positions: dict[str, float] | None = None
+    unmonitored_sent: set[str] = set()
 
     log.info(
         "[engine] worker loop started (interval=%ds, dry_run=%s, broker=%s, "
@@ -309,12 +314,25 @@ def run_engine_loop(app):
                 log.exception("Option mental-stop check failed")
 
             try:
+                cov_msgs, seen_option_positions = position_change_alerts(
+                    options_positions, seen_option_positions)
+                um_msgs, unmonitored_sent = unmonitored_alerts(
+                    options_positions, unmonitored_sent)
+                for text in cov_msgs + um_msgs:
+                    slack_notify(text, bypass_debounce=True)
+            except Exception:
+                log.exception("Option coverage alerts failed")
+
+            try:
                 from app.risk.eod_summary import pending_summaries_due
 
                 pending_msgs, pending_summary_sent = pending_summaries_due(
                     [dict(o) for o in options_open_orders],
                     pending_summary_sent,
                     include_startup=pending_startup_ping,
+                    coverage=coverage_line(
+                        options_positions,
+                        [dict(o) for o in options_open_orders] if option_orders_ok else None),
                 )
                 pending_startup_ping = False
                 for text in pending_msgs:
