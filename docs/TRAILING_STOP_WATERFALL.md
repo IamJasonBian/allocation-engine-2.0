@@ -54,8 +54,7 @@ Secondary rules (all %-only, all inside the invariant):
 
 The measurement surface the later phases verify against:
 `/api/viz/drift` (per-symbol drift vs the rail), `/api/viz/order-funnel`
-(placed→filled + slippage), `/api/viz/wheel-lanes` (per-underlying state),
-each on top of the IBKR broker client.
+(placed→filled + slippage), each on top of the IBKR broker client.
 
 *Exit criteria:* endpoints merged, full test suite green. **Met.**
 
