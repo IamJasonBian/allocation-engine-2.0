@@ -18,7 +18,6 @@ from gcp_secrets import add_secret_version, get_secret
 
 log = logging.getLogger("mcp_oauth")
 
-_EXPIRY_LEAD_SECONDS = 300
 _lock = threading.Lock()
 
 
@@ -54,7 +53,7 @@ def needs_refresh(obj: dict, now: float | None = None) -> bool:
     if exp is None:
         return False
     now = time.time() if now is None else now
-    return now >= exp - _EXPIRY_LEAD_SECONDS
+    return now >= exp - config.MCP_REFRESH_LEAD_SECONDS
 
 
 def refresh_blob(obj: dict, http_timeout: int = 15) -> dict:
@@ -144,3 +143,42 @@ def _from_secret(secret_name: str, *, persist: bool) -> str:
                         secret_name,
                     )
         return access_token_from_raw(json.dumps(obj))
+
+
+def refresh_once() -> None:
+    """One background tick: timestamp-check the secret and refresh if due.
+
+    Errors are logged, never raised — a failed refresh must not kill the loop,
+    and a dead chain (invalid_grant / revoked) needs a human re-login anyway.
+    """
+    if not config.MCP_TOKEN_SECRET:
+        return
+    try:
+        _from_secret(config.MCP_TOKEN_SECRET, persist=True)
+    except Exception:
+        log.exception("MCP OAuth background refresh failed")
+
+
+def start_refresh_loop(interval: float | None = None) -> threading.Thread | None:
+    """Start the daemon thread that keeps the refresh chain alive while idle.
+
+    Args:
+        interval: Seconds between ticks; defaults to MCP_REFRESH_INTERVAL_SECONDS.
+
+    Returns:
+        The started thread, or None when no Secret Manager token is configured.
+    """
+    if not config.MCP_TOKEN_SECRET:
+        return None
+    interval = config.MCP_REFRESH_INTERVAL_SECONDS if interval is None else interval
+
+    def _run() -> None:
+        while True:
+            refresh_once()
+            time.sleep(interval)
+
+    t = threading.Thread(target=_run, name="mcp-oauth-refresh", daemon=True)
+    t.start()
+    log.info("MCP OAuth refresh loop started (every %ss, lead %ss)",
+             interval, config.MCP_REFRESH_LEAD_SECONDS)
+    return t
