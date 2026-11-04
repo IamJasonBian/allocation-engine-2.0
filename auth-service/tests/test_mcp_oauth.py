@@ -23,10 +23,9 @@ def _blob(**overrides):
 class McpOAuthTests(unittest.TestCase):
 
     def test_needs_refresh_within_lead_window(self):
-        # 1h left, 48h lead -> refresh now (well inside the observed ~4-9d TTL)
-        obj = _blob(expires_at=time.time() + 3600)
-        with mock.patch("mcp_oauth.config.MCP_REFRESH_LEAD_SECONDS", 172800):
-            self.assertTrue(mcp_oauth.needs_refresh(obj))
+        # on-demand refresh: due inside the fixed 300s lead, not before
+        self.assertTrue(mcp_oauth.needs_refresh(_blob(expires_at=time.time() + 60)))
+        self.assertFalse(mcp_oauth.needs_refresh(_blob(expires_at=time.time() + 3600)))
 
 
     def test_refresh_blob_posts_oauth_fields(self):
@@ -62,16 +61,6 @@ class McpOAuthTests(unittest.TestCase):
         self.assertEqual(token, "fresh-jwt")
         refresh.assert_called_once()
         persist.assert_called_once()
-
-
-    def test_refresh_once_refreshes_when_due_and_swallows_errors(self):
-        stale = _blob(expires_at=time.time() + 60)
-        with mock.patch("mcp_oauth.config.MCP_TOKEN_SECRET", "rh-mcp-oauth-token"), \
-             mock.patch("mcp_oauth.config.MCP_REFRESH_LEAD_SECONDS", 172800), \
-             mock.patch("mcp_oauth.get_secret", return_value=json.dumps(stale)), \
-             mock.patch("mcp_oauth.refresh_blob", side_effect=RuntimeError("invalid_grant")) as refresh:
-            mcp_oauth.refresh_once()  # must not raise: loop stays alive
-        refresh.assert_called_once()
 
 
 if __name__ == "__main__":
