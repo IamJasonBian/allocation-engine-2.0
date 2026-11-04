@@ -55,6 +55,10 @@ def trade_signal(side):
     if market_hours not in MARKET_HOURS:
         return _bad(f"market_hours must be one of {list(MARKET_HOURS)}")
 
+    order = body.get("order")
+    if order is not None and not isinstance(order, dict):
+        return _bad("order must be a Robinhood order object")
+
     cfg = current_app.config
     received_at = now_utc()
     if body.get("expires_at"):
@@ -73,7 +77,7 @@ def trade_signal(side):
         reason=str(body.get("reason") or "")[:200],
         limit_price=limit_price, market_hours=market_hours,
         received_at=received_at, expires_at=expires_at,
-        authorized=_is_authorized(),
+        authorized=_is_authorized(), order=order,
     )
     try:
         chain = build_chain(

@@ -210,10 +210,10 @@ class AuthServiceClient:
                         method, path, status, code, detail)
             raise OTPRequired(detail or "OTP needed")
 
-    def _request(self, method, path, json_body=None):
+    def _request(self, method, path, json_body=None, extra_headers=None):
         self._check_config()
         url = f"{self.base_url}{path}"
-        headers = {"Authorization": f"Bearer {self.token}"}
+        headers = {"Authorization": f"Bearer {self.token}", **(extra_headers or {})}
         try:
             resp = requests.request(method, url, json=json_body,
                                     headers=headers, timeout=self.timeout)
@@ -308,6 +308,24 @@ class AuthServiceClient:
         return self.mcp_relay(payload, session_id=session_id)
 
     # -- auth (exempt from the destructive-action gates) --
+
+    def relay(self, method, path, body=None, dry_run=True):
+        """Send a Robinhood-shaped request through the box's /rh relay.
+
+        Args:
+            method: HTTP method, e.g. "POST".
+            path: Robinhood API path, e.g. "/options/orders/".
+            body: Robinhood request body.
+            dry_run: When true the box echoes the request instead of sending it.
+
+        Returns:
+            Robinhood's response (or the box's dry-run echo).
+
+        Raises:
+            AuthServiceError: The box or Robinhood rejected the request.
+        """
+        return self._request(method, f"/rh{path}", body,
+                             extra_headers={"X-Dry-Run": "true" if dry_run else "false"})
 
     def get_token(self):
         """Vend the box's live RH access token.
