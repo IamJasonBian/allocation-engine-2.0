@@ -432,7 +432,6 @@ class Handler(BaseHTTPRequestHandler):
 
 def main():
     server = ThreadingHTTPServer(("0.0.0.0", config.PORT), Handler)
-    mcp_oauth.start_refresh_loop()
     log.info("auth-service listening on :%d", config.PORT)
     try:
         server.serve_forever()

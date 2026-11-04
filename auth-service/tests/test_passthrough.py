@@ -1,4 +1,4 @@
-"""/rh/* relay: reads pass untouched, writes only through passthrough rules."""
+"""/rh/* relay: path confinement and the write rules."""
 
 import os
 import sys
@@ -10,30 +10,13 @@ os.environ.setdefault("AUTH_SERVICE_ENV", "/nonexistent-env-for-tests")
 
 import passthrough  # noqa: E402
 
-
-def _option_order(**overrides):
-    body = {
-        "account": "https://api.robinhood.com/accounts/TESTACCT/",
-        "direction": "debit", "type": "limit", "time_in_force": "gfd",
-        "quantity": "1", "price": "6.00", "ref_id": str(uuid.uuid4()),
-        "legs": [
-            {"option": "https://api.robinhood.com/options/instruments/a/",
-             "side": "buy", "position_effect": "open", "ratio_quantity": 1},
-            {"option": "https://api.robinhood.com/options/instruments/b/",
-             "side": "sell", "position_effect": "open", "ratio_quantity": 1},
-        ],
-    }
-    body.update(overrides)
-    return body
+BUY_OPEN = {"side": "buy", "position_effect": "open"}
+SELL_OPEN = {"side": "sell", "position_effect": "open"}
 
 
-def _equity_order(**overrides):
-    body = {"account": "https://api.robinhood.com/accounts/TESTACCT/",
-            "instrument": "https://api.robinhood.com/instruments/x/", "symbol": "NBIS",
-            "side": "buy", "type": "limit", "quantity": "2", "price": "158.25",
-            "time_in_force": "gfd", "trigger": "immediate", "ref_id": str(uuid.uuid4())}
-    body.update(overrides)
-    return body
+def _check(path, **body):
+    body.setdefault("ref_id", str(uuid.uuid4()))
+    return passthrough.check_write("POST", path, body)
 
 
 class UpstreamPathTests(unittest.TestCase):
@@ -48,56 +31,55 @@ class UpstreamPathTests(unittest.TestCase):
 
 
 class WriteRuleTests(unittest.TestCase):
-    def test_vertical_spread_allowed(self):
-        self.assertIsNone(passthrough.check_write("POST", "/options/orders/", _option_order()))
-
-    def test_naked_short_open_blocked(self):
-        legs = [{"option": "x", "side": "sell", "position_effect": "open"}]
-        self.assertIn("naked", passthrough.check_write(
-            "POST", "/options/orders/", _option_order(legs=legs)))
-
-    def test_closing_sell_allowed(self):
-        legs = [{"option": "x", "side": "sell", "position_effect": "close"}]
-        self.assertIsNone(passthrough.check_write(
-            "POST", "/options/orders/", _option_order(legs=legs, price="1.30")))
-
-    def test_option_notional_cap(self):
+    def test_option_orders(self):
+        o = "/options/orders/"
+        self.assertIsNone(_check(o, quantity="1", price="6", legs=[BUY_OPEN, SELL_OPEN]))
+        self.assertIsNone(_check(o, quantity="29", price="0.30",
+                                 legs=[{"side": "sell", "position_effect": "close"}]))
+        # Shape is Robinhood's job: fractional contracts / odd legs pass through.
+        self.assertIsNone(_check(o, quantity="1.5", price="1", legs="not-a-list"))
+        for legs in ([SELL_OPEN], [{"side": "SELL", "position_effect": "Open"}]):
+            self.assertIn("naked", _check(o, quantity="1", price="1", legs=legs))
         # 29 x $1.30 x 100 = $3,770 > default $1,000
-        self.assertIn("options_max_notional", passthrough.check_write(
-            "POST", "/options/orders/", _option_order(quantity="29", price="1.30")))
+        self.assertIn("options_max_notional", _check(o, quantity="29", price="1.30"))
+        # sell 2 / buy 1 per unit leaves one short uncovered
+        self.assertIn("naked", _check(o, quantity="1", price="1", legs=[
+            {**SELL_OPEN, "ratio_quantity": 2}, {**BUY_OPEN, "ratio_quantity": 1}]))
+        self.assertIsNone(_check(o, quantity="1", price="1", legs=[
+            {**SELL_OPEN, "ratio_quantity": 1}, {**BUY_OPEN, "ratio_quantity": 2}]))
+        for junk in ("x", -1, 0, None):
+            self.assertIn("ratio_quantity", _check(o, quantity="1", price="1", legs=[
+                {**SELL_OPEN, "ratio_quantity": junk}, BUY_OPEN]), junk)
 
-    def test_shape_left_to_robinhood(self):
-        # Fractional contracts, odd leg fields: Robinhood rejects these, not us.
-        self.assertIsNone(passthrough.check_write(
-            "POST", "/options/orders/", _option_order(quantity="1.5")))
-        self.assertIsNone(passthrough.check_write(
-            "POST", "/options/orders/", _option_order(legs="not-a-list")))
+    def test_closing_orders_skip_the_cap(self):
+        o = "/options/orders/"
+        close = [{"side": "sell", "position_effect": "close", "ratio_quantity": 1},
+                 {"side": "buy", "position_effect": "close", "ratio_quantity": 1}]
+        # 1 x $20 x 100 = $2,000 > $1,000 cap, but it only reduces exposure
+        self.assertIsNone(_check(o, quantity="1", price="20.00", legs=close))
+        self.assertIn("ref_id", _check(o, quantity="1", price="20.00", legs=close, ref_id="x"))
+        # a roll (close + open) is still capped
+        roll = [close[0], BUY_OPEN]
+        self.assertIn("options_max_notional", _check(o, quantity="1", price="20.00", legs=roll))
+        # no legs is not "all closes"
+        self.assertIn("options_max_notional", _check(o, quantity="29", price="1.30", legs=[]))
+
+    def test_equity_orders(self):
+        self.assertIsNone(_check("/orders/", quantity="2", price="158.25"))
+        self.assertIn("equity_max_notional", _check("/orders/", quantity="100", price="158.25"))
+        self.assertIn("ref_id", _check("/orders/", quantity="1", price="1", ref_id="nope"))
 
     def test_unparseable_cap_fields_fail_closed(self):
-        for bad in ({"quantity": ["29"]}, {"price": "abc"}, {"quantity": None}):
-            self.assertIn("needed for", passthrough.check_write(
-                "POST", "/options/orders/", _option_order(**bad)), bad)
+        for bad in ({"quantity": ["29"], "price": "1"}, {"quantity": "1", "price": "abc"},
+                    {"price": "1"}):
+            self.assertIn("needed for", _check("/options/orders/", **bad), bad)
 
-    def test_naked_short_check_ignores_case(self):
-        legs = [{"option": "x", "side": "SELL", "position_effect": "Open"}]
-        self.assertIn("naked", passthrough.check_write(
-            "POST", "/options/orders/", _option_order(legs=legs)))
-
-    def test_equity_cap_and_ref_id(self):
-        self.assertIsNone(passthrough.check_write("POST", "/orders/", _equity_order()))
-        self.assertIn("equity_max_notional", passthrough.check_write(
-            "POST", "/orders/", _equity_order(quantity="100")))
-        self.assertIn("ref_id", passthrough.check_write(
-            "POST", "/orders/", _equity_order(ref_id="nope")))
-
-    def test_cancels_allowed(self):
+    def test_write_allowlist(self):
         oid = str(uuid.uuid4())
-        self.assertIsNone(passthrough.check_write("POST", f"/orders/{oid}/cancel/", {}))
-        self.assertIsNone(passthrough.check_write("POST", f"/options/orders/{oid}/cancel/", {}))
-
-    def test_unlisted_writes_refused(self):
+        for path in (f"/orders/{oid}/cancel/", f"/options/orders/{oid}/cancel/"):
+            self.assertIsNone(_check(path))
         for path in ("/ach/transfers/", "/accounts/TESTACCT/", "/options/orders/x/replace/"):
-            self.assertIn("not an allowed write", passthrough.check_write("POST", path, {}))
+            self.assertIn("not an allowed write", _check(path))
 
 
 if __name__ == "__main__":

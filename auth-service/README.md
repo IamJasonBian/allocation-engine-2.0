@@ -129,21 +129,12 @@ All POSTs and order reads require `Authorization: Bearer <exec-token>`.
 | POST   | `/exec/mcp`                        | relay a JSON-RPC call to the Robinhood MCP |
 | ANY    | `/rh/<path>`                       | relay to `api.robinhood.com/<path>` (see below) |
 
-`/rh/<path>` is a thin relay to `https://api.robinhood.com/<path>` using the
-box's session. Callers send Robinhood's own request shape; Robinhood's status
-and body come back unchanged, so a bad shape is rejected by Robinhood.
-
-- **GET** passes through for any path.
-- **Writes** are refused (403 `GUARDRAIL_BLOCKED`) unless they match a rule in
-  `passthrough.WRITE_RULES`: `POST /orders/`, `POST /options/orders/`, and order
-  cancels. Order rules check only what Robinhood would accept but we don't want:
-  `[passthrough]` notional caps, no sell-to-open without a bought leg, UUID `ref_id`.
-  Shape is left to Robinhood, except `quantity`/`price` must parse (the cap reads them).
-- Writes are **dry-run** unless the caller sends `X-Dry-Run: false`.
-
-```bash
-curl -s "$BOX/rh/options/orders/?state=queued" -H "Authorization: Bearer $EXEC_TOKEN"
-```
+`/rh/<path>` relays to `https://api.robinhood.com/<path>` with the box's session;
+Robinhood's status + body come back unchanged. GETs pass. Writes are refused
+(403) unless they are `POST /orders/`, `POST /options/orders/`, or a cancel, and
+those are checked only for the `[passthrough]` notional caps (skipped when every
+option leg closes), naked short opens (sold-to-open ratio > bought-to-open), and a
+UUID `ref_id`. Writes dry-run unless `X-Dry-Run: false`.
 
 `/exec/mcp` forwards a JSON-RPC payload to the **official Robinhood MCP**
 (`https://agent.robinhood.com/mcp/trading`, HTTP transport) and relays the status
