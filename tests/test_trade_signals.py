@@ -109,7 +109,7 @@ def test_default_expiry_is_ttl_after_receipt(env):
 
 def test_unknown_listener_fails_loudly(env):
     client, alerts = env
-    r = client(SIGNAL_HANDLERS="alert,execute").post("/api/signals/sell", json=sig())
+    r = client(SIGNAL_HANDLERS="alert,bogus").post("/api/signals/sell", json=sig())
     assert r.status_code == 500 and "unknown SIGNAL_HANDLERS" in r.get_json()["error"]
     assert alerts == []
 
@@ -127,3 +127,62 @@ def test_bad_input_is_400(env, over):
     client, alerts = env
     assert client().post("/api/signals/sell", json=sig(**over)).status_code == 400
     assert alerts == []
+
+
+SPREAD = {"direction": "credit", "type": "limit", "price": "20.00", "quantity": "1",
+          "ref_id": "5f1d6a52-6d1b-4a39-9a43-0f0e9a8b1c11",
+          "legs": [{"option": "a", "side": "sell", "position_effect": "close"},
+                   {"option": "b", "side": "buy", "position_effect": "close"}]}
+
+
+@pytest.fixture
+def relay(monkeypatch):
+    import app.auth_service_client as asc
+    calls = []
+
+    def fake(self, method, path, body=None, dry_run=True):
+        calls.append((method, path, body, dry_run))
+        if isinstance(fake.result, Exception):
+            raise fake.result
+        return fake.result
+    fake.result = {"id": "rh-1", "state": "queued"}
+    monkeypatch.setattr(asc.AuthServiceClient, "relay", fake)
+    return calls, fake
+
+
+def test_authorized_order_is_relayed_and_alerted(env, relay):
+    client, alerts = env
+    calls, _ = relay
+    r = client(SIGNAL_HANDLERS="alert,execute", DRY_RUN=False).post(
+        "/api/signals/sell", headers=AUTH, json=sig(symbol="AMD", quantity=1, order=SPREAD))
+    out = r.get_json()
+    assert calls == [("POST", "/options/orders/", SPREAD, False)]
+    assert out["order"] == {"sent": True, "path": "/options/orders/", "state": "queued",
+                            "order_id": "rh-1"}
+    assert len(alerts) == 2 and alerts[1].startswith("[sell-order]") and "queued" in alerts[1]
+
+
+def test_order_not_relayed_without_token_or_execute_handler(env, relay):
+    client, alerts = env
+    calls, _ = relay
+    out = client(SIGNAL_HANDLERS="alert,execute").post(
+        "/api/signals/sell", json=sig(order=SPREAD)).get_json()
+    assert out["order"] == {"sent": False, "why": "unauthorized"}
+    client().post("/api/signals/sell", headers=AUTH, json=sig(symbol="nvda", order=SPREAD))
+    assert calls == []
+
+
+def test_relay_failure_is_alerted(env, relay):
+    from app.auth_service_client import AuthServiceError
+    client, alerts = env
+    _, fake = relay
+    fake.result = AuthServiceError("403 GUARDRAIL_BLOCKED")
+    out = client(SIGNAL_HANDLERS="alert,execute").post(
+        "/api/signals/sell", headers=AUTH, json=sig(order=SPREAD)).get_json()
+    assert out["order"]["sent"] is False and "GUARDRAIL" in out["order"]["error"]
+    assert "FAILED" in alerts[-1]
+
+
+def test_order_must_be_object(env):
+    client, _ = env
+    assert client().post("/api/signals/sell", json=sig(order="sell it")).status_code == 400

@@ -7,7 +7,10 @@ and notification sees.
     dedupe     — a repeated signal_id returns the original result (24h)
     freshness  — past expires_at (default received + 5 min) → marked expired
     cooldown   — same side+symbol within 5 min → suppressed, counted
-    <listeners>— SIGNAL_HANDLERS, in order (today: "alert")
+    <listeners>— SIGNAL_HANDLERS, in order ("alert", "execute")
+
+"execute" relays an attached Robinhood-shaped ``order`` to the auth box's
+/rh relay — only for authorized, unexpired signals — and alerts the outcome.
 
 The first three always run; listeners are configurable. A handler may stop
 the chain (duplicate, suppressed); later handlers then don't run.
@@ -38,6 +41,7 @@ class Signal:
     limit_price: float | None = None
     market_hours: str = "regular_hours"
     authorized: bool = False
+    order: dict | None = None
 
 
 @dataclass
@@ -161,7 +165,39 @@ class AlertHandler:
         ctx.result["alerted"] = True
 
 
-LISTENERS = {"alert": AlertHandler}
+class ExecuteHandler:
+    """Relay an attached Robinhood order through the auth box; alert the outcome."""
+
+    name = "execute"
+
+    def handle(self, ctx: Context) -> None:
+        s = ctx.signal
+        if not s.order:
+            return
+        if not s.authorized or ctx.expired:
+            ctx.result["order"] = {"sent": False,
+                                   "why": "unauthorized" if not s.authorized else "expired"}
+            return
+        from flask import current_app
+
+        from app.auth_service_client import AuthServiceClient, AuthServiceError
+        path = "/options/orders/" if "legs" in s.order else "/orders/"
+        dry_run = bool(current_app.config.get("DRY_RUN", True))
+        try:
+            resp = AuthServiceClient().relay("POST", path, s.order, dry_run=dry_run)
+        except AuthServiceError as e:
+            ctx.result["order"] = {"sent": False, "error": str(e)}
+            notify(f"[{s.side.lower()}-order] id={s.signal_id} {path} FAILED: {e}",
+                   bypass_debounce=True)
+            return
+        state = "dry_run" if resp.get("dry_run") else resp.get("state", "submitted")
+        ctx.result["order"] = {"sent": not resp.get("dry_run"), "path": path,
+                               "state": state, "order_id": resp.get("id")}
+        notify(f"[{s.side.lower()}-order] id={s.signal_id} {path} → {state} "
+               f"order_id={resp.get('id')}", bypass_debounce=True)
+
+
+LISTENERS = {"alert": AlertHandler, "execute": ExecuteHandler}
 
 
 def build_chain(listener_names: list[str], memory: SignalMemory,
