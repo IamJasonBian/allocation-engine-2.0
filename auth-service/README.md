@@ -132,8 +132,9 @@ All POSTs and order reads require `Authorization: Bearer <exec-token>`.
 `/rh/<path>` relays to `https://api.robinhood.com/<path>` with the box's session;
 Robinhood's status + body come back unchanged. GETs pass. Writes are refused
 (403) unless they are `POST /orders/`, `POST /options/orders/`, or a cancel, and
-those are checked only for the `[passthrough]` notional caps, naked short opens,
-and a UUID `ref_id`. Writes dry-run unless `X-Dry-Run: false`.
+those are checked only for the `[passthrough]` notional caps (skipped when every
+option leg closes), naked short opens (sold-to-open ratio > bought-to-open), and a
+UUID `ref_id`. Writes dry-run unless `X-Dry-Run: false`.
 
 `/exec/mcp` forwards a JSON-RPC payload to the **official Robinhood MCP**
 (`https://agent.robinhood.com/mcp/trading`, HTTP transport) and relays the status

@@ -72,16 +72,34 @@ def _leg_is(leg, side: str, effect: str) -> bool:
             and str(leg.get("position_effect", "")).lower() == effect)
 
 
+def _ratio(leg) -> Decimal | None:
+    r = _dec(leg.get("ratio_quantity", 1))
+    return r if r is not None and r > 0 else None
+
+
 def check_option_order(body: dict) -> str | None:
-    """POST /options/orders/ — notional cap, no naked short opens, idempotency key."""
-    reason = _check_notional(body, _OPTIONS_MULTIPLIER, config.RH_OPTIONS_MAX_NOTIONAL,
-                             "options_max_notional")
-    if reason:
-        return reason
+    """POST /options/orders/ — notional cap, no naked short opens, idempotency key.
+
+    An order whose legs all close is exempt from the cap: it can only shrink
+    exposure. Sold-to-open ratio must be covered by bought-to-open ratio.
+    """
     legs = body.get("legs") if isinstance(body.get("legs"), list) else []
-    if any(_leg_is(l, "sell", "open") for l in legs) \
-            and not any(_leg_is(l, "buy", "open") for l in legs):
-        return "sell-to-open without a bought leg in the same order (naked short) is blocked"
+    closes_only = bool(legs) and all(
+        isinstance(l, dict) and str(l.get("position_effect", "")).lower() == "close"
+        for l in legs)
+    if not closes_only:
+        reason = _check_notional(body, _OPTIONS_MULTIPLIER, config.RH_OPTIONS_MAX_NOTIONAL,
+                                 "options_max_notional")
+        if reason:
+            return reason
+    opens = [l for l in legs if _leg_is(l, "sell", "open") or _leg_is(l, "buy", "open")]
+    if any(_ratio(l) is None for l in opens):
+        return "ratio_quantity must be a positive number (needed for the naked-short check)"
+    sold = sum((_ratio(l) for l in opens if _leg_is(l, "sell", "open")), Decimal(0))
+    bought = sum((_ratio(l) for l in opens if _leg_is(l, "buy", "open")), Decimal(0))
+    if sold > bought:
+        return ("sell-to-open ratio %s exceeds bought-to-open ratio %s in the same order "
+                "(naked short) is blocked" % (sold, bought))
     return _check_ref_id(body)
 
 

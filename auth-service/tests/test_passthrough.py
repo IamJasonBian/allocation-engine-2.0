@@ -42,6 +42,27 @@ class WriteRuleTests(unittest.TestCase):
             self.assertIn("naked", _check(o, quantity="1", price="1", legs=legs))
         # 29 x $1.30 x 100 = $3,770 > default $1,000
         self.assertIn("options_max_notional", _check(o, quantity="29", price="1.30"))
+        # sell 2 / buy 1 per unit leaves one short uncovered
+        self.assertIn("naked", _check(o, quantity="1", price="1", legs=[
+            {**SELL_OPEN, "ratio_quantity": 2}, {**BUY_OPEN, "ratio_quantity": 1}]))
+        self.assertIsNone(_check(o, quantity="1", price="1", legs=[
+            {**SELL_OPEN, "ratio_quantity": 1}, {**BUY_OPEN, "ratio_quantity": 2}]))
+        for junk in ("x", -1, 0, None):
+            self.assertIn("ratio_quantity", _check(o, quantity="1", price="1", legs=[
+                {**SELL_OPEN, "ratio_quantity": junk}, BUY_OPEN]), junk)
+
+    def test_closing_orders_skip_the_cap(self):
+        o = "/options/orders/"
+        close = [{"side": "sell", "position_effect": "close", "ratio_quantity": 1},
+                 {"side": "buy", "position_effect": "close", "ratio_quantity": 1}]
+        # 1 x $20 x 100 = $2,000 > $1,000 cap, but it only reduces exposure
+        self.assertIsNone(_check(o, quantity="1", price="20.00", legs=close))
+        self.assertIn("ref_id", _check(o, quantity="1", price="20.00", legs=close, ref_id="x"))
+        # a roll (close + open) is still capped
+        roll = [close[0], BUY_OPEN]
+        self.assertIn("options_max_notional", _check(o, quantity="1", price="20.00", legs=roll))
+        # no legs is not "all closes"
+        self.assertIn("options_max_notional", _check(o, quantity="29", price="1.30", legs=[]))
 
     def test_equity_orders(self):
         self.assertIsNone(_check("/orders/", quantity="2", price="158.25"))
