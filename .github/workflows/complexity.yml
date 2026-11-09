@@ -1,0 +1,103 @@
+name: Complexity
+
+on:
+  pull_request:
+    paths:
+      - '**.py'
+      - .github/workflows/complexity.yml
+
+permissions:
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: complexity-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  report:
+    runs-on: ubuntu-latest
+    steps:
+      # The default PR ref is a merge commit: HEAD is the PR merged into base, HEAD^1 is base.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - run: pip install radon==6.0.1 complexipy==8.3.0
+      - run: git worktree add --detach "$RUNNER_TEMP/base" HEAD^1
+
+      - name: Score previous and current
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          python - <<'PY'
+          import json, os, subprocess, tempfile
+          from pathlib import Path
+
+          def run(tree, *cmd):
+              return subprocess.run(cmd, cwd=tree, check=True, capture_output=True, text=True).stdout
+
+          def mean(xs):
+              return sum(xs) / len(xs) if xs else 0
+
+          def score(tree):
+              blocks = [b for v in json.loads(run(tree, "radon", "cc", "-j", ".")).values()
+                        if isinstance(v, list) for b in v if b["type"] != "class"]
+              # Weight by lines so adding a small file cannot move the index on its own.
+              mi = [(v["mi"], Path(tree, f).read_bytes().count(b"\n"))
+                    for f, v in json.loads(run(tree, "radon", "mi", "-j", ".")).items() if "mi" in v]
+              with tempfile.TemporaryDirectory() as d:
+                  out = os.path.join(d, "c.json")
+                  run(tree, "complexipy", ".", "--isolated", "-i", "-q", "--output-format", "json", "--output", out)
+                  cog = [f["complexity"] for f in json.load(open(out))]
+              return {
+                  "radon: avg cyclomatic complexity": mean([b["complexity"] for b in blocks]),
+                  "radon: functions ranked C or worse (CC > 10)": sum(b["complexity"] > 10 for b in blocks),
+                  "radon: maintainability index, line-weighted (higher is better)": sum(m * n for m, n in mi) / max(sum(n for _, n in mi), 1),
+                  "complexipy: total cognitive complexity": sum(cog),
+                  "complexipy: functions over 15": sum(c > 15 for c in cog),
+                  "complexipy: functions analyzed": len(cog),
+              }
+
+          def fmt(v):
+              return f"{v:.2f}" if isinstance(v, float) else str(v)
+
+          def delta(prev, cur):
+              d = cur - prev
+              return "0" if abs(d) < 0.005 else f"{d:+.2f}" if isinstance(d, float) else f"{d:+d}"
+
+          base = os.path.join(os.environ["RUNNER_TEMP"], "base")
+          prev, cur = score(base), score(".")
+          base_sha = run(".", "git", "rev-parse", "HEAD^1")[:7]
+          rows = [f"| {k} | {fmt(prev[k])} | {fmt(cur[k])} | {delta(prev[k], cur[k])} |" for k in cur]
+          body = "\n".join([
+              "<!-- complexity-report -->",
+              "### Complexity report",
+              f"Previous: base `{base_sha}`. Current: `{os.environ['HEAD_SHA'][:7]}` merged into base.",
+              "",
+              "| Metric | Previous | Current | Delta |",
+              "| --- | ---: | ---: | ---: |",
+              *rows,
+              "",
+          ])
+          open(os.path.join(os.environ["RUNNER_TEMP"], "report.md"), "w").write(body)
+          open(os.environ["GITHUB_STEP_SUMMARY"], "a").write(body)
+          PY
+
+      - name: Post or update PR comment
+        # Fork and Dependabot PRs get a read-only token; they still have the job summary.
+        if: github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMENTS: repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments
+          ISSUE_COMMENTS: repos/${{ github.repository }}/issues/comments
+        run: |
+          id=$(gh api "$COMMENTS" --paginate --jq '.[] | select(.body | startswith("<!-- complexity-report -->")) | .id' | head -n1)
+          if [ -n "$id" ]; then
+            gh api -X PATCH "$ISSUE_COMMENTS/$id" -F body=@"$RUNNER_TEMP/report.md" --silent
+          else
+            gh api "$COMMENTS" -F body=@"$RUNNER_TEMP/report.md" --silent
+          fi
