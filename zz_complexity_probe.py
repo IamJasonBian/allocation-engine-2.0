@@ -10,4 +10,6 @@ def draft_probe(items, limit):
                     total += step
                 elif step > limit / 2:
                     total -= 1
+    if total < 0 and limit:
+        total = 0
     return total
