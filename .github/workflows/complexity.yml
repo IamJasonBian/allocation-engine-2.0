@@ -35,7 +35,6 @@ jobs:
         run: |
           python - <<'PY'
           import json, os, subprocess, tempfile
-          from pathlib import Path
 
           def run(tree, *cmd):
               return subprocess.run(cmd, cwd=tree, check=True, capture_output=True, text=True).stdout
@@ -46,9 +45,6 @@ jobs:
           def score(tree):
               blocks = [b for v in json.loads(run(tree, "radon", "cc", "-j", ".")).values()
                         if isinstance(v, list) for b in v if b["type"] != "class"]
-              # Weight by lines so adding a small file cannot move the index on its own.
-              mi = [(v["mi"], Path(tree, f).read_bytes().count(b"\n"))
-                    for f, v in json.loads(run(tree, "radon", "mi", "-j", ".")).items() if "mi" in v]
               with tempfile.TemporaryDirectory() as d:
                   out = os.path.join(d, "c.json")
                   run(tree, "complexipy", ".", "--isolated", "-i", "-q", "--output-format", "json", "--output", out)
@@ -56,7 +52,6 @@ jobs:
               return {
                   "radon: avg cyclomatic complexity": mean([b["complexity"] for b in blocks]),
                   "radon: functions ranked C or worse (CC > 10)": sum(b["complexity"] > 10 for b in blocks),
-                  "radon: maintainability index, line-weighted (higher is better)": sum(m * n for m, n in mi) / max(sum(n for _, n in mi), 1),
                   "complexipy: total cognitive complexity": sum(cog),
                   "complexipy: functions over 15": sum(c > 15 for c in cog),
                   "complexipy: functions analyzed": len(cog),
