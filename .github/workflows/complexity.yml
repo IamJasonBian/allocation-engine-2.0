@@ -61,7 +61,7 @@ jobs:
               return f"{v:.2f}" if isinstance(v, float) else str(v)
 
           def delta(prev, cur):
-              d = cur - prev
+              d = round(cur, 2) - round(prev, 2)
               return "0" if abs(d) < 0.005 else f"{d:+.2f}" if isinstance(d, float) else f"{d:+d}"
 
           base = os.path.join(os.environ["RUNNER_TEMP"], "base")
