@@ -15,7 +15,9 @@ Writes are dry-run unless the caller sends ``X-Dry-Run: false``.
 
 import re
 import uuid
+from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
+from zoneinfo import ZoneInfo
 
 import requests
 
@@ -80,13 +82,33 @@ def _leg_is(leg, side: str, effect: str) -> bool:
             and str(leg.get("position_effect", "")).lower() == effect)
 
 
+def _now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _in_weekend_window(now: datetime, cutoff_hour_et: float) -> bool:
+    """Friday at or after the ET cutoff hour, or any time Saturday/Sunday ET."""
+    if cutoff_hour_et < 0:
+        return False
+    et = now.astimezone(ZoneInfo("America/New_York"))
+    return et.weekday() >= 5 or (et.weekday() == 4
+                                 and et.hour + et.minute / 60 >= cutoff_hour_et)
+
+
 def check_option_order(body: dict) -> str | None:
-    """POST /options/orders/ — notional cap, no naked short opens, idempotency key."""
+    """POST /options/orders/ — notional cap, no naked short opens, no weekend
+    opens, idempotency key."""
     reason = _check_notional(body, _OPTIONS_MULTIPLIER, config.RH_OPTIONS_MAX_NOTIONAL,
                              "options_max_notional")
     if reason:
         return reason
     legs = body.get("legs") if isinstance(body.get("legs"), list) else []
+    if (any(isinstance(l, dict) and str(l.get("position_effect", "")).lower() == "open"
+            for l in legs)
+            and _in_weekend_window(_now(), config.RH_OPTIONS_WEEKEND_CUTOFF_HOUR_ET)):
+        return ("option opens are blocked from Friday %g:00 ET through the weekend "
+                "([passthrough] options_weekend_cutoff_hour_et)"
+                % config.RH_OPTIONS_WEEKEND_CUTOFF_HOUR_ET)
     if any(_leg_is(l, "sell", "open") for l in legs) \
             and not any(_leg_is(l, "buy", "open") for l in legs):
         return "sell-to-open without a bought leg in the same order (naked short) is blocked"

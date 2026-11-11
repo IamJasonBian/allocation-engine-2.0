@@ -59,6 +59,10 @@ RH_EQUITY_MAX_NOTIONAL = float(
 RH_OPTIONS_MAX_NOTIONAL = float(
     os.getenv("RH_OPTIONS_MAX_NOTIONAL", _get("passthrough", "options_max_notional", "1000"))
 )
+# No option opens from this Friday hour (ET) until Monday 00:00 ET; closes pass.
+# Set to a negative number to switch the rule off.
+RH_OPTIONS_WEEKEND_CUTOFF_HOUR_ET = float(os.getenv(
+    "RH_OPTIONS_WEEKEND_CUTOFF_HOUR_ET", _get("passthrough", "options_weekend_cutoff_hour_et", "15")))
 
 # --- Robinhood MCP (official hosted agentic-trading server) ---
 # HTTP-transport MCP endpoint; OAuth Bearer required. Token is provisioned via
