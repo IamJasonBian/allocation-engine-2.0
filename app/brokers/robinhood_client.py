@@ -269,6 +269,54 @@ class RobinhoodTrader(BrokerClient):
         log.error("RH option stop-loss rejected: %s", result)
         return None
 
+    def place_option_close_limit(self, order: dict) -> dict | None:
+        """Sell a long option to close with a day limit.
+
+        Args:
+            order: Planned sell from ``plan_weekend_flatten``: contract
+                (chain_symbol, option_type, strike, expiration), quantity,
+                limit_price.
+
+        Returns:
+            ``{"id", "state"}`` for the submitted order, or None if rejected.
+        """
+        self._ensure_auth()
+        c = order["contract"]
+        try:
+            result = rh.orders.order_sell_option_limit(
+                positionEffect="close", creditOrDebit="credit",
+                price=float(order["limit_price"]), symbol=c["chain_symbol"],
+                quantity=int(order["quantity"]), expirationDate=c["expiration"],
+                strike=float(c["strike"]), optionType=c["option_type"],
+                account_number=self.account_number or None,
+                timeInForce="gfd", jsonify=True,
+            )
+        except Exception as e:
+            log.error("Robinhood option close-limit error for %s: %s", c["chain_symbol"], e)
+            return None
+        if result and result.get("id"):
+            return {"id": result["id"], "state": result.get("state")}
+        log.error("RH option close-limit rejected: %s", result)
+        return None
+
+    def cancel_option_order(self, order_id: str) -> bool:
+        """Cancel one open option order.
+
+        Args:
+            order_id: Robinhood option order id.
+
+        Returns:
+            True when Robinhood accepted the cancel request.
+        """
+        self._ensure_auth()
+        try:
+            rh.orders.cancel_option_order(order_id)
+        except Exception as e:
+            log.error("Robinhood option cancel error for %s: %s", order_id, e)
+            return False
+        log.info("Cancelled RH option order %s", order_id)
+        return True
+
     def cancel_order(self, order_id: str):
         self._ensure_auth()
         rh.orders.cancel_stock_order(order_id)

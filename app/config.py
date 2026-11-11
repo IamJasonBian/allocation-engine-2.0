@@ -97,9 +97,19 @@ class Config:
     OPTION_SL_SWEEP_INTERVAL_SECONDS = int(os.getenv("OPTION_SL_SWEEP_INTERVAL_SECONDS", "900"))
     # Stop triggers at RH lot purchase_price * (1 - pct/100); per-symbol
     # overrides live in app/risk/option_stop_mapping.py.
-    OPTION_SL_PERCENT = float(os.getenv("OPTION_SL_PERCENT", "50"))
+    OPTION_SL_PERCENT = float(os.getenv("OPTION_SL_PERCENT", "25"))
     # Limit rests this percent below the trigger so a fast drop can still fill.
     OPTION_SL_LIMIT_OFFSET_PERCENT = float(os.getenv("OPTION_SL_LIMIT_OFFSET_PERCENT", "10"))
+
+    # -- Options weekend flatten (engine loop, see app/risk/weekend_rules.py) --
+    # Sell every long option from Friday OPTION_WEEKEND_CUTOFF_HOUR_ET until
+    # Monday 00:00 ET; the stop-loss sweep stands down in that window.
+    OPTION_WEEKEND_FLAT_ENABLED = os.getenv("OPTION_WEEKEND_FLAT_ENABLED", "true").lower() == "true"
+    OPTION_WEEKEND_FLAT_DRY_RUN = os.getenv("OPTION_WEEKEND_FLAT_DRY_RUN", "true").lower() == "true"
+    OPTION_WEEKEND_CUTOFF_HOUR_ET = float(os.getenv("OPTION_WEEKEND_CUTOFF_HOUR_ET", "15"))
+    # Day limit rests this percent below the mark so it fills before the close.
+    OPTION_WEEKEND_FLAT_LIMIT_OFFSET_PERCENT = float(
+        os.getenv("OPTION_WEEKEND_FLAT_LIMIT_OFFSET_PERCENT", "5"))
 
     # -- Trading DB write path (5thstreetcapital Netlify functions) --
     TRADING_DB_URL = os.getenv(

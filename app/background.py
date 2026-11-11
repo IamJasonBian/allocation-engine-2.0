@@ -222,7 +222,7 @@ def run_engine_loop(app):
     from app.trading_db import post_orders, post_positions
     from app.utils_shared import (
         SweepState, maybe_option_stop_loss_sweep, maybe_option_take_profit_sweep,
-        maybe_stop_sweep,
+        maybe_stop_sweep, maybe_weekend_flatten_sweep,
     )
 
     config = app.config
@@ -336,6 +336,12 @@ def run_engine_loop(app):
                         [dict(o) for o in options_open_orders], opt_sl_state)
                 except Exception as sl_err:
                     log.exception("[opt-sl] sweep failed: %s", sl_err)
+                try:
+                    maybe_weekend_flatten_sweep(
+                        config, broker, options_positions,
+                        [dict(o) for o in options_open_orders])
+                except Exception as wf_err:
+                    log.exception("[weekend-flat] sweep failed: %s", wf_err)
             else:
                 log.warning("[opt-sl] skipping sweep: open option orders unreadable")
 
