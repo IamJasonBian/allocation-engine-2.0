@@ -14,6 +14,7 @@ from zoneinfo import ZoneInfo
 from app import stop_sweeper as sw
 from app.risk.equity_stop_mapping import EQUITY_STOP_MAPPING
 from app.risk.option_stop_loss import plan_option_stop_losses
+from app.risk.weekend_rules import in_weekend_window, plan_weekend_flatten
 
 log = logging.getLogger(__name__)
 
@@ -107,6 +108,10 @@ def maybe_option_stop_loss_sweep(config, broker, options_positions,
     """
     if not config["OPTION_SL_ENABLED"] or not hasattr(broker, "place_option_stop_loss"):
         return None
+    # The weekend flatten cancels resting stops before selling; don't re-rest them.
+    if config.get("OPTION_WEEKEND_FLAT_ENABLED") and in_weekend_window(
+            datetime.now(ZoneInfo("UTC")), config["OPTION_WEEKEND_CUTOFF_HOUR_ET"]):
+        return None
     now = time.time()
     if now - state.get("last_run", 0.0) < config["OPTION_SL_SWEEP_INTERVAL_SECONDS"]:
         return None
@@ -142,6 +147,65 @@ def maybe_option_stop_loss_sweep(config, broker, options_positions,
              len(orders), len(placed), len(skipped), dry)
     _post_bot_activity(events, "option SL bot activity")
     return {"planned": orders, "placed": placed, "skipped": skipped}
+
+
+def maybe_weekend_flatten_sweep(config, broker, options_positions, open_option_orders,
+                                now=None):
+    """Sell long options to close from the Friday cutoff through the weekend.
+
+    Runs every loop pass; each pass cancels resting sells or places the close
+    (see app/risk/weekend_rules.py), so it needs no state of its own.
+
+    Args:
+        config: Flask app config (keys from app.config.Config).
+        broker: The engine's BrokerClient; needs ``place_option_close_limit``
+            and ``cancel_option_order``.
+        options_positions: Dicts from ``broker.options_positions()``.
+        open_option_orders: Open option orders (OrderEvent dicts).
+        now: Current time (timezone-aware); defaults to now.
+
+    Returns:
+        ``{"sells", "cancels", "placed", "cancelled", "skipped"}``, or None when
+        gated off or outside the window.
+    """
+    if not config["OPTION_WEEKEND_FLAT_ENABLED"] or not hasattr(broker, "place_option_close_limit"):
+        return None
+    sells, cancels, skipped = plan_weekend_flatten(
+        options_positions, open_option_orders, now or datetime.now(ZoneInfo("UTC")),
+        config["OPTION_WEEKEND_CUTOFF_HOUR_ET"],
+        config["OPTION_WEEKEND_FLAT_LIMIT_OFFSET_PERCENT"])
+    if not (sells or cancels or skipped):
+        return None
+    dry = config["OPTION_WEEKEND_FLAT_DRY_RUN"]
+    placed, cancelled, events = [], [], []
+    for c in cancels:
+        k = c["contract"]
+        if dry:
+            log.info("[weekend-flat] DRY RUN would cancel %s %s %g %s order %s",
+                     k["chain_symbol"], k["option_type"], k["strike"], k["expiration"], c["order_id"])
+        elif broker.cancel_option_order(c["order_id"]):
+            cancelled.append(c)
+    for s in sells:
+        k = s["contract"]
+        desc = (f"{k['chain_symbol']} {k['option_type']} {k['strike']:g} {k['expiration']} "
+                f"x{s['quantity']} mark ${s['mark']:.2f} limit ${s['limit_price']:.2f}")
+        if dry:
+            log.info("[weekend-flat] DRY RUN would sell %s", desc)
+            continue
+        result = broker.place_option_close_limit(s)
+        if not result:
+            skipped.append({"contract": k, "reason": "broker_rejected"})
+            continue
+        log.info("[weekend-flat] sold %s -> %s", desc, result["id"])
+        placed.append({**s, "result": result})
+        events.append({"order_id": result["id"], "type": "OPTION_WEEKEND_FLATTEN",
+                       "status": result.get("state", "submitted"),
+                       "symbol": k["chain_symbol"], "quantity": float(s["quantity"])})
+    log.info("[weekend-flat] sells=%d cancels=%d placed=%d cancelled=%d skipped=%d dry_run=%s",
+             len(sells), len(cancels), len(placed), len(cancelled), len(skipped), dry)
+    _post_bot_activity(events, "option weekend-flatten bot activity")
+    return {"sells": sells, "cancels": cancels, "placed": placed,
+            "cancelled": cancelled, "skipped": skipped}
 
 
 def maybe_stop_sweep(config, state, current_positions):
