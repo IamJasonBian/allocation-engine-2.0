@@ -44,6 +44,9 @@ from app.config import Config
 from app.risk.equity_stop_mapping import (
     equity_stop_percent, equity_stop_qty_fraction, is_stop_frozen,
 )
+from app.risk.option_stop_loss import (
+    contract_key, sell_close_holdings, short_chains, snap_down,
+)
 
 log = logging.getLogger("stop_sweeper")
 
@@ -183,16 +186,6 @@ class ProxyClient:
         raise NotImplementedError(
             "replace is not exposed via the Render proxy — run with --via box")
 
-    def get_option_positions(self):
-        r = requests.get(f"{self.base}/positions/options", timeout=self.timeout)
-        r.raise_for_status()
-        return r.json().get("positions", [])
-
-    def get_option_orders(self):
-        r = requests.get(f"{self.base}/orders/options", timeout=self.timeout)
-        r.raise_for_status()
-        return r.json().get("orders", [])
-
     def mcp_call(self, payload):
         validate_mcp_call(payload)
         r = requests.post(f"{self.base}/mcp", json={"payload": payload},
@@ -232,28 +225,6 @@ class BoxClient:
         r = requests.post(f"{self.base}/orders/trailing_stop/replace",
                           json={"order_id": order_id, "payload": payload,
                                 "dry_run": dry_run},
-                          headers=self.headers, timeout=self.timeout)
-        r.raise_for_status()
-        return r.json()
-
-    def get_option_positions(self):
-        """Open option lots from Robinhood (via auth-service)."""
-        r = requests.get(f"{self.base}/positions/options",
-                         headers=self.headers, timeout=self.timeout)
-        r.raise_for_status()
-        return r.json().get("positions", [])
-
-    def get_option_orders(self):
-        """Open option orders from Robinhood (via auth-service)."""
-        r = requests.get(f"{self.base}/orders/options",
-                         headers=self.headers, timeout=self.timeout)
-        r.raise_for_status()
-        return r.json().get("orders", [])
-
-    def place_option_limit(self, order, dry_run=True):
-        """Single-leg option limit; box resolves contract via RH instruments APIs."""
-        r = requests.post(f"{self.base}/orders/options/limit",
-                          json={"order": order, "dry_run": dry_run},
                           headers=self.headers, timeout=self.timeout)
         r.raise_for_status()
         return r.json()
@@ -741,8 +712,16 @@ def option_contract_key(contract):
 
 
 def option_take_profit_limit(entry_premium, tp_percent):
-    """Premium limit for sell-to-close take profit."""
-    return round(float(entry_premium) * (1 + float(tp_percent) / 100.0), 2)
+    """Premium limit for sell-to-close take profit, on a valid tick.
+
+    Args:
+        entry_premium: Purchase premium per share.
+        tp_percent: Take-profit percent above entry.
+
+    Returns:
+        The limit snapped down to a tick every underlying accepts.
+    """
+    return snap_down(float(entry_premium) * (1 + float(tp_percent) / 100.0))
 
 
 def build_option_take_profit_order(contract, quantity, entry_premium, tp_percent,
@@ -806,29 +785,43 @@ def _entry_premium_from_rh_position(position):
     return cents / 100.0 if cents > 0 else None
 
 
-def sweep_options_take_profit(client, store, tp_percent=OPTION_TP_PERCENT,
-                              dry_run=True):
+def sweep_options_take_profit(broker, store, option_positions, open_option_orders,
+                              tp_percent=OPTION_TP_PERCENT, dry_run=True):
     """Once-per-day: resting sell-to-close limits at entry + tp_percent.
 
-    Positions and open orders are read from Robinhood via the auth-service
-    (GET /positions/options, GET /orders/options). Take-profit limits use
-    RH lot ``purchase_price`` (or ``average_price`` cents fallback), not
-    mark or dashboard-derived prices. Placement uses GET /instruments/ +
-    GET /options/instruments/ on the box.
+    Uses the positions and open orders the engine loop already read and
+    places through ``broker.place_option_take_profit`` (the same path as the
+    option stop-loss). Limits use the RH lot ``purchase_price`` (or the
+    ``average_price`` cents fallback), never mark.
+
+    Skipped on purpose: shorts, longs on a chain that also holds a short
+    (selling one leg would leave the short naked), and quantity already held
+    by open sell-to-close orders, stops included, so TP and SL together never
+    ask to sell more than is held.
+
+    The day is marked done only when no placement failed and the book was
+    non-empty, so a broker error (or a read that came back empty) is retried
+    on a later pass instead of latching the day.
+
+    Args:
+        broker: BrokerClient with ``place_option_take_profit``.
+        store: StopStore holding the ``last_option_tp_sweep_at`` marker.
+        option_positions: Dicts from ``broker.options_positions()``.
+        open_option_orders: Open option orders (OrderEvent or raw broker dicts).
+        tp_percent: Take-profit percent above entry.
+        dry_run: Log the orders instead of placing them.
+
+    Returns:
+        ``{"surveyed", "placed", "skipped", "failed"}``, or a dict with
+        ``skipped="already_swept_today"`` when the day is already done.
     """
     if store.option_tp_swept_today():
-        return {"skipped": "already_swept_today", "placed": [], "surveyed": []}
+        return {"skipped": "already_swept_today", "placed": [], "surveyed": [],
+                "failed": []}
 
-    log.info("[opt-tp] fetching option positions and open orders from RH (box)")
-    try:
-        option_positions = client.get_option_positions()
-        open_option_orders = client.get_option_orders()
-    except Exception as e:  # noqa: BLE001
-        log.warning("[opt-tp] RH read failed: %s", e)
-        return {"skipped": "rh_read_failed", "placed": [], "surveyed": [],
-                "detail": str(e)}
-
-    surveyed, placed, skipped = [], [], []
+    paired = short_chains(option_positions)
+    held = sell_close_holdings(open_option_orders)
+    surveyed, placed, skipped, failed = [], [], [], []
     for p in option_positions or []:
         qty = float(p.get("quantity", 0) or 0)
         direction = p.get("position_type") or p.get("type") or "long"
@@ -838,12 +831,14 @@ def sweep_options_take_profit(client, store, tp_percent=OPTION_TP_PERCENT,
         if not contract:
             skipped.append({"reason": "incomplete_contract", "position": p})
             continue
+        if contract["chain_symbol"] in paired:
+            skipped.append({"contract": contract, "reason": "paired_with_short_leg"})
+            continue
         entry = _entry_premium_from_rh_position(p)
         if entry is None or entry <= 0:
             skipped.append({"contract": contract, "reason": "no_purchase_price"})
             continue
-        whole = int(qty)
-        if whole < 1:
+        if int(qty) < 1:
             skipped.append({"contract": contract, "reason": "fractional_qty"})
             continue
         ckey = option_contract_key(contract)
@@ -851,28 +846,45 @@ def sweep_options_take_profit(client, store, tp_percent=OPTION_TP_PERCENT,
         if _open_tp_limit_exists(open_option_orders, ckey, limit_px):
             skipped.append({"contract": contract, "reason": "tp_limit_already_open"})
             continue
-        order = build_option_take_profit_order(contract, whole, entry, tp_percent)
-        surveyed.append({"contract": contract, "quantity": whole, "order": order})
-        sym = contract["chain_symbol"]
+        committed = held.get(contract_key(**contract), {}).get("qty", 0.0)
+        free = int(qty - committed)
+        if free < 1:
+            skipped.append({"contract": contract, "reason": "qty_committed"})
+            continue
+        order = build_option_take_profit_order(contract, free, entry, tp_percent)
+        surveyed.append({"contract": contract, "quantity": free, "order": order})
+        desc = (f"{contract['chain_symbol']} {contract['option_type']} "
+                f"{contract['strike']:g} {contract['expiration']} x{free} "
+                f"sell_to_close limit ${order['limit_price']}")
+        if dry_run:
+            log.info("[opt-tp] DRY RUN would place %s", desc)
+            placed.append({"contract": contract, "order": order,
+                           "result": {"dry_run": True}})
+            continue
         try:
-            result = client.place_option_limit(order, dry_run=dry_run)
+            result = broker.place_option_take_profit(order)
         except Exception as e:  # noqa: BLE001
-            log.warning("[opt-tp] %s failed: %s", sym, e)
-            skipped.append({"contract": contract, "reason": str(e)})
+            result, detail = None, f"{type(e).__name__}: {e}"
+        else:
+            detail = "broker_rejected"
+        if not result or not result.get("id"):
+            log.warning("[opt-tp] placement failed for %s: %s", desc, detail)
+            failed.append({"contract": contract, "reason": detail})
             continue
-        ok, detail = _placement_ok(result)
-        if not ok:
-            skipped.append({"contract": contract, "reason": detail})
-            continue
-        placed.append({"contract": contract, "result": result})
-        log.info("[opt-tp] %s %s %s sell_to_close limit $%s qty=%s (dry_run=%s)",
-                 sym, contract["option_type"], contract["expiration"],
-                 order["limit_price"], whole, dry_run)
+        placed.append({"contract": contract, "order": order, "result": result})
+        log.info("[opt-tp] placed %s -> %s", desc, result["id"])
 
-    store.set_meta("last_option_tp_sweep_at", _now_iso())
-    log.info("[opt-tp] surveyed=%d placed=%d skipped=%d dry_run=%s",
-             len(surveyed), len(placed), len(skipped), dry_run)
-    return {"surveyed": surveyed, "placed": placed, "skipped": skipped}
+    if failed:
+        log.error("[opt-tp] %d placement(s) failed; day not marked done, will retry",
+                  len(failed))
+    elif not option_positions:
+        log.info("[opt-tp] no option positions read; day not marked done")
+    else:
+        store.set_meta("last_option_tp_sweep_at", _now_iso())
+    log.info("[opt-tp] surveyed=%d placed=%d skipped=%d failed=%d dry_run=%s",
+             len(surveyed), len(placed), len(skipped), len(failed), dry_run)
+    return {"surveyed": surveyed, "placed": placed, "skipped": skipped,
+            "failed": failed}
 
 
 # --------------------------------------------------------------------------- #

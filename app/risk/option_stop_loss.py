@@ -80,7 +80,7 @@ def stop_prices(entry: float, stop_pct: float, limit_offset_pct: float) -> tuple
     return stop, min(limit, stop)
 
 
-def _contract_key(chain_symbol, option_type, strike, expiration) -> tuple:
+def contract_key(chain_symbol, option_type, strike, expiration) -> tuple:
     """Normalized key identifying one option contract.
 
     Args:
@@ -96,7 +96,21 @@ def _contract_key(chain_symbol, option_type, strike, expiration) -> tuple:
             round(_num(strike), 4), str(expiration or ""))
 
 
-def _sell_close_orders(open_orders: list[dict]) -> dict[tuple, dict]:
+def short_chains(positions: list[dict]) -> set[str]:
+    """Chains holding any short leg; longs on them must not be sold alone.
+
+    Args:
+        positions: Dicts from ``broker.options_positions()``.
+
+    Returns:
+        Upper-cased chain symbols with at least one short position.
+    """
+    return {str(p.get("chain_symbol", "")).upper()
+            for p in positions or []
+            if str(p.get("position_type", "")).lower() == "short"}
+
+
+def sell_close_holdings(open_orders: list[dict]) -> dict[tuple, dict]:
     """Sum open single-leg sell-to-close quantity per contract.
 
     Args:
@@ -118,9 +132,9 @@ def _sell_close_orders(open_orders: list[dict]) -> dict[tuple, dict]:
             continue
         if str(leg.get("position_effect", "close")).lower() != "close":
             continue
-        key = _contract_key(leg.get("chain_symbol") or o.get("symbol"),
-                            leg.get("option_type"), leg.get("strike"),
-                            leg.get("expiration"))
+        key = contract_key(leg.get("chain_symbol") or o.get("symbol"),
+                           leg.get("option_type"), leg.get("strike"),
+                           leg.get("expiration"))
         slot = held.setdefault(key, {"qty": 0.0, "has_stop": False})
         qty = _num(o.get("quantity")) - _num(o.get("filled_quantity"))
         slot["qty"] += max(qty, 0.0)
@@ -145,10 +159,8 @@ def plan_option_stop_losses(positions: list[dict], open_orders: list[dict],
         ``(orders, skipped)``. Each order has contract, quantity, entry,
         stop_pct, stop_price and limit_price; each skip has contract and reason.
     """
-    short_chains = {str(p.get("chain_symbol", "")).upper()
-                    for p in positions or []
-                    if str(p.get("position_type", "")).lower() == "short"}
-    held = _sell_close_orders(open_orders)
+    paired = short_chains(positions)
+    held = sell_close_holdings(open_orders)
     orders, skipped = [], []
 
     for p in positions or []:
@@ -164,14 +176,14 @@ def plan_option_stop_losses(positions: list[dict], open_orders: list[dict],
                 or contract["strike"] <= 0 or not contract["expiration"]):
             skipped.append({"contract": contract, "reason": "incomplete_contract"})
             continue
-        if contract["chain_symbol"] in short_chains:
+        if contract["chain_symbol"] in paired:
             skipped.append({"contract": contract, "reason": "paired_with_short_leg"})
             continue
         entry = _num(p.get("purchase_price"))
         if entry <= 0:
             skipped.append({"contract": contract, "reason": "no_purchase_price"})
             continue
-        slot = held.get(_contract_key(**contract), {"qty": 0.0, "has_stop": False})
+        slot = held.get(contract_key(**contract), {"qty": 0.0, "has_stop": False})
         free = int(_num(p.get("quantity")) - slot["qty"])
         if free < 1:
             if slot["has_stop"]:

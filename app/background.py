@@ -322,14 +322,15 @@ def run_engine_loop(app):
             except Exception:
                 log.exception("Pending option summary failed")
 
-            try:
-                maybe_option_take_profit_sweep(config, opt_tp_sweep_state)
-            except Exception as tp_err:
-                log.exception("[opt-tp] sweep failed: %s", tp_err)
-
             # A failed order read looks like "no open orders", which would make
-            # every long look unprotected and stack duplicate stops.
+            # every long look unprotected and stack duplicate exits.
             if option_orders_ok:
+                try:
+                    maybe_option_take_profit_sweep(
+                        config, broker, options_positions,
+                        [dict(o) for o in options_open_orders], opt_tp_sweep_state)
+                except Exception as tp_err:
+                    log.exception("[opt-tp] sweep failed: %s", tp_err)
                 try:
                     maybe_option_stop_loss_sweep(
                         config, broker, options_positions,
@@ -337,7 +338,7 @@ def run_engine_loop(app):
                 except Exception as sl_err:
                     log.exception("[opt-sl] sweep failed: %s", sl_err)
             else:
-                log.warning("[opt-sl] skipping sweep: open option orders unreadable")
+                log.warning("[opt-tp/opt-sl] skipping sweeps: open option orders unreadable")
 
             equity_events: list[OrderEvent] = [
                 _equity_order_to_event(o, is_open=True) for o in open_orders
