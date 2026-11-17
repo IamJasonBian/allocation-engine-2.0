@@ -46,6 +46,11 @@ class OrderTrigger(StrEnum):
     STOP = "stop"
 
 
+class QuoteState(StrEnum):
+    LIVE = "live"            # the broker returned a quote with a mark
+    MISSING = "missing"      # no usable quote; ``detail`` says why
+
+
 class RiskEventType(StrEnum):
     """Risk events emitted during engine reconciliation."""
     PRICE_DEPEG = "price_depeg"             # live price diverges from cached/stale price

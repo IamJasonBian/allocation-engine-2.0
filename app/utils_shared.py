@@ -135,8 +135,8 @@ def maybe_option_stop_loss_sweep(config, broker, options_positions,
             continue
         result = broker.place_option_stop_loss(o)
         if not result or not result.get("id"):
-            why = (result or {}).get("error") or "no response"
-            skipped.append({"contract": c, "reason": f"broker_rejected: {why}"})
+            skipped.append({"contract": c, "reason": "broker_rejected",
+                            "detail": (result or {}).get("error") or "no response"})
             continue
         log.info("[opt-sl] placed %s -> %s", desc, result["id"])
         placed.append({**o, "result": result})
@@ -149,8 +149,9 @@ def maybe_option_stop_loss_sweep(config, broker, options_positions,
         })
     for s in skipped:
         c = s["contract"]
-        log.info("[opt-sl] skipped %s %s %s %s: %s", c.get("chain_symbol"), c.get("option_type"),
-                 c.get("strike"), c.get("expiration"), s["reason"])
+        log.info("[opt-sl] skipped %s %s %s %s: %s%s", c.get("chain_symbol"),
+                 c.get("option_type"), c.get("strike"), c.get("expiration"), s["reason"],
+                 f" ({s['detail']})" if s.get("detail") else "")
     log.info("[opt-sl] planned=%d placed=%d skipped=%d dry_run=%s",
              len(orders), len(placed), len(skipped), dry)
     _post_bot_activity(events, "option SL bot activity")

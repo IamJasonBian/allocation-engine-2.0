@@ -29,7 +29,12 @@ from __future__ import annotations
 
 import math
 
+from app.enums import QuoteState
 from app.risk.option_stop_mapping import option_stop_percent
+from app.schemas import (
+    OptionContract, OptionPosition, OptionQuote, OptionStopSkip, OrderEvent,
+    PlannedOptionStop,
+)
 
 OPEN_STATES = {"queued", "confirmed", "partially_filled", "pending", "unconfirmed"}
 
@@ -103,7 +108,7 @@ def _contract_key(chain_symbol, option_type, strike, expiration) -> tuple:
             round(_num(strike), 4), str(expiration or ""))
 
 
-def _sell_close_orders(open_orders: list[dict]) -> dict[tuple, dict]:
+def _sell_close_orders(open_orders: list[OrderEvent]) -> dict[tuple, dict]:
     """Sum open single-leg sell-to-close quantity per contract.
 
     Args:
@@ -136,9 +141,10 @@ def _sell_close_orders(open_orders: list[dict]) -> dict[tuple, dict]:
     return held
 
 
-def plan_option_stop_losses(positions: list[dict], open_orders: list[dict],
-                            default_stop_pct: float, limit_offset_pct: float,
-                            min_limit_ticks: int = 0) -> tuple[list[dict], list[dict]]:
+def plan_option_stop_losses(
+        positions: list[OptionPosition], open_orders: list[OrderEvent],
+        default_stop_pct: float, limit_offset_pct: float, min_limit_ticks: int = 0,
+) -> tuple[list[PlannedOptionStop], list[OptionStopSkip]]:
     """Decide which long option positions need a protective stop-limit.
 
     Args:
@@ -162,7 +168,7 @@ def plan_option_stop_losses(positions: list[dict], open_orders: list[dict],
     for p in positions or []:
         if str(p.get("position_type", "long")).lower() != "long":
             continue
-        contract = {
+        contract: OptionContract = {
             "chain_symbol": str(p.get("chain_symbol", "")).upper(),
             "option_type": str(p.get("option_type", "")).lower(),
             "strike": _num(p.get("strike")),
@@ -195,16 +201,17 @@ def plan_option_stop_losses(positions: list[dict], open_orders: list[dict],
             skipped.append({"contract": contract, "reason": "invalid_stop_pct"})
             continue
         stop, limit = stop_prices(entry, pct, limit_offset_pct, min_limit_ticks)
-        if p.get("quote_ok") is False or p.get("mark_price") is None:
-            skipped.append({"contract": contract, "reason": "no_quote"})
+        quote = OptionQuote.from_row(p)
+        if quote.state is not QuoteState.LIVE:
+            skipped.append({"contract": contract, "reason": "no_quote",
+                            "detail": quote.detail})
             continue
-        bid = p.get("bid_price")
-        if bid is not None and _num(bid) <= 0:
+        if not quote.sellable:
             skipped.append({"contract": contract, "reason": "no_bid"})
             continue
-        # A sell stop is judged against what a seller can get: the bid.
-        ref, name = (bid, "bid") if bid is not None else (p["mark_price"], "mark")
-        if _num(ref) <= stop:
+        # A sell stop is judged against what a seller can get.
+        if quote.exit_price <= stop:
+            name = "bid" if quote.bid is not None else "mark"
             skipped.append({"contract": contract, "reason": f"{name}_at_or_below_stop"})
             continue
         orders.append({"contract": contract, "quantity": free, "entry": entry,

@@ -67,14 +67,16 @@ def test_skips_when_mark_missing_or_at_or_below_stop():
 
 
 def test_quote_rules_use_bid_and_reject_fallback_mark():
-    def reason(**over):
-        orders, skipped = plan_option_stop_losses([_pos(**over)], [], 50, 10)
-        return skipped[0]["reason"] if skipped else "planned"
+    def plan(**quote):
+        orders, skipped = plan_option_stop_losses([_pos(quote=quote)], [], 50, 10)
+        return skipped[0] if skipped else "planned"
 
-    assert reason(quote_ok=False) == "no_quote"          # mark is the purchase-price fallback
-    assert reason(bid_price=0.0) == "no_bid"
-    assert reason(bid_price=10.30) == "bid_at_or_below_stop"   # mark 18.0 alone would pass
-    assert reason(bid_price=10.35) == "planned"
+    # the row's mark_price (18.0) is only a display value once a quote is attached
+    missing = plan(state="missing", detail="TimeoutError: read timed out")
+    assert (missing["reason"], missing["detail"]) == ("no_quote", "TimeoutError: read timed out")
+    assert plan(state="live", bid=0.0, ask=0.3, mark=0.15)["reason"] == "no_bid"
+    assert plan(state="live", bid=10.30, ask=11.0, mark=18.0)["reason"] == "bid_at_or_below_stop"
+    assert plan(state="live", bid=10.35, ask=11.0, mark=18.0) == "planned"
 
 
 def test_limit_sits_at_least_min_ticks_below_stop():
@@ -203,8 +205,9 @@ def test_sweep_reports_why_broker_refused(monkeypatch, caplog):
         out = maybe_option_stop_loss_sweep(_cfg(OPTION_SL_SWEEP_DRY_RUN=False), Refusing(),
                                            [_pos()], [], {})
     assert out["placed"] == []
-    assert out["skipped"][0]["reason"] == "broker_rejected: rejected: tick size"
-    assert "skipped MU call 1050.0 2026-11-20: broker_rejected: rejected: tick size" in caplog.text
+    assert out["skipped"][0]["reason"] == "broker_rejected"
+    assert out["skipped"][0]["detail"] == "rejected: tick size"
+    assert "skipped MU call 1050.0 2026-11-20: broker_rejected (rejected: tick size)" in caplog.text
 
 
 def test_robinhood_stop_loss_returns_reason_instead_of_none(monkeypatch):

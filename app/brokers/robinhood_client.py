@@ -12,8 +12,9 @@ from datetime import datetime, timedelta, timezone
 import robin_stocks.robinhood as rh
 
 from app.brokers.base import BrokerClient
-from app.enums import OrderType
+from app.enums import OrderType, QuoteState
 from app.pnl import compute_pnl
+from app.schemas import OptionPosition, OptionQuote, PlannedOptionStop
 from app.storage import get_trade_fills
 
 log = logging.getLogger(__name__)
@@ -249,7 +250,7 @@ class RobinhoodTrader(BrokerClient):
             log.error("Robinhood order error for %s %s %s: %s", side, qty, symbol, e)
             return None
 
-    def place_option_stop_loss(self, order: dict) -> dict | None:
+    def place_option_stop_loss(self, order: PlannedOptionStop) -> dict:
         """Rest a GTC sell-to-close stop-limit on a long option.
 
         Args:
@@ -420,7 +421,7 @@ class RobinhoodTrader(BrokerClient):
 
     # -- options ------------------------------------------------------------
 
-    def options_positions(self) -> list[dict]:
+    def options_positions(self) -> list[OptionPosition]:
         """Return current options positions.
 
         Entry premium is Robinhood's lot ``average_price`` on
@@ -539,6 +540,11 @@ class RobinhoodTrader(BrokerClient):
                 except Exception:
                     pass
 
+            # mark_price above stays a number for the dashboard and P&L (the
+            # purchase price when there is no quote); decisions read `quote`.
+            quote = (OptionQuote(QuoteState.MISSING, detail=mark_err) if mark_err else
+                     OptionQuote(QuoteState.LIVE, bid=bid_price, ask=ask_price,
+                                 mark=round(mark_price, 4)))
             cost_basis = qty * purchase_price * trade_value_multiplier
             current_value = qty * mark_price * trade_value_multiplier
             unrealized_pl = current_value - cost_basis
@@ -555,10 +561,7 @@ class RobinhoodTrader(BrokerClient):
                 "avg_price": round(purchase_price, 4),
                 "purchase_price": round(purchase_price, 4),
                 "mark_price": round(mark_price, 4),
-                # False when mark_price is the purchase-price fallback above.
-                "quote_ok": mark_err is None,
-                "bid_price": bid_price,
-                "ask_price": ask_price,
+                "quote": quote.to_row(),
                 "source": "robinhood",
                 "multiplier": trade_value_multiplier,
                 "cost_basis": round(cost_basis, 2),
