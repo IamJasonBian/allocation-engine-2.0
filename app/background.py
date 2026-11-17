@@ -4,41 +4,14 @@ import os
 import time
 import logging
 from datetime import datetime, timezone
-from typing import TypedDict
 
 from app.enums import (
     OrderSide, OrderType, AssetType, OrderState, OrderTrigger, OPEN_STATES,
 )
+from app.schemas import OrderEvent
 
 log = logging.getLogger(__name__)
 
-
-# ---------------------------------------------------------------------------
-# Unified OrderEvent — a single shape for both equity and option orders
-# ---------------------------------------------------------------------------
-
-class OrderEvent(TypedDict, total=False):
-    """Normalised order record used by Redis/Blob sync and the API layer."""
-    id: str
-    symbol: str
-    side: OrderSide
-    order_type: OrderType
-    asset_type: AssetType
-    trigger: OrderTrigger
-    state: OrderState | str
-    quantity: float
-    filled_quantity: float
-    limit_price: float | None
-    stop_price: float | None
-    price: float | None                   # average fill price
-    created_at: str
-    updated_at: str
-    # option-specific fields (absent for equities)
-    legs: list[dict] | None
-    direction: str | None                 # debit / credit
-    opening_strategy: str | None
-    premium: float | None
-    processed_premium: float | None
 
 def _equity_order_to_event(o: dict, *, is_open: bool = False) -> OrderEvent:
     """Convert a stock order dict (from broker) into an OrderEvent."""

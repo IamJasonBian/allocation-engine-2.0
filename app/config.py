@@ -100,6 +100,8 @@ class Config:
     OPTION_SL_PERCENT = float(os.getenv("OPTION_SL_PERCENT", "50"))
     # Limit rests this percent below the trigger so a fast drop can still fill.
     OPTION_SL_LIMIT_OFFSET_PERCENT = float(os.getenv("OPTION_SL_LIMIT_OFFSET_PERCENT", "10"))
+    # ...and never fewer than this many ticks below it (10% of $0.50 is one tick).
+    OPTION_SL_LIMIT_MIN_TICKS = int(os.getenv("OPTION_SL_LIMIT_MIN_TICKS", "2"))
 
     # -- Trading DB write path (5thstreetcapital Netlify functions) --
     TRADING_DB_URL = os.getenv(

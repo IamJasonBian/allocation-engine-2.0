@@ -58,11 +58,32 @@ def test_partial_existing_stop_covers_only_remaining_qty():
 
 
 def test_skips_when_mark_missing_or_at_or_below_stop():
-    for mark in (None, 10.30, 9.0):
+    for mark, reason in ((None, "no_quote"), (10.30, "mark_at_or_below_stop"),
+                         (9.0, "mark_at_or_below_stop")):
         orders, skipped = plan_option_stop_losses([_pos(mark_price=mark)], [], 50, 10)
-        assert orders == [] and skipped[0]["reason"] == "mark_at_or_below_stop"
+        assert orders == [] and skipped[0]["reason"] == reason
     orders, _ = plan_option_stop_losses([_pos(mark_price=10.35)], [], 50, 10)
     assert orders[0]["stop_price"] == 10.30
+
+
+def test_quote_rules_use_bid_and_reject_fallback_mark():
+    def plan(**quote):
+        orders, skipped = plan_option_stop_losses([_pos(quote=quote)], [], 50, 10)
+        return skipped[0] if skipped else "planned"
+
+    # the row's mark_price (18.0) is only a display value once a quote is attached
+    missing = plan(state="missing", detail="TimeoutError: read timed out")
+    assert (missing["reason"], missing["detail"]) == ("no_quote", "TimeoutError: read timed out")
+    assert plan(state="live", bid=0.0, ask=0.3, mark=0.15)["reason"] == "no_bid"
+    assert plan(state="live", bid=10.30, ask=11.0, mark=18.0)["reason"] == "bid_at_or_below_stop"
+    assert plan(state="live", bid=10.35, ask=11.0, mark=18.0) == "planned"
+
+
+def test_limit_sits_at_least_min_ticks_below_stop():
+    assert stop_prices(1.00, 50, 10) == (0.50, 0.45)
+    assert stop_prices(1.00, 50, 10, min_limit_ticks=2) == (0.50, 0.40)
+    assert stop_prices(0.20, 50, 10, min_limit_ticks=2) == (0.10, 0.05)   # floored at one tick
+    assert stop_prices(20.65, 50, 10, min_limit_ticks=2) == (10.30, 9.20)  # percent already wider
 
 
 def test_skips_invalid_stop_percent(monkeypatch):
@@ -171,6 +192,40 @@ def test_sweep_live_places_and_respects_interval(monkeypatch):
     assert maybe_option_stop_loss_sweep(_cfg(OPTION_SL_SWEEP_DRY_RUN=False), b,
                                         [_pos()], [], state) is None
     assert len(b.placed) == 1
+
+
+def test_sweep_reports_why_broker_refused(monkeypatch, caplog):
+    monkeypatch.setattr("app.utils_shared._post_bot_activity", lambda events, label: None)
+
+    class Refusing:
+        def place_option_stop_loss(self, order):
+            return {"id": None, "error": "rejected: tick size"}
+
+    with caplog.at_level("INFO"):
+        out = maybe_option_stop_loss_sweep(_cfg(OPTION_SL_SWEEP_DRY_RUN=False), Refusing(),
+                                           [_pos()], [], {})
+    assert out["placed"] == []
+    assert out["skipped"][0]["reason"] == "broker_rejected"
+    assert out["skipped"][0]["detail"] == "rejected: tick size"
+    assert "skipped MU call 1050.0 2026-11-20: broker_rejected (rejected: tick size)" in caplog.text
+
+
+def test_robinhood_stop_loss_returns_reason_instead_of_none(monkeypatch):
+    from app.brokers.robinhood_client import RobinhoodTrader
+
+    t = RobinhoodTrader.__new__(RobinhoodTrader)
+    t.account_number = "ACCT"
+    monkeypatch.setattr(t, "_ensure_auth", lambda: None, raising=False)
+    orders, _ = plan_option_stop_losses([_pos()], [], 50, 10)
+    path = "app.brokers.robinhood_client.rh.orders.order_sell_option_stop_limit"
+
+    monkeypatch.setattr(path, lambda **kw: {"detail": "Invalid tick size."})
+    assert t.place_option_stop_loss(orders[0]) == {"id": None, "error": "rejected: Invalid tick size."}
+
+    def boom(**kw):
+        raise TimeoutError("read timed out")
+    monkeypatch.setattr(path, boom)
+    assert t.place_option_stop_loss(orders[0]) == {"id": None, "error": "TimeoutError: read timed out"}
 
 
 def test_sweep_disabled_or_unsupported_broker():

@@ -12,8 +12,9 @@ from datetime import datetime, timedelta, timezone
 import robin_stocks.robinhood as rh
 
 from app.brokers.base import BrokerClient
-from app.enums import OrderType
+from app.enums import OrderType, QuoteState
 from app.pnl import compute_pnl
+from app.schemas import OptionPosition, OptionQuote, PlannedOptionStop
 from app.storage import get_trade_fills
 
 log = logging.getLogger(__name__)
@@ -21,6 +22,21 @@ log = logging.getLogger(__name__)
 # Cache instrument URL -> symbol to avoid repeated API calls
 _instrument_cache: dict[str, str] = {}
 _init_phase: str = "not_started"
+
+
+def _opt_float(v) -> float | None:
+    """Parse a quote field, keeping a missing or junk value as None.
+
+    Args:
+        v: Raw value from Robinhood market data.
+
+    Returns:
+        The value as a float, or None when absent or unparseable.
+    """
+    try:
+        return None if v is None else float(v)
+    except (TypeError, ValueError):
+        return None
 
 
 def _symbol_from_instrument(instrument_url: str) -> str:
@@ -234,7 +250,7 @@ class RobinhoodTrader(BrokerClient):
             log.error("Robinhood order error for %s %s %s: %s", side, qty, symbol, e)
             return None
 
-    def place_option_stop_loss(self, order: dict) -> dict | None:
+    def place_option_stop_loss(self, order: PlannedOptionStop) -> dict:
         """Rest a GTC sell-to-close stop-limit on a long option.
 
         Args:
@@ -243,11 +259,12 @@ class RobinhoodTrader(BrokerClient):
                 stop_price, limit_price.
 
         Returns:
-            ``{"id", "state"}`` for the submitted order, or None if rejected.
+            ``{"id", "state"}`` for the submitted order, or
+            ``{"id": None, "error": reason}`` when it was not accepted.
         """
-        self._ensure_auth()
         c = order["contract"]
         try:
+            self._ensure_auth()
             result = rh.orders.order_sell_option_stop_limit(
                 positionEffect="close", creditOrDebit="credit",
                 limitPrice=float(order["limit_price"]),
@@ -260,14 +277,16 @@ class RobinhoodTrader(BrokerClient):
             )
         except Exception as e:
             log.error("Robinhood option stop-loss error for %s: %s", c["chain_symbol"], e)
-            return None
+            return {"id": None, "error": f"{type(e).__name__}: {e}"[:200]}
         if result and result.get("id"):
             log.info("RH option stop-loss submitted: %s %s %s %s stop $%.2f -> %s",
                      c["chain_symbol"], c["option_type"], c["strike"], c["expiration"],
                      float(order["stop_price"]), result["id"])
             return {"id": result["id"], "state": result.get("state")}
         log.error("RH option stop-loss rejected: %s", result)
-        return None
+        detail = result if not isinstance(result, dict) else (
+            result.get("detail") or result.get("non_field_errors") or result)
+        return {"id": None, "error": f"rejected: {detail}"[:200] if result else "empty response"}
 
     def cancel_order(self, order_id: str):
         self._ensure_auth()
@@ -402,7 +421,7 @@ class RobinhoodTrader(BrokerClient):
 
     # -- options ------------------------------------------------------------
 
-    def options_positions(self) -> list[dict]:
+    def options_positions(self) -> list[OptionPosition]:
         """Return current options positions.
 
         Entry premium is Robinhood's lot ``average_price`` on
@@ -466,6 +485,7 @@ class RobinhoodTrader(BrokerClient):
             mark_err = "no market data returned"
             greeks = {"delta": None, "gamma": None, "theta": None, "vega": None, "iv": None}
             underlying_price = None
+            bid_price = ask_price = None
             try:
                 market_data = rh.options.get_option_market_data(
                     chain_symbol, expiration, str(strike),
@@ -480,6 +500,8 @@ class RobinhoodTrader(BrokerClient):
                     mark_price = float(md.get("mark_price", purchase_price))
                     mark_err = (None if md.get("mark_price") is not None
                                 else "market data has no mark_price")
+                    bid_price = _opt_float(md.get("bid_price"))
+                    ask_price = _opt_float(md.get("ask_price"))
                     for g in ("delta", "gamma", "theta", "vega"):
                         val = md.get(g)
                         if val is not None:
@@ -518,6 +540,11 @@ class RobinhoodTrader(BrokerClient):
                 except Exception:
                     pass
 
+            # mark_price above stays a number for the dashboard and P&L (the
+            # purchase price when there is no quote); decisions read `quote`.
+            quote = (OptionQuote(QuoteState.MISSING, detail=mark_err) if mark_err else
+                     OptionQuote(QuoteState.LIVE, bid=bid_price, ask=ask_price,
+                                 mark=round(mark_price, 4)))
             cost_basis = qty * purchase_price * trade_value_multiplier
             current_value = qty * mark_price * trade_value_multiplier
             unrealized_pl = current_value - cost_basis
@@ -534,6 +561,7 @@ class RobinhoodTrader(BrokerClient):
                 "avg_price": round(purchase_price, 4),
                 "purchase_price": round(purchase_price, 4),
                 "mark_price": round(mark_price, 4),
+                "quote": quote.to_row(),
                 "source": "robinhood",
                 "multiplier": trade_value_multiplier,
                 "cost_basis": round(cost_basis, 2),
