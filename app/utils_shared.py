@@ -105,16 +105,24 @@ def maybe_option_stop_loss_sweep(config, broker, options_positions,
     Returns:
         ``{"planned", "placed", "skipped"}``, or None when gated off.
     """
-    if not config["OPTION_SL_ENABLED"] or not hasattr(broker, "place_option_stop_loss"):
+    if not config["OPTION_SL_ENABLED"]:
+        log.info("[opt-sl] sweep not run: OPTION_SL_ENABLED is false")
+        return None
+    if not hasattr(broker, "place_option_stop_loss"):
+        log.info("[opt-sl] sweep not run: %s cannot place option stops",
+                 type(broker).__name__)
         return None
     now = time.time()
-    if now - state.get("last_run", 0.0) < config["OPTION_SL_SWEEP_INTERVAL_SECONDS"]:
+    wait = config["OPTION_SL_SWEEP_INTERVAL_SECONDS"] - (now - state.get("last_run", 0.0))
+    if wait > 0:
+        log.debug("[opt-sl] sweep not run: next in %.0fs", wait)
         return None
     state["last_run"] = now
 
     orders, skipped = plan_option_stop_losses(
         options_positions, open_option_orders,
-        config["OPTION_SL_PERCENT"], config["OPTION_SL_LIMIT_OFFSET_PERCENT"])
+        config["OPTION_SL_PERCENT"], config["OPTION_SL_LIMIT_OFFSET_PERCENT"],
+        config.get("OPTION_SL_LIMIT_MIN_TICKS", 0))
     dry = config["OPTION_SL_SWEEP_DRY_RUN"]
     placed, events = [], []
     for o in orders:
@@ -126,8 +134,9 @@ def maybe_option_stop_loss_sweep(config, broker, options_positions,
             log.info("[opt-sl] DRY RUN would place %s", desc)
             continue
         result = broker.place_option_stop_loss(o)
-        if not result:
-            skipped.append({"contract": c, "reason": "broker_rejected"})
+        if not result or not result.get("id"):
+            why = (result or {}).get("error") or "no response"
+            skipped.append({"contract": c, "reason": f"broker_rejected: {why}"})
             continue
         log.info("[opt-sl] placed %s -> %s", desc, result["id"])
         placed.append({**o, "result": result})
@@ -138,6 +147,10 @@ def maybe_option_stop_loss_sweep(config, broker, options_positions,
             "symbol": c["chain_symbol"],
             "quantity": float(o["quantity"]),
         })
+    for s in skipped:
+        c = s["contract"]
+        log.info("[opt-sl] skipped %s %s %s %s: %s", c.get("chain_symbol"), c.get("option_type"),
+                 c.get("strike"), c.get("expiration"), s["reason"])
     log.info("[opt-sl] planned=%d placed=%d skipped=%d dry_run=%s",
              len(orders), len(placed), len(skipped), dry)
     _post_bot_activity(events, "option SL bot activity")

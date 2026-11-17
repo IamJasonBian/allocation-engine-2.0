@@ -15,8 +15,10 @@ Skipped on purpose:
     verticals, calendars and diagonals all count): stopping the long out would
     leave the short leg naked;
   * a stop percent outside (0, 100);
-  * a long whose current mark is missing or at/below the stop, since that
-    stop would trigger immediately;
+  * a long with no live quote (the broker row carries a fallback mark), or a
+    quoted bid of zero: there is nothing to judge the stop against or sell to;
+  * a long whose bid (or mark, when the row has no bid) is at/below the stop,
+    since that stop would trigger immediately;
   * contracts whose quantity is fully held by open sell-to-close orders
     (stops or e.g. a resting take-profit). Only the free remainder gets a
     stop: Robinhood rejects sells beyond the unencumbered quantity, and it has
@@ -64,19 +66,24 @@ def snap_down(price: float) -> float:
     return max(round(snapped, 2), 0.05)
 
 
-def stop_prices(entry: float, stop_pct: float, limit_offset_pct: float) -> tuple[float, float]:
+def stop_prices(entry: float, stop_pct: float, limit_offset_pct: float,
+                min_limit_ticks: int = 0) -> tuple[float, float]:
     """Stop trigger and limit for a long option bought at ``entry``.
 
     Args:
         entry: Purchase premium per share.
         stop_pct: Drawdown percent that triggers the stop.
         limit_offset_pct: How far below the trigger the limit rests, in percent.
+        min_limit_ticks: Least number of ticks the limit sits below the stop,
+            so a percent offset on a cheap contract is not a single tick.
 
     Returns:
         ``(stop_price, limit_price)``, both on valid ticks, limit <= stop.
     """
     stop = snap_down(entry * (1 - stop_pct / 100.0))
-    limit = snap_down(stop * (1 - limit_offset_pct / 100.0))
+    tick = 0.05 if stop < 3 else 0.10
+    limit = snap_down(min(stop * (1 - limit_offset_pct / 100.0),
+                          stop - min_limit_ticks * tick))
     return stop, min(limit, stop)
 
 
@@ -130,8 +137,8 @@ def _sell_close_orders(open_orders: list[dict]) -> dict[tuple, dict]:
 
 
 def plan_option_stop_losses(positions: list[dict], open_orders: list[dict],
-                            default_stop_pct: float,
-                            limit_offset_pct: float) -> tuple[list[dict], list[dict]]:
+                            default_stop_pct: float, limit_offset_pct: float,
+                            min_limit_ticks: int = 0) -> tuple[list[dict], list[dict]]:
     """Decide which long option positions need a protective stop-limit.
 
     Args:
@@ -140,6 +147,7 @@ def plan_option_stop_losses(positions: list[dict], open_orders: list[dict],
             ``broker.options_orders()`` dicts; both carry legs/trigger/state).
         default_stop_pct: Drawdown percent for symbols without an override.
         limit_offset_pct: Limit distance below the trigger, in percent.
+        min_limit_ticks: Least ticks between stop and limit.
 
     Returns:
         ``(orders, skipped)``. Each order has contract, quantity, entry,
@@ -186,10 +194,18 @@ def plan_option_stop_losses(positions: list[dict], open_orders: list[dict],
         if not 0 < pct < 100:
             skipped.append({"contract": contract, "reason": "invalid_stop_pct"})
             continue
-        stop, limit = stop_prices(entry, pct, limit_offset_pct)
-        mark = p.get("mark_price")
-        if mark is None or _num(mark) <= stop:
-            skipped.append({"contract": contract, "reason": "mark_at_or_below_stop"})
+        stop, limit = stop_prices(entry, pct, limit_offset_pct, min_limit_ticks)
+        if p.get("quote_ok") is False or p.get("mark_price") is None:
+            skipped.append({"contract": contract, "reason": "no_quote"})
+            continue
+        bid = p.get("bid_price")
+        if bid is not None and _num(bid) <= 0:
+            skipped.append({"contract": contract, "reason": "no_bid"})
+            continue
+        # A sell stop is judged against what a seller can get: the bid.
+        ref, name = (bid, "bid") if bid is not None else (p["mark_price"], "mark")
+        if _num(ref) <= stop:
+            skipped.append({"contract": contract, "reason": f"{name}_at_or_below_stop"})
             continue
         orders.append({"contract": contract, "quantity": free, "entry": entry,
                        "stop_pct": pct, "stop_price": stop, "limit_price": limit})
