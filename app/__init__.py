@@ -5,12 +5,14 @@ from flask import Flask
 from flask_cors import CORS
 
 from app.config import Config
+from app.log_task import install_task_id_logging
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s %(levelname)-8s %(name)s  %(message)s",
+    format="%(asctime)s %(levelname)-8s %(name)s [%(log_task_id)s] %(message)s",
     datefmt="%H:%M:%S",
 )
+install_task_id_logging()
 
 
 log = logging.getLogger(__name__)
