@@ -9,6 +9,14 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ.setdefault("AUTH_SERVICE_ENV", "/nonexistent-env-for-tests")
 
 import passthrough  # noqa: E402
+from datetime import datetime  # noqa: E402
+from unittest import mock  # noqa: E402
+from zoneinfo import ZoneInfo  # noqa: E402
+
+_ET = ZoneInfo("America/New_York")
+# Pin the clock mid-week so opening-order tests don't depend on the day they run.
+_WEDNESDAY = datetime(2026, 11, 11, 11, 0, tzinfo=_ET)
+passthrough._now = lambda: _WEDNESDAY
 
 
 def _option_order(**overrides):
@@ -102,3 +110,36 @@ class WriteRuleTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WeekendOpenTests(unittest.TestCase):
+    def _check(self, when, legs, cutoff=15.0):
+        with mock.patch.object(passthrough, "_now", lambda: when), \
+                mock.patch.object(passthrough.config, "RH_OPTIONS_WEEKEND_CUTOFF_HOUR_ET", cutoff):
+            return passthrough.check_write("POST", "/options/orders/",
+                                           _option_order(legs=legs, price="1.00"))
+
+    BUY_OPEN = [{"option": "x", "side": "buy", "position_effect": "open"}]
+    SELL_CLOSE = [{"option": "x", "side": "sell", "position_effect": "close"}]
+
+    def test_opens_blocked_from_friday_cutoff_through_sunday(self):
+        for when in (datetime(2026, 11, 13, 15, 0, tzinfo=_ET),
+                     datetime(2026, 11, 14, 10, 0, tzinfo=_ET),
+                     datetime(2026, 11, 15, 23, 59, tzinfo=_ET)):
+            self.assertIn("weekend", self._check(when, self.BUY_OPEN), when)
+
+    def test_opens_allowed_before_cutoff_and_monday(self):
+        for when in (datetime(2026, 11, 13, 14, 59, tzinfo=_ET),
+                     datetime(2026, 11, 16, 0, 0, tzinfo=_ET)):
+            self.assertIsNone(self._check(when, self.BUY_OPEN), when)
+
+    def test_closes_always_allowed(self):
+        self.assertIsNone(self._check(datetime(2026, 11, 14, 10, 0, tzinfo=_ET), self.SELL_CLOSE))
+
+    def test_spread_with_any_open_leg_blocked(self):
+        legs = self.BUY_OPEN + [{"option": "y", "side": "sell", "position_effect": "open"}]
+        self.assertIn("weekend", self._check(datetime(2026, 11, 13, 16, 0, tzinfo=_ET), legs))
+
+    def test_negative_cutoff_turns_rule_off(self):
+        self.assertIsNone(self._check(datetime(2026, 11, 14, 10, 0, tzinfo=_ET),
+                                      self.BUY_OPEN, cutoff=-1))
